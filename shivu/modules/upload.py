@@ -1,22 +1,31 @@
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import aiohttp
 from pymongo import ReturnDocument
-from telegram import Update
+from telegram import Update, PhotoSize
 from telegram.ext import CommandHandler, CallbackContext
 from telegram.error import BadRequest
 
 from shivu import application, sudo_users, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
 
 # Constants
-WRONG_FORMAT_TEXT = """Wrong ❌️ format...  eg. /upload Img_url muzan-kibutsuji Demon-slayer 3
+WRONG_FORMAT_TEXT = """❌ Wrong format!
 
-img_url character-name anime-name rarity-number
+You have two options:
 
-use rarity number accordingly rarity Map
+1️⃣ **Reply to a photo**: Reply to any photo and use:
+   `/upload character-name anime-name rarity-number`
 
-rarity_map = 1 (⚪️ Common), 2 (🟣 Rare), 3 (🟡 Legendary), 4 (🟢 Medium), 5 (💮 Special Edition)"""
+2️⃣ **With image URL**: Use:
+   `/upload image-url character-name anime-name rarity-number`
+
+📊 Rarity Map:
+• 1 ⚪ Common
+• 2 🟣 Rare
+• 3 🟡 Legendary
+• 4 🟢 Medium
+• 5 💮 Special Edition"""
 
 RARITY_MAP = {
     1: "⚪ Common",
@@ -26,8 +35,14 @@ RARITY_MAP = {
     5: "💮 Special Edition"
 }
 
+VALID_FIELDS = ['img_url', 'name', 'anime', 'rarity']
+
 async def validate_image_url(url: str) -> bool:
     """Validate if URL is accessible and points to an image."""
+    # Check if it's a Telegram file_id (starts with 'Ag')
+    if url.startswith('Ag'):
+        return True
+    
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.head(url) as response:
@@ -50,6 +65,11 @@ async def get_next_sequence_number(sequence_name: str) -> int:
         return_document=ReturnDocument.AFTER
     )
     return sequence_document['sequence_value']
+
+def get_best_photo_file_id(photo_sizes: List[PhotoSize]) -> str:
+    """Get the file_id of the highest quality photo."""
+    # Telegram sends multiple sizes, the last one is usually the largest
+    return photo_sizes[-1].file_id
 
 async def send_channel_message(
     context: CallbackContext, 
@@ -85,7 +105,8 @@ async def send_channel_message(
             )
             return character['message_id']
     except BadRequest as e:
-        if "not found" in str(e).lower() or "message to edit not found" in str(e).lower():
+        error_msg = str(e).lower()
+        if "not found" in error_msg or "message to edit not found" in error_msg:
             # Message was deleted from channel, send new one
             message = await context.bot.send_photo(
                 chat_id=CHARA_CHANNEL_ID,
@@ -97,44 +118,67 @@ async def send_channel_message(
         raise
 
 async def upload(update: Update, context: CallbackContext) -> None:
-    """Handle character upload command."""
-    if update.effective_user.id not in sudo_users:
+    """Handle character upload command with both reply-to-photo and URL methods."""
+    # Fix: Convert user ID to string for comparison
+    if str(update.effective_user.id) not in sudo_users:
         await update.message.reply_text('Ask My Owner...')
         return
 
-    # Validate arguments
-    if not context.args or len(context.args) != 4:
-        await update.message.reply_text(WRONG_FORMAT_TEXT)
-        return
-
-    img_url, char_raw, anime_raw, rarity_raw = context.args
-
-    # Validate image URL
-    if not await validate_image_url(img_url):
-        await update.message.reply_text('Invalid or inaccessible image URL.')
-        return
-
-    # Parse rarity
     try:
-        rarity_num = int(rarity_raw)
-        if rarity_num not in RARITY_MAP:
-            await update.message.reply_text('Invalid rarity. Please use 1, 2, 3, 4, or 5.')
+        # Check if message is a reply to a photo
+        if update.message.reply_to_message and update.message.reply_to_message.photo:
+            # Method 1: Reply to photo
+            if not context.args or len(context.args) != 3:
+                await update.message.reply_text(
+                    "❌ When replying to a photo, use: /upload character-name anime-name rarity-number\n"
+                    "Example: /upload nezuko demon-slayer 4"
+                )
+                return
+            
+            char_raw, anime_raw, rarity_raw = context.args
+            # Get the best quality photo file_id
+            photo_sizes = update.message.reply_to_message.photo
+            img_file_id = get_best_photo_file_id(photo_sizes)
+            img_url = img_file_id
+            
+        else:
+            # Method 2: With image URL
+            if not context.args or len(context.args) != 4:
+                await update.message.reply_text(WRONG_FORMAT_TEXT)
+                return
+            
+            img_url, char_raw, anime_raw, rarity_raw = context.args
+            
+            # Validate image URL (skip validation for Telegram file_ids)
+            if not img_url.startswith('Ag') and not await validate_image_url(img_url):
+                await update.message.reply_text(
+                    '❌ Invalid or inaccessible image URL.\n'
+                    'Make sure the URL is public and points to an image file.'
+                )
+                return
+
+        # Parse rarity
+        try:
+            rarity_num = int(rarity_raw)
+            if rarity_num not in RARITY_MAP:
+                await update.message.reply_text(
+                    '❌ Invalid rarity. Please use 1, 2, 3, 4, or 5.'
+                )
+                return
+            rarity = RARITY_MAP[rarity_num]
+        except ValueError:
+            await update.message.reply_text('❌ Rarity must be a number (1-5).')
             return
-        rarity = RARITY_MAP[rarity_num]
-    except ValueError:
-        await update.message.reply_text('Rarity must be a number (1-5).')
-        return
 
-    # Generate character data
-    character = {
-        'img_url': img_url,
-        'name': char_raw.replace('-', ' ').title(),
-        'anime': anime_raw.replace('-', ' ').title(),
-        'rarity': rarity,
-        'id': str(await get_next_sequence_number('character_id')).zfill(6)
-    }
+        # Generate character data
+        character = {
+            'img_url': img_url,
+            'name': char_raw.replace('-', ' ').title(),
+            'anime': anime_raw.replace('-', ' ').title(),
+            'rarity': rarity,
+            'id': str(await get_next_sequence_number('character_id')).zfill(6)
+        }
 
-    try:
         # Send to channel and get message ID
         message_id = await send_channel_message(
             context, character, 
@@ -151,26 +195,30 @@ async def upload(update: Update, context: CallbackContext) -> None:
     except Exception as e:
         # Try to insert without channel message
         try:
-            await collection.insert_one(character)
-            await update.message.reply_text(
-                "⚠️ Character added to database but failed to send to channel. "
-                "Bot might not have permission to post in the channel."
-            )
+            if 'character' in locals():
+                await collection.insert_one(character)
+                await update.message.reply_text(
+                    "⚠️ Character added to database but failed to send to channel.\n"
+                    "Bot might not have permission to post in the channel."
+                )
+            else:
+                raise
         except Exception as db_error:
             await update.message.reply_text(
-                f'❌ Character upload failed completely.\n'
+                f'❌ Character upload failed.\n'
                 f'Error: {str(db_error)}\n'
                 f'If you think this is a source error, forward to: {SUPPORT_CHAT}'
             )
 
 async def delete(update: Update, context: CallbackContext) -> None:
     """Handle character deletion command."""
-    if update.effective_user.id not in sudo_users:
+    # Fix: Convert user ID to string for comparison
+    if str(update.effective_user.id) not in sudo_users:
         await update.message.reply_text('Ask my Owner to use this Command...')
         return
 
     if not context.args or len(context.args) != 1:
-        await update.message.reply_text('Incorrect format... Please use: /delete ID')
+        await update.message.reply_text('❌ Incorrect format... Please use: /delete ID')
         return
 
     character_id = context.args[0]
@@ -193,7 +241,8 @@ async def delete(update: Update, context: CallbackContext) -> None:
         else:
             await update.message.reply_text('✅ Character deleted from database (no channel message found).')
     except BadRequest as e:
-        if "message to delete not found" in str(e).lower():
+        error_msg = str(e).lower()
+        if "message to delete not found" in error_msg:
             await update.message.reply_text('✅ Character deleted from database (channel message was already gone).')
         else:
             await update.message.reply_text(
@@ -208,24 +257,24 @@ async def delete(update: Update, context: CallbackContext) -> None:
 
 async def update(update: Update, context: CallbackContext) -> None:
     """Handle character update command."""
-    if update.effective_user.id not in sudo_users:
+    # Fix: Convert user ID to string for comparison
+    if str(update.effective_user.id) not in sudo_users:
         await update.message.reply_text('You do not have permission to use this command.')
         return
 
     if not context.args or len(context.args) != 3:
         await update.message.reply_text(
-            'Incorrect format. Please use: /update id field new_value\n'
-            'Valid fields: img_url, name, anime, rarity'
+            '❌ Incorrect format. Please use: /update id field new_value\n'
+            f'Valid fields: {", ".join(VALID_FIELDS)}'
         )
         return
 
     char_id, field, new_value = context.args
 
     # Validate field
-    valid_fields = ['img_url', 'name', 'anime', 'rarity']
-    if field not in valid_fields:
+    if field not in VALID_FIELDS:
         await update.message.reply_text(
-            f'Invalid field. Valid fields: {", ".join(valid_fields)}'
+            f'❌ Invalid field. Valid fields: {", ".join(VALID_FIELDS)}'
         )
         return
 
@@ -243,15 +292,16 @@ async def update(update: Update, context: CallbackContext) -> None:
         try:
             rarity_num = int(new_value)
             if rarity_num not in RARITY_MAP:
-                await update.message.reply_text('Invalid rarity. Please use 1, 2, 3, 4, or 5.')
+                await update.message.reply_text('❌ Invalid rarity. Please use 1, 2, 3, 4, or 5.')
                 return
             update_data[field] = RARITY_MAP[rarity_num]
         except ValueError:
-            await update.message.reply_text('Rarity must be a number (1-5).')
+            await update.message.reply_text('❌ Rarity must be a number (1-5).')
             return
     else:  # img_url
-        if not await validate_image_url(new_value):
-            await update.message.reply_text('Invalid or inaccessible image URL.')
+        # Allow both Telegram file_ids and URLs
+        if not new_value.startswith('Ag') and not await validate_image_url(new_value):
+            await update.message.reply_text('❌ Invalid or inaccessible image URL.')
             return
         update_data[field] = new_value
 
@@ -304,7 +354,8 @@ async def update(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text('✅ Character updated successfully!')
         
     except BadRequest as e:
-        if "not found" in str(e).lower() or "message to edit not found" in str(e).lower():
+        error_msg = str(e).lower()
+        if "not found" in error_msg or "message to edit not found" in error_msg:
             # Channel message was deleted, send new one
             new_message_id = await send_channel_message(
                 context, updated_character,
@@ -327,6 +378,6 @@ async def update(update: Update, context: CallbackContext) -> None:
         )
 
 # Register handlers
-application.add_handler(CommandHandler("upload", upload))
-application.add_handler(CommandHandler("delete", delete))
-application.add_handler(CommandHandler("update", update))
+application.add_handler(CommandHandler("upload", upload, block=False))
+application.add_handler(CommandHandler("delete", delete, block=False))
+application.add_handler(CommandHandler("update", update, block=False))

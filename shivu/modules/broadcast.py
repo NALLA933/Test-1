@@ -6,27 +6,69 @@ from telegram import Update, Message
 from telegram.ext import CallbackContext, CommandHandler
 from telegram.error import BadRequest, RetryAfter, TelegramError
 from motor.motor_asyncio import AsyncIOMotorCollection
-from shivu import application, top_global_groups_collection, pm_users, OWNER_ID
+from shivu import application, top_global_groups_collection, pm_users
 
 # --- Configuration ---
-MAX_CONCURRENT_TASKS = 100  # Maximum concurrent sends
-BATCH_SIZE = 35  # Chunk size for parallel processing
-MAX_RETRIES = 2  # Maximum retry attempts for temporary failures
-TTL_HOURS = 12  # Cache duration for failed users
-FLOOD_WAIT_BASE = 1  # Base wait time for flood control
+# Replace these with your actual IDs
+OWNER_ID = 8420981179  # Replace with your owner ID
+SUDO_USERS = [8420981179, 7818323042, 8420981179]  # Replace with your sudo users
 
-# --- MongoDB Collections for Temporary Cache ---
-# Add these to your shivu.py imports or create them here
-# from motor.motor_asyncio import AsyncIOMotorClient
-# client = AsyncIOMotorClient(MONGO_URI)
-# db = client['shivu_bot']
-# failed_cache_collection = db['broadcast_failed_cache']
+# Create authorized users list (Owner + Sudo Users)
+AUTHORIZED_USERS = [OWNER_ID] + SUDO_USERS
 
-# --- In-Memory Temporary Cache (per broadcast) ---
+# Broadcast settings
+MAX_CONCURRENT_TASKS = 100
+BATCH_SIZE = 35
+MAX_RETRIES = 2
+TTL_HOURS = 12
+FLOOD_WAIT_BASE = 1
+
+# --- Small Caps Font Converter ---
+SMALL_CAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
+    'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
+    'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ',
+    'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ',
+    'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ',
+    'z': 'ᴢ',
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ',
+    'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ',
+    'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ',
+    'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ',
+    'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ',
+    'Z': 'ᴢ',
+    ' ': ' ', '!': '!', '?': '?', '.': '.', ',': ',',
+    ':': ':', ';': ';', '-': '-', '_': '_', '(': '(',
+    ')': ')', '[': '[', ']': ']', '{': '{', '}': '}',
+    '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
+    '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
+}
+
+def to_small_caps(text: str) -> str:
+    """Convert text to small caps Unicode font"""
+    result = []
+    for char in text:
+        result.append(SMALL_CAPS_MAP.get(char, char))
+    return ''.join(result)
+
+# --- Style Constants (using Small Caps) ---
+class Style:
+    HEADER = to_small_caps("📢 BROADCAST SYSTEM")
+    STATUS = to_small_caps("📊 BROADCAST STATUS")
+    COMPLETE = to_small_caps("✨ BROADCAST COMPLETED")
+    STARTING = to_small_caps("🚀 STARTING BROADCAST")
+    IN_PROGRESS = to_small_caps("📤 BROADCASTING")
+    LINE = "━" * 30
+
+# --- Global Broadcast Lock ---
+is_broadcasting = False
+broadcast_lock = asyncio.Lock()
+
+# --- Temporary Failure Cache (per broadcast) ---
 class TemporaryFailureCache:
     def __init__(self):
         self.failed_users: Set[int] = set()
-        self.flood_waits: Dict[int, float] = {}  # user_id -> next_attempt_time
+        self.flood_waits: Dict[int, float] = {}
     
     def add_failed(self, user_id: int, retry_after: float = 0):
         """Add user to temporary failure cache"""
@@ -49,7 +91,7 @@ class TemporaryFailureCache:
         ]
         return retryable
 
-# --- MongoDB TTL Cache (12-24 hours) ---
+# --- MongoDB TTL Cache Setup (Optional) ---
 async def setup_ttl_cache():
     """Setup MongoDB TTL index if not exists"""
     # This should be called once during bot startup
@@ -93,7 +135,7 @@ async def send_message_batch(
                         chat_id=chat_id,
                         from_chat_id=message.chat_id,
                         message_id=message.message_id,
-                        disable_notification=True  # Reduces API load
+                        disable_notification=True
                     )
                     stats["success"] += 1
                     return
@@ -122,7 +164,6 @@ async def send_message_batch(
                     
                     if any(err in error_msg for err in permanent_errors):
                         stats["invalid"] += 1
-                        # Add to TTL cache for future broadcasts
                         await add_to_ttl_cache(chat_id)
                     else:
                         failed_cache.add_failed(chat_id)
@@ -143,115 +184,221 @@ async def send_message_batch(
     tasks = [send_single(chat_id) for chat_id in chat_ids]
     await asyncio.gather(*tasks, return_exceptions=True)
 
-# --- Optimized Broadcast Function ---
+# --- Premium Styled Report Generator ---
+def generate_premium_report(stats: Dict[str, int], total_targets: int, elapsed_time: float) -> str:
+    """Generate a premium styled report with small caps and bold formatting"""
+    
+    users_per_second = stats["success"] / max(1, elapsed_time)
+    success_rate = (stats["success"] / total_targets * 100) if total_targets > 0 else 0
+    
+    # Format numbers with commas for thousands
+    def format_num(num: int) -> str:
+        return f"{num:,}"
+    
+    report_lines = [
+        f"<b>{Style.STATUS}</b>",
+        f"<code>{Style.LINE}</code>",
+        f"<b>✅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ:</b> <code>{format_num(stats['success'])}</code>",
+        f"<b>🔄 ᴛᴇᴍᴘᴏʀᴀʀʏ ꜰᴀɪʟꜱ:</b> <code>{format_num(stats['failed'])}</code>",
+        f"<b>🚫 ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰᴀɪʟꜱ:</b> <code>{format_num(stats['invalid'])}</code>",
+        f"<b>⏳ ꜰʟᴏᴏᴅ ʟɪᴍɪᴛᴇᴅ:</b> <code>{format_num(stats['flood'])}</code>",
+        f"<b>📦 ꜰʀᴏᴍ ᴄᴀᴄʜᴇ:</b> <code>{format_num(stats['cached'])}</code>",
+        f"<b>👥 ᴛᴏᴛᴀʟ ᴛᴀʀɢᴇᴛᴇᴅ:</b> <code>{format_num(total_targets)}</code>",
+        f"<code>{Style.LINE}</code>",
+        f"<b>⏱️ ᴛᴏᴛᴀʟ ᴛɪᴍᴇ:</b> <code>{elapsed_time:.1f}s</code>",
+        f"<b>⚡ ꜱᴘᴇᴇᴅ:</b> <code>{users_per_second:.1f} users/sec</code>",
+        f"<b>📈 ꜱᴜᴄᴄᴇꜱꜱ ʀᴀᴛᴇ:</b> <code>{success_rate:.1f}%</code>",
+        f"<code>{Style.LINE}</code>",
+        f"<b>{Style.COMPLETE}</b>"
+    ]
+    
+    return "\n".join(report_lines)
+
+# --- Main Broadcast Function ---
 async def broadcast(update: Update, context: CallbackContext) -> None:
-    """10x faster broadcast system for 5k+ users"""
+    """Premium broadcast system with multi-user access control"""
     
-    # Authorization check
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("❌ Not authorized.")
+    global is_broadcasting
+    
+    # Multi-User Authorization Check
+    user_id = update.effective_user.id
+    if user_id not in AUTHORIZED_USERS:
+        await update.message.reply_text(
+            f"<b>❌ {to_small_caps('ACCESS DENIED')}</b>\n"
+            f"<i>You are not authorized to use this command.</i>",
+            parse_mode='HTML'
+        )
         return
     
-    # Get message to broadcast
-    message_to_broadcast = update.message.reply_to_message
-    if message_to_broadcast is None:
-        await update.message.reply_text("📝 Reply to a message to broadcast.")
-        return
+    # Check for overlapping broadcasts
+    async with broadcast_lock:
+        if is_broadcasting:
+            await update.message.reply_text(
+                f"<b>⏳ {to_small_caps('BROADCAST IN PROGRESS')}</b>\n"
+                f"<i>Please wait for the current broadcast to complete.</i>",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Set broadcast flag
+        is_broadcasting = True
     
-    start_time = time.time()
-    
-    # Fetch targets concurrently
-    async def fetch_targets():
-        chats_task = top_global_groups_collection.distinct("group_id")
-        users_task = pm_users.distinct("_id")
-        return await asyncio.gather(chats_task, users_task)
-    
-    all_chats, all_users = await fetch_targets()
-    all_targets = list(set(all_chats + all_users))
-    total_targets = len(all_targets)
-    
-    # Progress message
-    progress_msg = await update.message.reply_text(
-        f"🚀 Starting broadcast to {total_targets:,} targets...\n"
-        f"⚡ Using {MAX_CONCURRENT_TASKS} concurrent workers\n"
-        f"⏳ Estimated time: {max(30, total_targets // 100)} seconds"
-    )
-    
-    # Initialize stats and cache
-    stats = {"success": 0, "failed": 0, "invalid": 0, "flood": 0, "cached": 0}
-    failed_cache = TemporaryFailureCache()
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-    
-    # Process in optimized chunks
-    chunks = [all_targets[i:i + BATCH_SIZE] for i in range(0, len(all_targets), BATCH_SIZE)]
-    
-    for i, chunk in enumerate(chunks):
-        await send_message_batch(
-            context, 
-            message_to_broadcast, 
-            chunk, 
-            semaphore, 
-            failed_cache, 
-            stats
+    try:
+        # Get message to broadcast
+        message_to_broadcast = update.message.reply_to_message
+        if message_to_broadcast is None:
+            await update.message.reply_text(
+                f"<b>📝 {to_small_caps('REPLY REQUIRED')}</b>\n"
+                f"<i>Please reply to a message to broadcast.</i>",
+                parse_mode='HTML'
+            )
+            is_broadcasting = False
+            return
+        
+        start_time = time.time()
+        
+        # Initial status message
+        status_msg = await update.message.reply_text(
+            f"<b>{Style.STARTING}</b>\n"
+            f"<i>Preparing broadcast...</i>",
+            parse_mode='HTML'
         )
         
-        # Update progress every 5 chunks (or 175 users)
-        if i % 5 == 0:
-            elapsed = time.time() - start_time
-            remaining = ((len(chunks) - i) * elapsed / max(1, i)) if i > 0 else 0
-            
-            await progress_msg.edit_text(
-                f"📤 Broadcasting... ({i+1}/{len(chunks)} chunks)\n"
-                f"✅ Sent: {stats['success']:,} | ❌ Failed: {stats['failed']:,}\n"
-                f"⏱️ Elapsed: {elapsed:.1f}s | Remaining: ~{remaining:.1f}s\n"
-                f"📊 Success rate: {(stats['success']/max(1, i*BATCH_SIZE)*100):.1f}%"
-            )
-    
-    # Retry temporary failures
-    retryable = failed_cache.get_retryable()
-    if retryable:
-        retry_chunks = [retryable[i:i + BATCH_SIZE] for i in range(0, len(retryable), BATCH_SIZE)]
+        # Fetch targets concurrently
+        async def fetch_targets():
+            chats_task = top_global_groups_collection.distinct("group_id")
+            users_task = pm_users.distinct("_id")
+            return await asyncio.gather(chats_task, users_task)
         
-        for chunk in retry_chunks:
+        try:
+            all_chats, all_users = await fetch_targets()
+        except Exception as e:
+            await status_msg.edit_text(
+                f"<b>❌ {to_small_caps('DATABASE ERROR')}</b>\n"
+                f"<i>Failed to fetch targets: {str(e)}</i>",
+                parse_mode='HTML'
+            )
+            is_broadcasting = False
+            return
+        
+        all_targets = list(set(all_chats + all_users))
+        total_targets = len(all_targets)
+        
+        # Update status with target count
+        await status_msg.edit_text(
+            f"<b>{Style.STARTING}</b>\n"
+            f"<i>Targets loaded: {total_targets:,} users</i>\n"
+            f"<code>{Style.LINE}</code>\n"
+            f"⚡ <i>Starting broadcast...</i>",
+            parse_mode='HTML'
+        )
+        
+        # Initialize stats and cache
+        stats = {"success": 0, "failed": 0, "invalid": 0, "flood": 0, "cached": 0}
+        failed_cache = TemporaryFailureCache()
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+        
+        # Process in optimized chunks
+        chunks = [all_targets[i:i + BATCH_SIZE] for i in range(0, len(all_targets), BATCH_SIZE)]
+        
+        for i, chunk in enumerate(chunks):
             await send_message_batch(
                 context, 
                 message_to_broadcast, 
                 chunk, 
                 semaphore, 
-                TemporaryFailureCache(),  # Fresh cache for retries
+                failed_cache, 
                 stats
             )
-    
-    # Final statistics
-    elapsed_total = time.time() - start_time
-    users_per_second = stats["success"] / max(1, elapsed_total)
-    
-    # Detailed report
-    report_lines = [
-        "📊 BROADCAST COMPLETE",
-        "━" * 30,
-        f"✅ Successful: {stats['success']:,}",
-        f"🔄 Temporary fails: {stats['failed']:,}",
-        f"🚫 Permanent fails: {stats['invalid']:,}",
-        f"⏳ Flood limited: {stats['flood']:,}",
-        f"📦 From cache: {stats['cached']:,}",
-        f"👥 Total targeted: {total_targets:,}",
-        "━" * 30,
-        f"⏱️ Total time: {elapsed_total:.1f}s",
-        f"⚡ Speed: {users_per_second:.1f} users/sec",
-        f"📈 Success rate: {(stats['success']/total_targets*100):.1f}%",
-        "━" * 30,
-        f"🎯 Next broadcast will skip {stats['invalid']:,} invalid users"
-    ]
-    
-    await progress_msg.edit_text("\n".join(report_lines))
+            
+            # Update progress every 5 chunks
+            if i % 5 == 0 or i == len(chunks) - 1:
+                elapsed = time.time() - start_time
+                remaining = ((len(chunks) - i) * elapsed / max(1, i)) if i > 0 else 0
+                
+                progress_percent = ((i + 1) / len(chunks)) * 100
+                
+                await status_msg.edit_text(
+                    f"<b>{Style.IN_PROGRESS}</b>\n"
+                    f"<code>{Style.LINE}</code>\n"
+                    f"📊 <b>ᴘʀᴏɢʀᴇꜱꜱ:</b> <code>{i+1}/{len(chunks)} chunks</code>\n"
+                    f"📈 <b>ᴄᴏᴍᴘʟᴇᴛᴇᴅ:</b> <code>{progress_percent:.1f}%</code>\n"
+                    f"✅ <b>ꜱᴇɴᴛ:</b> <code>{stats['success']:,}</code>\n"
+                    f"⏱️ <b>ᴇʟᴀᴘꜱᴇᴅ:</b> <code>{elapsed:.1f}s</code>\n"
+                    f"⏳ <b>ʀᴇᴍᴀɪɴɪɴɢ:</b> <code>~{remaining:.1f}s</code>\n"
+                    f"<code>{Style.LINE}</code>",
+                    parse_mode='HTML'
+                )
+        
+        # Retry temporary failures
+        retryable = failed_cache.get_retryable()
+        if retryable:
+            retry_chunks = [retryable[i:i + BATCH_SIZE] for i in range(0, len(retryable), BATCH_SIZE)]
+            
+            await status_msg.edit_text(
+                f"<b>🔄 {to_small_caps('RETRYING FAILED USERS')}</b>\n"
+                f"<i>Retrying {len(retryable)} temporarily failed users...</i>",
+                parse_mode='HTML'
+            )
+            
+            for chunk in retry_chunks:
+                await send_message_batch(
+                    context, 
+                    message_to_broadcast, 
+                    chunk, 
+                    semaphore, 
+                    TemporaryFailureCache(),
+                    stats
+                )
+        
+        # Final statistics
+        elapsed_total = time.time() - start_time
+        
+        # Generate premium report
+        final_report = generate_premium_report(stats, total_targets, elapsed_total)
+        
+        # Send final report
+        await status_msg.edit_text(final_report, parse_mode='HTML')
+        
+        # Also send a copy to the command issuer
+        await update.message.reply_text(
+            f"<b>🎯 {to_small_caps('BROADCAST SUMMARY')}</b>\n"
+            f"<i>Initiated by: {update.effective_user.first_name}</i>\n"
+            f"<code>{Style.LINE}</code>\n"
+            f"✅ <b>Delivered to:</b> {stats['success']:,} users\n"
+            f"⏱️ <b>Total time:</b> {elapsed_total:.1f}s\n"
+            f"<code>{Style.LINE}</code>\n"
+            f"<i>Broadcast completed successfully!</i>",
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        # Handle any unexpected errors
+        error_msg = f"<b>❌ {to_small_caps('BROADCAST ERROR')}</b>\n<code>Error: {str(e)}</code>"
+        
+        if 'status_msg' in locals():
+            await status_msg.edit_text(error_msg, parse_mode='HTML')
+        else:
+            await update.message.reply_text(error_msg, parse_mode='HTML')
+        
+        # Log the error
+        print(f"Broadcast error: {e}")
+        
+    finally:
+        # Always reset the broadcast flag
+        is_broadcasting = False
 
-# --- Registration ---
+# --- Broadcast Command Registration ---
 application.add_handler(CommandHandler("broadcast", broadcast, block=False))
 
-# --- Optional: Auto-setup TTL index on startup ---
+# --- Optional: Auto-setup on startup ---
 async def setup_broadcast_system():
-    """Setup TTL indexes and prepare cache"""
-    # Create TTL index for 12-hour expiration
-    # This should be called in your bot's startup routine
-    pass
+    """Setup TTL indexes and prepare cache on bot startup"""
+    try:
+        await setup_ttl_cache()
+        print("Broadcast system initialized successfully.")
+    except Exception as e:
+        print(f"Failed to initialize broadcast system: {e}")
+
+# Call this during your bot's startup
+# asyncio.create_task(setup_broadcast_system())

@@ -5,7 +5,10 @@ from typing import Set, Tuple
 from telegram import Update
 from telegram.error import Forbidden, BadRequest, RetryAfter, TelegramError
 from telegram.ext import CallbackContext, CommandHandler
-from shivu import application, top_global_groups_collection, pm_users, OWNER_ID
+from shivu import application, top_global_groups_collection, pm_users
+
+# Hardcoded Owner ID - ONLY this user can access the broadcast command
+OWNER_ID = 8420981179
 
 
 def create_progress_bar(percentage: float, width: int = 10) -> str:
@@ -62,13 +65,15 @@ async def get_all_recipients() -> Tuple[Set[int], int]:
 
 
 async def broadcast(update: Update, context: CallbackContext) -> None:
-    """Premium broadcast command for owner only."""
+    """Premium broadcast command for owner only (ID: 8420981179)."""
     
-    # Authorization check - CRUCIAL
+    # STRICT AUTHORIZATION CHECK - Only user ID 8420981179 can access
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text(
-            "⛔ **Access Denied**\n\n"
-            "This command is restricted to the bot owner only."
+            "⛔ **ACCESS DENIED**\n\n"
+            "🚫 This command is strictly restricted to the bot owner only.\n"
+            "🔒 Owner ID: 8420981179\n\n"
+            "Your attempt has been logged."
         )
         return
 
@@ -163,7 +168,7 @@ async def broadcast(update: Update, context: CallbackContext) -> None:
                 await status_msg.edit_text(status_text)
                 stats['last_update_time'] = current_time
                 stats['last_update_count'] = processed
-            except Exception as e:
+            except Exception:
                 # Silently fail if we can't edit (message deleted, etc.)
                 pass
 

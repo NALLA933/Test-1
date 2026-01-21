@@ -261,6 +261,7 @@ def generate_cleanup_summary(stats: BroadcastStats) -> str:
     users = [id for id in stats.invalid_ids if id > 0]
     groups = [id for id in stats.invalid_ids if id < 0]
     
+    # FIXED: Properly escaped curly braces in f-string
     summary = f"""<b>🧹 {to_small_caps("DATABASE CLEANUP REQUIRED")}</b>
 <code>{line}</code>
 
@@ -273,10 +274,10 @@ def generate_cleanup_summary(stats: BroadcastStats) -> str:
 <b>💡 {to_small_caps("CLEANUP SUGGESTIONS")}</b>
 
 <i>Remove invalid users:</i>
-<code>await pm_users.delete_many({{'_id': {{'$in': [list of user IDs]}}})</code>
+<code>await pm_users.delete_many({{'_id': {{'$in': [list of user IDs]}}}})</code>
 
 <i>Remove invalid groups:</i>
-<code>await top_global_groups_collection.delete_many({{'group_id': {{'$in': [list of group IDs]}}})</code>
+<code>await top_global_groups_collection.delete_many({{'group_id': {{'$in': [list of group IDs]}}}})</code>
 
 <b>⚠️ Total entries to clean:</b> <code>{len(stats.invalid_ids):,}</code>"""
     

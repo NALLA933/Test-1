@@ -14,7 +14,7 @@ from shivu import (
     top_global_groups_collection,
     group_user_totals_collection
 )
-from config import Config
+from shivu.config import Config
 
 
 video_cache = cachetools.LRUCache(maxsize=100)

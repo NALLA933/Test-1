@@ -80,14 +80,12 @@ async def get_group_config(chat_id: int) -> Dict:
     config = await group_config_collection.find_one({"group_id": str(chat_id)})
     
     if not config:
-        # Default configuration
+        # Default configuration (NO TIME-BASED FIELDS)
         config = {
             "group_id": str(chat_id),
             "group_name": "",
             "enabled": True,
-            "drop_frequency": 100,
-            "drop_cooldown": 300,  # 5 minutes default
-            "last_drop_time": 0,
+            "drop_frequency": 100,  # Messages required for drop
             "paused": False
         }
         await group_config_collection.insert_one(config)
@@ -138,9 +136,10 @@ async def update_leaderboards(user_id: int, coins: int):
     except Exception as e:
         LOGGER.error(f"Leaderboard update error: {e}")
 
-# ========== MESSAGE COUNTER WITH ALL FEATURES ==========
+# ========== PURE MESSAGE COUNT BASED DROP SYSTEM ==========
 
 async def message_counter(update: Update, context: CallbackContext) -> None:
+    """Message counter - PURE MESSAGE-BASED SYSTEM (NO TIME CHECKS)"""
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     
@@ -151,23 +150,16 @@ async def message_counter(update: Update, context: CallbackContext) -> None:
     if not config.get("enabled", True) or config.get("paused", False):
         return
     
-    # Check group drop cooldown
-    current_time = time.time()
-    last_drop = config.get("last_drop_time", 0)
-    drop_cooldown = config.get("drop_cooldown", 300)
-    
-    if current_time - last_drop < drop_cooldown:
-        return  # Cooldown active, no drops
-    
     # Global spam detection
     message_text = update.message.text or ""
     if chat_id not in spam_counters:
         spam_counters[chat_id] = {}
     
     if user_id not in spam_counters[chat_id]:
-        spam_counters[chat_id][user_id] = {"messages": [], "last_time": 0}
+        spam_counters[chat_id][user_id] = {"messages": []}
     
     user_spam = spam_counters[chat_id][user_id]
+    current_time = time.time()
     
     # Clean old messages (older than 30 seconds)
     user_spam["messages"] = [
@@ -221,14 +213,19 @@ async def message_counter(update: Update, context: CallbackContext) -> None:
         if chat_id not in message_counts:
             message_counts[chat_id] = 0
         
+        # Increment message counter
         message_counts[chat_id] += 1
         
-        # Check if it's time for a character drop
+        LOGGER.debug(f"Chat {chat_id}: Message count = {message_counts[chat_id]}/{message_frequency}")
+        
+        # Check if it's time for a character drop (PURE MESSAGE-BASED)
         if message_counts[chat_id] >= message_frequency:
             if await send_image(update, context, config):
+                # RESET counter after successful drop
                 message_counts[chat_id] = 0
+                LOGGER.info(f"Character dropped in chat {chat_id}. Counter reset to 0.")
 
-# ========== CHARACTER DROP FUNCTION ==========
+# ========== CHARACTER DROP FUNCTION (UPDATED) ==========
 
 async def send_image(update: Update, context: CallbackContext, config: Dict) -> bool:
     """Send character image to chat, returns True if sent successfully"""
@@ -265,9 +262,8 @@ async def send_image(update: Update, context: CallbackContext, config: Dict) -> 
         if chat_id in first_correct_guesses:
             del first_correct_guesses[chat_id]
         
-        # Update last drop time
+        # Update group name only (NO TIME-BASED UPDATES)
         await update_group_config(chat_id, {
-            "last_drop_time": time.time(),
             "group_name": update.effective_chat.title if update.effective_chat else ""
         })
         
@@ -287,7 +283,7 @@ async def send_image(update: Update, context: CallbackContext, config: Dict) -> 
         LOGGER.error(f"Error in send_image: {e}")
         return False
 
-# ========== GUESS FUNCTION WITH ALL FEATURES ==========
+# ========== GUESS FUNCTION (UNCHANGED) ==========
 
 async def guess(update: Update, context: CallbackContext) -> None:
     chat_id = update.effective_chat.id
@@ -523,7 +519,7 @@ async def guess(update: Update, context: CallbackContext) -> None:
                 parse_mode='HTML'
             )
 
-# ========== LEADERBOARD FUNCTIONS ==========
+# ========== LEADERBOARD FUNCTIONS (UNCHANGED) ==========
 
 async def topdaily(update: Update, context: CallbackContext):
     """Daily leaderboard"""
@@ -658,10 +654,10 @@ async def topglobal(update: Update, context: CallbackContext):
         LOGGER.error(f"Global leaderboard error: {e}")
         await update.message.reply_text("❌ Error loading global leaderboard")
 
-# ========== ADMIN COMMANDS ==========
+# ========== ADMIN COMMANDS (UPDATED) ==========
 
 async def setfrequency(update: Update, context: CallbackContext):
-    """Set drop frequency"""
+    """Set drop frequency (messages required for drop)"""
     if not await check_admin(update, context):
         await update.message.reply_text("❌ Admin only command!")
         return
@@ -678,31 +674,14 @@ async def setfrequency(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     await update_group_config(chat_id, {"drop_frequency": frequency})
     
-    await update.message.reply_text(f"✅ Drop frequency set to *{frequency} messages*", parse_mode='Markdown')
+    # Reset counter for this group
+    chat_id_str = str(chat_id)
+    if chat_id_str in message_counts:
+        message_counts[chat_id_str] = 0
+    
+    await update.message.reply_text(f"✅ Drop frequency set to *{frequency} messages*\nMessage counter has been reset to 0.", parse_mode='Markdown')
 
-async def setcooldown(update: Update, context: CallbackContext):
-    """Set drop cooldown in seconds"""
-    if not await check_admin(update, context):
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /setcooldown <seconds>\nExample: /setcooldown 300")
-        return
-    
-    cooldown = int(context.args[0])
-    if cooldown < 0:
-        await update.message.reply_text("❌ Cooldown must be positive")
-        return
-    
-    chat_id = update.effective_chat.id
-    await update_group_config(chat_id, {"drop_cooldown": cooldown})
-    
-    minutes = cooldown // 60
-    seconds = cooldown % 60
-    time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
-    
-    await update.message.reply_text(f"✅ Drop cooldown set to *{time_str}*", parse_mode='Markdown')
+# REMOVED: setcooldown command completely
 
 async def pausegame(update: Update, context: CallbackContext):
     """Pause game in group"""
@@ -736,43 +715,39 @@ async def forcedrop(update: Update, context: CallbackContext):
     config = await get_group_config(chat_id)
     
     if await send_image(update, context, config):
-        await update.message.reply_text("🎮 *Character drop forced!*", parse_mode='Markdown')
+        # Reset counter after forced drop
+        chat_id_str = str(chat_id)
+        if chat_id_str in message_counts:
+            message_counts[chat_id_str] = 0
+        await update.message.reply_text("🎮 *Character drop forced!*\nMessage counter has been reset.", parse_mode='Markdown')
     else:
         await update.message.reply_text("❌ Failed to force drop")
 
 async def gameinfo(update: Update, context: CallbackContext):
-    """Show game settings"""
+    """Show game settings (UPDATED - NO COOLDOWN INFO)"""
     chat_id = update.effective_chat.id
     config = await get_group_config(chat_id)
     
-    # Calculate time until next drop
-    current_time = time.time()
-    last_drop = config.get("last_drop_time", 0)
-    cooldown = config.get("drop_cooldown", 300)
-    
-    time_since_last = current_time - last_drop
-    time_until_next = max(0, cooldown - time_since_last)
-    
-    minutes = int(time_until_next // 60)
-    seconds = int(time_until_next % 60)
+    # Get current message count
+    current_count = message_counts.get(str(chat_id), 0)
+    frequency = config.get("drop_frequency", 100)
     
     message = (
         f"⚙️ *Game Settings*\n\n"
         f"• Status: {'⏸️ Paused' if config.get('paused') else '▶️ Active'}\n"
-        f"• Drop Frequency: {config.get('drop_frequency', 100)} messages\n"
-        f"• Drop Cooldown: {cooldown // 60}m {cooldown % 60}s\n"
-        f"• Next drop in: {minutes}m {seconds}s\n"
-        f"• Messages until drop: {config.get('drop_frequency', 100) - message_counts.get(str(chat_id), 0)}\n\n"
+        f"• Drop Frequency: {frequency} messages\n"
+        f"• Messages counted: {current_count}/{frequency}\n"
+        f"• Messages until next drop: {frequency - current_count}\n\n"
         f"*Admin Commands:*\n"
-        f"/setfrequency <number>\n"
-        f"/setcooldown <seconds>\n"
-        f"/pausegame /resumegame\n"
-        f"/forcedrop /gameinfo"
+        f"/setfrequency <number> - Set messages needed for drop\n"
+        f"/pausegame /resumegame - Pause/resume game\n"
+        f"/forcedrop - Force immediate character drop\n"
+        f"/gameinfo - Show this info"
     )
     
     await update.message.reply_text(message, parse_mode='Markdown')
 
-# ========== EXISTING FUNCTIONS (UPDATED) ==========
+# ========== EXISTING FUNCTIONS (UNCHANGED) ==========
 
 async def fav(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
@@ -805,12 +780,12 @@ async def fav(update: Update, context: CallbackContext) -> None:
         parse_mode='Markdown'
     )
 
-# ========== CLEANUP TASKS (FIXED - USING JOB QUEUE) ==========
+# ========== CLEANUP TASKS (UPDATED) ==========
 
 async def cleanup_tasks(context: CallbackContext):
     """Periodic cleanup tasks - called by JobQueue"""
     try:
-        # Clean old cooldowns (older than 1 hour)
+        # Clean old cooldowns (older than 1 hour) - FOR GUESS COOLDOWN ONLY
         cutoff = time.time() - 3600
         deleted_cooldowns = await user_cooldown_collection.delete_many({
             "last_guess": {"$lt": cutoff}
@@ -822,8 +797,15 @@ async def cleanup_tasks(context: CallbackContext):
             "last_wrong": {"$lt": cutoff_24h}
         })
         
+        # Clean up old warned users
+        current_time = time.time()
+        expired_warns = [uid for uid, warn_time in warned_users.items() if current_time - warn_time > 600]
+        for uid in expired_warns:
+            del warned_users[uid]
+        
         LOGGER.info(f"Cleanup completed: {deleted_cooldowns.deleted_count} cooldowns, "
-                   f"{deleted_wrong_guesses.deleted_count} wrong guesses removed")
+                   f"{deleted_wrong_guesses.deleted_count} wrong guesses removed, "
+                   f"{len(expired_warns)} warned users cleared")
         
     except Exception as e:
         LOGGER.error(f"Cleanup error: {e}")
@@ -834,14 +816,14 @@ async def refresh_character_cache(context: CallbackContext = None):
     """Refresh character cache - can be called manually or by JobQueue"""
     await get_cached_characters()
 
-# ========== MAIN FUNCTION (PROPERLY FIXED) ==========
+# ========== MAIN FUNCTION (UPDATED) ==========
 
 def main() -> None:
     """Run bot."""
     
-    # Add admin commands
+    # Add admin commands (REMOVED setcooldown)
     application.add_handler(CommandHandler("setfrequency", setfrequency, block=False))
-    application.add_handler(CommandHandler("setcooldown", setcooldown, block=False))
+    # REMOVED: application.add_handler(CommandHandler("setcooldown", setcooldown, block=False))
     application.add_handler(CommandHandler("pausegame", pausegame, block=False))
     application.add_handler(CommandHandler("resumegame", resumegame, block=False))
     application.add_handler(CommandHandler("forcedrop", forcedrop, block=False))
@@ -879,10 +861,10 @@ def main() -> None:
     )
     
     # Start the bot
-    LOGGER.info("Starting bot with JobQueue-based background tasks...")
+    LOGGER.info("Starting bot with PURE MESSAGE-BASED drop system...")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     shivuu.start()
-    LOGGER.info("Bot started with upgraded features")
+    LOGGER.info("Bot started with pure message-based drop system")
     main()

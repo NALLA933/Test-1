@@ -9,21 +9,24 @@ from pathlib import Path
 from html import escape
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters, ContextTypes
+from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters
 
+# Import from shivu package (using your __init__.py structure)
 from shivu import (
-    collection, 
-    top_global_groups_collection, 
-    group_user_totals_collection, 
-    user_collection, 
-    user_totals_collection, 
-    shivuu, 
-    application, 
-    db, 
+    collection,
+    top_global_groups_collection,
+    group_user_totals_collection,
+    user_collection,
+    user_totals_collection,
+    shivuu,
+    application,
+    db,
     LOGGER,
     OWNER_ID,
     SUDO_USERS,
-    MONGO_URL
+    MONGO_URL,
+    SUPPORT_CHAT,
+    UPDATE_CHAT
 )
 
 # ========================
@@ -163,15 +166,16 @@ async def message_counter(update: Update, context: CallbackContext) -> None:
             message_counts[chat_id] = 0
 
 # ========================
-# CHARACTER SPAWN
+# CHARACTER SPAWN (WITH ROBUST ERROR HANDLING)
 # ========================
 async def send_image(update: Update, context: CallbackContext) -> None:
-    """Spawn a new character"""
+    """Spawn a new character with robust error handling"""
     chat_id = update.effective_chat.id  # Keep as INTEGER
     
     all_characters = list(await collection.find({}).to_list(length=None))
     
     if not all_characters:
+        LOGGER.warning("No characters found in database")
         return
     
     if chat_id not in sent_characters:
@@ -192,12 +196,78 @@ async def send_image(update: Update, context: CallbackContext) -> None:
     rarity_text = to_small_caps(f"a new {character['rarity']} character appeared")
     guess_text = to_small_caps("guess character name and add to your harem")
     
-    await context.bot.send_photo(
-        chat_id=chat_id,
-        photo=character['img_url'],
-        caption=f"{rarity_text}...\n/{guess_text}",
-        parse_mode='HTML'
-    )
+    # Robust error handling for image sending
+    try:
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=character['img_url'],
+            caption=f"{rarity_text}...\n/{guess_text}",
+            parse_mode='HTML'
+        )
+        LOGGER.info(f"✅ Successfully spawned character: {character.get('name', 'Unknown')} (ID: {character.get('id', 'N/A')})")
+    
+    except Exception as e:
+        # Log error to console
+        LOGGER.error(f"❌ Failed to send character image:")
+        LOGGER.error(f"   Character Name: {character.get('name', 'Unknown')}")
+        LOGGER.error(f"   Character ID: {character.get('id', 'N/A')}")
+        LOGGER.error(f"   Image URL: {character.get('img_url', 'N/A')}")
+        LOGGER.error(f"   Error: {str(e)}")
+        
+        # Notify owner via DM
+        try:
+            # MongoDB fix command for easy copy-paste
+            mongo_fix_command = (
+                f'db.anime_characters_lol.updateOne(\n'
+                f'  {{ "id": "{character.get("id", "N/A")}" }},\n'
+                f'  {{ $set: {{ "img_url": "YOUR_NEW_WORKING_URL_HERE" }} }}\n'
+                f')'
+            )
+            
+            error_message = (
+                f"🚨 <b>Character Image Error Detected</b>\n\n"
+                f"<b>Character Name:</b> {escape(character.get('name', 'Unknown'))}\n"
+                f"<b>Character ID:</b> <code>{character.get('id', 'N/A')}</code>\n"
+                f"<b>Anime:</b> {escape(character.get('anime', 'Unknown'))}\n"
+                f"<b>Rarity:</b> {character.get('rarity', 'Unknown')}\n\n"
+                f"<b>Broken Image URL:</b>\n<code>{character.get('img_url', 'N/A')}</code>\n\n"
+                f"<b>Error Message:</b>\n<code>{escape(str(e))}</code>\n\n"
+                f"<b>Chat ID:</b> <code>{chat_id}</code>\n\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"💡 <b>Quick Fix (MongoDB):</b>\n\n"
+                f"<code>{escape(mongo_fix_command)}</code>\n\n"
+                f"📝 <b>Steps:</b>\n"
+                f"1. Copy the Character ID above\n"
+                f"2. Find a working image URL\n"
+                f"3. Run the MongoDB command\n"
+                f"4. Character will work in next spawn!\n\n"
+                f"⚠️ <b>Tip:</b> Use reliable image hosts like:\n"
+                f"• imgur.com\n"
+                f"• catbox.moe\n"
+                f"• telegra.ph\n"
+                f"• Direct CDN links"
+            )
+            
+            await context.bot.send_message(
+                chat_id=OWNER_ID,
+                text=error_message,
+                parse_mode='HTML'
+            )
+            LOGGER.info(f"📨 Error notification sent to owner (ID: {OWNER_ID})")
+        
+        except Exception as notify_error:
+            LOGGER.error(f"❌ Failed to notify owner: {notify_error}")
+        
+        # Remove broken character from sent list to allow retry in next cycle
+        if character['id'] in sent_characters.get(chat_id, []):
+            sent_characters[chat_id].remove(character['id'])
+        
+        # Clean up last_characters to prevent guess attempts on failed spawn
+        if chat_id in last_characters:
+            del last_characters[chat_id]
+        
+        # Return safely without crashing the bot
+        return
 
 # ========================
 # GUESS COMMAND
@@ -388,7 +458,7 @@ async def setfrequencyall(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(f"❌ {to_small_caps('minimum frequency is 10 messages')}")
         return
     
-    # Update all chats without custom frequency
+    # Update all chats
     result = await user_totals_collection.update_many(
         {},
         {'$set': {'message_frequency': frequency}}

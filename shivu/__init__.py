@@ -18,18 +18,18 @@ LOGGER = logging.getLogger(__name__)
 from shivu.config import Development as Config
 
 
-api_id = Config.api_id
-api_hash = Config.api_hash
+API_ID = Config.API_ID
+API_HASH = Config.API_HASH
 TOKEN = Config.TOKEN
+MONGO_URL = Config.MONGO_URL
+OWNER_ID = Config.OWNER_ID
+SUDO_USERS = Config.SUDO_USERS
 GROUP_ID = Config.GROUP_ID
-CHARA_CHANNEL_ID = Config.CHARA_CHANNEL_ID 
-mongo_url = Config.mongo_url 
-PHOTO_URL = Config.PHOTO_URL 
-SUPPORT_CHAT = Config.SUPPORT_CHAT 
+CHARA_CHANNEL_ID = Config.CHARA_CHANNEL_ID
+PHOTO_URL = Config.PHOTO_URL
+SUPPORT_CHAT = Config.SUPPORT_CHAT
 UPDATE_CHAT = Config.UPDATE_CHAT
 BOT_USERNAME = Config.BOT_USERNAME 
-sudo_users = Config.sudo_users
-OWNER_ID = Config.OWNER_ID 
 
 application = Application.builder().token(TOKEN).build()
 shivuu = Client("Shivu", api_id, api_hash, bot_token=TOKEN)

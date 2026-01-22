@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, CallbackContext, MessageHandler, filters
 
 from shivu import collection, top_global_groups_collection, group_user_totals_collection, user_collection, user_totals_collection, shivuu
 from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
@@ -831,7 +831,24 @@ async def cleanup_tasks():
             LOGGER.error(f"Cleanup error: {e}")
             await asyncio.sleep(300)  # Wait 5 minutes on error
 
-# ========== MAIN FUNCTION ==========
+# ========== POST-INIT HANDLER (FIX FOR EVENT LOOP) ==========
+
+async def post_init(application: Application) -> None:
+    """
+    Run background tasks after bot initialization.
+    This is called AFTER the event loop is running.
+    """
+    LOGGER.info("Starting background tasks...")
+    
+    # Now we have a running event loop, so create_task is safe
+    asyncio.create_task(cleanup_tasks())
+    
+    # Initialize character cache
+    asyncio.create_task(get_cached_characters())
+    
+    LOGGER.info("Background tasks started successfully")
+
+# ========== MAIN FUNCTION (CORRECTED) ==========
 
 def main() -> None:
     """Run bot."""
@@ -855,12 +872,11 @@ def main() -> None:
     application.add_handler(CommandHandler("fav", fav, block=False))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
     
-    # Start background cleanup task
-    asyncio.create_task(cleanup_tasks())
+    # ✅ CORRECTED: Use post_init to start background tasks
+    # This ensures tasks are created AFTER the event loop is running
+    application.post_init(post_init)
     
-    # Initialize character cache
-    asyncio.create_task(get_cached_characters())
-    
+    # Start the bot
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":

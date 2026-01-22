@@ -72,28 +72,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = get_keyboard()
     
     if update.effective_chat.type == "private":
-        caption = f"""✦ {small_caps('senpai waifu bot')} ✦
+        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
-─────────────────
-
-sᴇɴᴘᴀɪ ᴅᴏᴇs ɴᴏᴛ ᴄʜᴀsᴇ.
-sᴇɴᴘᴀɪ ɪs ᴄʜᴏsᴇɴ.
-
-ʏᴏᴜ ʜᴀᴠᴇ ᴇɴᴛᴇʀᴇᴅ ᴀ ʀᴇғɪɴᴇᴅ sᴘᴀᴄᴇ.
-ᴇʟᴇɢᴀɴᴄᴇ ɪs ɴᴏᴛ ᴀɴ ᴏᴘᴛɪᴏɴ.
-ɪᴛ ɪs ᴛʜᴇ sᴛᴀɴᴅᴀʀᴅ.
-
-✧ ᴡʜᴀᴛ ɪ ᴏғғᴇʀ ✧
-
-• ᴘʀᴇsᴇɴᴄᴇ ᴛʜᴀᴛ ᴄᴏᴍᴍᴀɴᴅs ᴀᴛᴛᴇɴᴛɪᴏɴ
-• ᴇʟɪᴛᴇ ᴀᴛᴍᴏsᴘʜᴇʀᴇ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘs
-• ᴄᴀʟᴍ ᴅᴏᴍɪɴᴀɴᴄᴇ
-• ᴜɴᴡᴀᴠᴇʀɪɴɢ ᴄᴏᴍᴘᴏsᴜʀᴇ
-
-─────────────────
-
-ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ.
-ɪғ ʏᴏᴜ'ʀᴇ ᴡᴏʀᴛʜʏ."""
+ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
@@ -104,16 +85,9 @@ sᴇɴᴘᴀɪ ɪs ᴄʜᴏsᴇɴ.
         )
     
     else:
-        caption = f"""✦ {small_caps('senpai has arrived')} ✦
+        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
-─────────────────
-
-ᴛʜɪs ɢʀᴏᴜᴘ ɴᴏᴡ ʜᴏʟᴅs ᴍʏ ᴘʀᴇsᴇɴᴄᴇ.
-
-ᴄᴏɴɴᴇᴄᴛ ᴡɪᴛʜ ᴍᴇ ɪɴ ᴘʀɪᴠᴀᴛᴇ
-ғᴏʀ ᴘʀᴏᴘᴇʀ ɪɴᴛʀᴏᴅᴜᴄᴛɪᴏɴ.
-
-ᴇʟᴇɢᴀɴᴄᴇ ᴅᴇᴍᴀɴᴅs ʀᴇsᴘᴇᴄᴛ."""
+ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
         await context.bot.send_photo(
             chat_id=update.effective_chat.id,
@@ -161,28 +135,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     
     elif query.data == 'back':
-        caption = f"""✦ {small_caps('senpai waifu bot')} ✦
+        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
-─────────────────
-
-sᴇɴᴘᴀɪ ᴅᴏᴇs ɴᴏᴛ ᴄʜᴀsᴇ.
-sᴇɴᴘᴀɪ ɪs ᴄʜᴏsᴇɴ.
-
-ʏᴏᴜ ʜᴀᴠᴇ ᴇɴᴛᴇʀᴇᴅ ᴀ ʀᴇғɪɴᴇᴅ sᴘᴀᴄᴇ.
-ᴇʟᴇɢᴀɴᴄᴇ ɪs ɴᴏᴛ ᴀɴ ᴏᴘᴛɪᴏɴ.
-ɪᴛ ɪs ᴛʜᴇ sᴛᴀɴᴅᴀʀᴅ.
-
-✧ ᴡʜᴀᴛ ɪ ᴏғғᴇʀ ✧
-
-• ᴘʀᴇsᴇɴᴄᴇ ᴛʜᴀᴛ ᴄᴏᴍᴍᴀɴᴅs ᴀᴛᴛᴇɴᴛɪᴏɴ
-• ᴇʟɪᴛᴇ ᴀᴛᴍᴏsᴘʜᴇʀᴇ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘs
-• ᴄᴀʟᴍ ᴅᴏᴍɪɴᴀɴᴄᴇ
-• ᴜɴᴡᴀᴠᴇʀɪɴɢ ᴄᴏᴍᴘᴏsᴜʀᴇ
-
-─────────────────
-
-ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ.
-ɪғ ʏᴏᴜ'ʀᴇ ᴡᴏʀᴛʏ."""
+ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
         keyboard = get_keyboard()
         await query.edit_message_caption(

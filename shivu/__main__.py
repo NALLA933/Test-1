@@ -14,9 +14,8 @@ from shivu import collection, top_global_groups_collection, group_user_totals_co
 from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
 from shivu.modules import ALL_MODULES
 
-# Initialize new collections
+# Initialize new collections (REMOVED user_cooldown_collection)
 group_config_collection = db["group_config"]
-user_cooldown_collection = db["user_cooldown"]
 character_cache_collection = db["character_cache"]
 daily_leaderboard_collection = db["daily_leaderboard"]
 weekly_leaderboard_collection = db["weekly_leaderboard"]
@@ -80,12 +79,12 @@ async def get_group_config(chat_id: int) -> Dict:
     config = await group_config_collection.find_one({"group_id": str(chat_id)})
     
     if not config:
-        # Default configuration (NO TIME-BASED FIELDS)
+        # Default configuration
         config = {
             "group_id": str(chat_id),
             "group_name": "",
             "enabled": True,
-            "drop_frequency": 100,  # Messages required for drop
+            "drop_frequency": 100,
             "paused": False
         }
         await group_config_collection.insert_one(config)
@@ -136,10 +135,9 @@ async def update_leaderboards(user_id: int, coins: int):
     except Exception as e:
         LOGGER.error(f"Leaderboard update error: {e}")
 
-# ========== PURE MESSAGE COUNT BASED DROP SYSTEM ==========
+# ========== MESSAGE COUNTER ==========
 
 async def message_counter(update: Update, context: CallbackContext) -> None:
-    """Message counter - PURE MESSAGE-BASED SYSTEM (NO TIME CHECKS)"""
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     
@@ -184,7 +182,7 @@ async def message_counter(update: Update, context: CallbackContext) -> None:
         # Silent cooldown - just return without processing
         return
     
-    # Original anti-spam logic (from existing code)
+    # Original anti-spam logic
     if chat_id not in locks:
         locks[chat_id] = asyncio.Lock()
     lock = locks[chat_id]
@@ -193,7 +191,7 @@ async def message_counter(update: Update, context: CallbackContext) -> None:
         # Get chat frequency from config
         message_frequency = config.get("drop_frequency", 100)
         
-        # User spam detection (existing logic)
+        # User spam detection
         if chat_id in last_user and last_user[chat_id]['user_id'] == user_id:
             last_user[chat_id]['count'] += 1
             if last_user[chat_id]['count'] >= 10:
@@ -218,14 +216,14 @@ async def message_counter(update: Update, context: CallbackContext) -> None:
         
         LOGGER.debug(f"Chat {chat_id}: Message count = {message_counts[chat_id]}/{message_frequency}")
         
-        # Check if it's time for a character drop (PURE MESSAGE-BASED)
+        # Check if it's time for a character drop
         if message_counts[chat_id] >= message_frequency:
             if await send_image(update, context, config):
-                # RESET counter after successful drop
+                # Reset counter after successful drop
                 message_counts[chat_id] = 0
                 LOGGER.info(f"Character dropped in chat {chat_id}. Counter reset to 0.")
 
-# ========== CHARACTER DROP FUNCTION (UPDATED) ==========
+# ========== CHARACTER DROP FUNCTION ==========
 
 async def send_image(update: Update, context: CallbackContext, config: Dict) -> bool:
     """Send character image to chat, returns True if sent successfully"""
@@ -262,7 +260,7 @@ async def send_image(update: Update, context: CallbackContext, config: Dict) -> 
         if chat_id in first_correct_guesses:
             del first_correct_guesses[chat_id]
         
-        # Update group name only (NO TIME-BASED UPDATES)
+        # Update group name only
         await update_group_config(chat_id, {
             "group_name": update.effective_chat.title if update.effective_chat else ""
         })
@@ -283,9 +281,10 @@ async def send_image(update: Update, context: CallbackContext, config: Dict) -> 
         LOGGER.error(f"Error in send_image: {e}")
         return False
 
-# ========== GUESS FUNCTION (UNCHANGED) ==========
+# ========== GUESS FUNCTION (NO COOLDOWN) ==========
 
 async def guess(update: Update, context: CallbackContext) -> None:
+    """Guess function WITHOUT COOLDOWN"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     
@@ -303,24 +302,8 @@ async def guess(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text("❌ This character was already guessed by someone else!")
         return
     
-    # Check per-user guess cooldown (10 seconds)
-    cooldown_key = f"{chat_id}:{user_id}"
-    current_time = time.time()
-    
-    cooldown_data = await user_cooldown_collection.find_one({"key": cooldown_key})
-    if cooldown_data:
-        last_guess = cooldown_data.get("last_guess", 0)
-        if current_time - last_guess < 10:
-            remaining = int(10 - (current_time - last_guess))
-            await update.message.reply_text(f"⏳ Please wait {remaining} seconds before guessing again!")
-            return
-    
-    # Update guess cooldown
-    await user_cooldown_collection.update_one(
-        {"key": cooldown_key},
-        {"$set": {"last_guess": current_time, "user_id": user_id, "chat_id": chat_id}},
-        upsert=True
-    )
+    # ✅ REMOVED: Per-user guess cooldown check completely
+    # No more cooldown collection or time delays
     
     # Check wrong guesses limit for this character
     character_id = last_characters[chat_id]['id']
@@ -480,6 +463,7 @@ async def guess(update: Update, context: CallbackContext) -> None:
         
     else:
         # Wrong guess - increment counter
+        current_time = time.time()
         await wrong_guesses_collection.update_one(
             {
                 "chat_id": chat_id,
@@ -519,10 +503,10 @@ async def guess(update: Update, context: CallbackContext) -> None:
                 parse_mode='HTML'
             )
 
-# ========== LEADERBOARD FUNCTIONS (UNCHANGED) ==========
+# ========== LEADERBOARD FUNCTIONS (FIXED) ==========
 
 async def topdaily(update: Update, context: CallbackContext):
-    """Daily leaderboard"""
+    """Daily leaderboard - FIXED INDEXING"""
     today = datetime.now().strftime("%Y-%m-%d")
     
     try:
@@ -550,8 +534,15 @@ async def topdaily(update: Update, context: CallbackContext):
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         
         for i, user in enumerate(top_users, 1):
-            user_info = user.get("user_info", [{}])[0]
-            username = user_info.get("first_name", f"User_{user['user_id']}")
+            user_info_list = user.get("user_info", [])
+            
+            # ✅ FIXED: Safe indexing with fallback
+            if user_info_list and len(user_info_list) > 0:
+                user_info = user_info_list[0]
+                username = user_info.get("first_name", f"User_{user['user_id']}")
+            else:
+                username = f"User_{user['user_id']}"
+            
             coins = user.get("coins", 0)
             
             medal = medals[i-1] if i <= 10 else f"{i}."
@@ -565,7 +556,7 @@ async def topdaily(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Error loading daily leaderboard")
 
 async def topweekly(update: Update, context: CallbackContext):
-    """Weekly leaderboard"""
+    """Weekly leaderboard - FIXED INDEXING"""
     week_num = datetime.now().strftime("%Y-W%W")
     
     try:
@@ -593,8 +584,15 @@ async def topweekly(update: Update, context: CallbackContext):
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         
         for i, user in enumerate(top_users, 1):
-            user_info = user.get("user_info", [{}])[0]
-            username = user_info.get("first_name", f"User_{user['user_id']}")
+            user_info_list = user.get("user_info", [])
+            
+            # ✅ FIXED: Safe indexing with fallback
+            if user_info_list and len(user_info_list) > 0:
+                user_info = user_info_list[0]
+                username = user_info.get("first_name", f"User_{user['user_id']}")
+            else:
+                username = f"User_{user['user_id']}"
+            
             coins = user.get("coins", 0)
             
             medal = medals[i-1] if i <= 10 else f"{i}."
@@ -654,10 +652,10 @@ async def topglobal(update: Update, context: CallbackContext):
         LOGGER.error(f"Global leaderboard error: {e}")
         await update.message.reply_text("❌ Error loading global leaderboard")
 
-# ========== ADMIN COMMANDS (UPDATED) ==========
+# ========== ADMIN COMMANDS ==========
 
 async def setfrequency(update: Update, context: CallbackContext):
-    """Set drop frequency (messages required for drop)"""
+    """Set drop frequency for current group"""
     if not await check_admin(update, context):
         await update.message.reply_text("❌ Admin only command!")
         return
@@ -681,7 +679,37 @@ async def setfrequency(update: Update, context: CallbackContext):
     
     await update.message.reply_text(f"✅ Drop frequency set to *{frequency} messages*\nMessage counter has been reset to 0.", parse_mode='Markdown')
 
-# REMOVED: setcooldown command completely
+async def setfrequencyall(update: Update, context: CallbackContext):
+    """✅ NEW: Set drop frequency for ALL GROUPS"""
+    if not await check_admin(update, context):
+        await update.message.reply_text("❌ Admin only command!")
+        return
+    
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("Usage: /setfrequencyall <number>\nExample: /setfrequencyall 75")
+        return
+    
+    frequency = int(context.args[0])
+    if frequency < 1:
+        await update.message.reply_text("❌ Frequency must be at least 1")
+        return
+    
+    # Update ALL groups in the database
+    result = await group_config_collection.update_many(
+        {},
+        {"$set": {"drop_frequency": frequency}}
+    )
+    
+    # Reset message counts for ALL groups
+    global message_counts
+    message_counts.clear()
+    
+    await update.message.reply_text(
+        f"✅ Drop frequency set to *{frequency} messages* for ALL groups\n"
+        f"• Updated {result.modified_count} groups\n"
+        f"• Message counters have been reset globally",
+        parse_mode='Markdown'
+    )
 
 async def pausegame(update: Update, context: CallbackContext):
     """Pause game in group"""
@@ -724,7 +752,7 @@ async def forcedrop(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Failed to force drop")
 
 async def gameinfo(update: Update, context: CallbackContext):
-    """Show game settings (UPDATED - NO COOLDOWN INFO)"""
+    """Show game settings"""
     chat_id = update.effective_chat.id
     config = await get_group_config(chat_id)
     
@@ -739,15 +767,15 @@ async def gameinfo(update: Update, context: CallbackContext):
         f"• Messages counted: {current_count}/{frequency}\n"
         f"• Messages until next drop: {frequency - current_count}\n\n"
         f"*Admin Commands:*\n"
-        f"/setfrequency <number> - Set messages needed for drop\n"
-        f"/pausegame /resumegame - Pause/resume game\n"
-        f"/forcedrop - Force immediate character drop\n"
-        f"/gameinfo - Show this info"
+        f"/setfrequency <number> - Set for this group\n"
+        f"/setfrequencyall <number> - Set for ALL groups\n"
+        f"/pausegame /resumegame\n"
+        f"/forcedrop /gameinfo"
     )
     
     await update.message.reply_text(message, parse_mode='Markdown')
 
-# ========== EXISTING FUNCTIONS (UNCHANGED) ==========
+# ========== EXISTING FUNCTIONS ==========
 
 async def fav(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
@@ -785,12 +813,6 @@ async def fav(update: Update, context: CallbackContext) -> None:
 async def cleanup_tasks(context: CallbackContext):
     """Periodic cleanup tasks - called by JobQueue"""
     try:
-        # Clean old cooldowns (older than 1 hour) - FOR GUESS COOLDOWN ONLY
-        cutoff = time.time() - 3600
-        deleted_cooldowns = await user_cooldown_collection.delete_many({
-            "last_guess": {"$lt": cutoff}
-        })
-        
         # Clean old wrong guesses (older than 24 hours)
         cutoff_24h = time.time() - 86400
         deleted_wrong_guesses = await wrong_guesses_collection.delete_many({
@@ -803,8 +825,7 @@ async def cleanup_tasks(context: CallbackContext):
         for uid in expired_warns:
             del warned_users[uid]
         
-        LOGGER.info(f"Cleanup completed: {deleted_cooldowns.deleted_count} cooldowns, "
-                   f"{deleted_wrong_guesses.deleted_count} wrong guesses removed, "
+        LOGGER.info(f"Cleanup completed: {deleted_wrong_guesses.deleted_count} wrong guesses removed, "
                    f"{len(expired_warns)} warned users cleared")
         
     except Exception as e:
@@ -813,7 +834,7 @@ async def cleanup_tasks(context: CallbackContext):
 # ========== CACHE REFRESH FUNCTION ==========
 
 async def refresh_character_cache(context: CallbackContext = None):
-    """Refresh character cache - can be called manually or by JobQueue"""
+    """Refresh character cache"""
     await get_cached_characters()
 
 # ========== MAIN FUNCTION (UPDATED) ==========
@@ -821,9 +842,9 @@ async def refresh_character_cache(context: CallbackContext = None):
 def main() -> None:
     """Run bot."""
     
-    # Add admin commands (REMOVED setcooldown)
+    # Add admin commands
     application.add_handler(CommandHandler("setfrequency", setfrequency, block=False))
-    # REMOVED: application.add_handler(CommandHandler("setcooldown", setcooldown, block=False))
+    application.add_handler(CommandHandler("setfrequencyall", setfrequencyall, block=False))  # ✅ NEW
     application.add_handler(CommandHandler("pausegame", pausegame, block=False))
     application.add_handler(CommandHandler("resumegame", resumegame, block=False))
     application.add_handler(CommandHandler("forcedrop", forcedrop, block=False))
@@ -840,20 +861,20 @@ def main() -> None:
     application.add_handler(CommandHandler("fav", fav, block=False))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
     
-    # ✅ CORRECT: Schedule periodic cleanup using JobQueue (production-safe)
+    # Schedule periodic cleanup using JobQueue
     application.job_queue.run_repeating(
         cleanup_tasks,
         interval=3600,  # Run every hour (3600 seconds)
         first=10  # Start after 10 seconds
     )
     
-    # ✅ CORRECT: Initialize character cache on startup using JobQueue
+    # Initialize character cache on startup using JobQueue
     application.job_queue.run_once(
         lambda context: asyncio.create_task(get_cached_characters()),
         when=0  # Run immediately
     )
     
-    # ✅ CORRECT: Schedule cache refresh every 5 minutes (300 seconds)
+    # Schedule cache refresh every 5 minutes (300 seconds)
     application.job_queue.run_repeating(
         lambda context: asyncio.create_task(get_cached_characters()),
         interval=300,  # Every 5 minutes
@@ -861,10 +882,10 @@ def main() -> None:
     )
     
     # Start the bot
-    LOGGER.info("Starting bot with PURE MESSAGE-BASED drop system...")
+    LOGGER.info("Starting bot with all modifications...")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     shivuu.start()
-    LOGGER.info("Bot started with pure message-based drop system")
+    LOGGER.info("Bot started with all requested modifications")
     main()

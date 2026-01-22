@@ -4,7 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
 from pymongo.results import UpdateResult
 
-from shivu import application, PHOTO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
+from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
 from shivu import pm_users as collection
 
 
@@ -68,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         print(f"Database error in /start: {e}")
     
-    photo_url = random.choice(PHOTO_URL)
+    video_url = random.choice(VIDEO_URL)
     keyboard = get_keyboard()
     
     if update.effective_chat.type == "private":
@@ -76,9 +76,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo=photo_url,
+        await context.bot.send_video(
+    chat_id=update.effective_chat.id,
+    video=video_url,
             caption=caption,
             reply_markup=keyboard,
             parse_mode='HTML'
@@ -89,9 +89,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo=photo_url,
+        await context.bot.send_video(
+    chat_id=update.effective_chat.id,
+    video=video_url,
             caption=caption,
             reply_markup=keyboard,
             parse_mode='HTML'

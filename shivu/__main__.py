@@ -1,891 +1,467 @@
 import importlib
+import importlib.util
+import os
+import sys
 import time
 import random
-import re
 import asyncio
-from html import escape 
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from pathlib import Path
+from html import escape
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackContext, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CommandHandler, CallbackContext, MessageHandler, filters, ContextTypes
 
-from shivu import collection, top_global_groups_collection, group_user_totals_collection, user_collection, user_totals_collection, shivuu
-from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
-from shivu.modules import ALL_MODULES
+from shivu import (
+    collection, 
+    top_global_groups_collection, 
+    group_user_totals_collection, 
+    user_collection, 
+    user_totals_collection, 
+    shivuu, 
+    application, 
+    db, 
+    LOGGER
+)
 
-# Initialize new collections (REMOVED user_cooldown_collection)
-group_config_collection = db["group_config"]
-character_cache_collection = db["character_cache"]
-daily_leaderboard_collection = db["daily_leaderboard"]
-weekly_leaderboard_collection = db["weekly_leaderboard"]
-wrong_guesses_collection = db["wrong_guesses"]
+# Import configuration
+try:
+    from shivu.config import OWNER_ID, SUDO_USERS, MONGO_URL
+except ImportError:
+    LOGGER.error("Failed to import config. Please ensure shivu/config.py exists with OWNER_ID, SUDO_USERS, and MONGO_URL")
+    sys.exit(1)
 
-# Constants
-RARITY_COINS = {
-    "Common": 100,
-    "Rare": 250,
-    "Epic": 500,
-    "Legendary": 1000,
-    "Mythic": 2000
-}
-CACHE_TTL = 300  # 5 minutes
-
-# Global variables
+# ========================
+# GLOBAL STATE
+# ========================
 locks = {}
-message_counters = {}
-spam_counters = {}
+last_user = {}
+warned_users = {}
+message_counts = {}
 last_characters = {}
 sent_characters = {}
 first_correct_guesses = {}
-message_counts = {}
-character_cache = []
-cache_refresh_time = 0
-last_user = {}
-warned_users = {}
+loaded_modules = {}
 
-# Import all modules
-for module_name in ALL_MODULES:
-    imported_module = importlib.import_module("shivu.modules." + module_name)
+# ========================
+# SMALL CAPS CONVERTER
+# ========================
+SMALL_CAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ', 'h': 'ʜ',
+    'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ',
+    'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
+    'y': 'ʏ', 'z': 'ᴢ'
+}
 
-def escape_markdown(text):
-    escape_chars = r'\*_`\\~>#+-=|{}.!'
-    return re.sub(r'([%s])' % re.escape(escape_chars), r'\\\1', text)
+def to_small_caps(text: str) -> str:
+    """Convert text to small caps aesthetic"""
+    return ''.join(SMALL_CAPS_MAP.get(c.lower(), c) for c in text)
 
-# ========== HELPER FUNCTIONS ==========
+# ========================
+# MODULE LOADER
+# ========================
+def load_module(module_path: str, module_name: str) -> bool:
+    """Dynamically load a single module"""
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            loaded_modules[module_name] = module
+            LOGGER.info(f"✅ Loaded module: {module_name}")
+            return True
+    except Exception as e:
+        LOGGER.error(f"❌ Failed to load {module_name}: {e}")
+    return False
 
-async def get_cached_characters() -> List[Dict]:
-    """Get characters from cache or refresh if needed"""
-    global character_cache, cache_refresh_time
+def auto_load_modules():
+    """Auto-discover and load all modules from shivu/modules/"""
+    modules_dir = Path(__file__).parent / "shivu" / "modules"
     
+    if not modules_dir.exists():
+        LOGGER.warning(f"Modules directory not found: {modules_dir}")
+        return
+    
+    LOGGER.info(f"🔍 Scanning for modules in: {modules_dir}")
+    
+    for root, dirs, files in os.walk(modules_dir):
+        for file in files:
+            if file.endswith(".py") and not file.startswith("_"):
+                module_path = os.path.join(root, file)
+                module_name = file[:-3]  # Remove .py
+                relative_path = os.path.relpath(module_path, modules_dir.parent)
+                full_module_name = relative_path.replace(os.sep, ".")[:-3]
+                
+                load_module(module_path, full_module_name)
+    
+    LOGGER.info(f"✅ Loaded {len(loaded_modules)} modules")
+
+# ========================
+# ANTI-SPAM SYSTEM
+# ========================
+async def check_spam(chat_id: str, user_id: int) -> bool:
+    """Returns True if user should be ignored (is spamming)"""
     current_time = time.time()
-    if not character_cache or (current_time - cache_refresh_time) > CACHE_TTL:
-        LOGGER.info("Refreshing character cache...")
-        character_cache = await collection.find({}).to_list(length=None)
-        cache_refresh_time = current_time
-        
-        # Update cache collection for persistence
-        await character_cache_collection.delete_many({})
-        if character_cache:
-            await character_cache_collection.insert_many(
-                [{**char, 'cached_at': current_time} for char in character_cache]
-            )
-        LOGGER.info(f"Cached {len(character_cache)} characters")
     
-    return character_cache
-
-async def get_group_config(chat_id: int) -> Dict:
-    """Get or create group configuration"""
-    config = await group_config_collection.find_one({"group_id": str(chat_id)})
+    # Check if user is currently warned
+    if user_id in warned_users:
+        if current_time - warned_users[user_id] < 600:  # 10 minutes
+            return True
+        else:
+            del warned_users[user_id]
     
-    if not config:
-        # Default configuration
-        config = {
-            "group_id": str(chat_id),
-            "group_name": "",
-            "enabled": True,
-            "drop_frequency": 100,
-            "paused": False
-        }
-        await group_config_collection.insert_one(config)
+    # Track consecutive messages
+    if chat_id in last_user and last_user[chat_id]['user_id'] == user_id:
+        time_diff = current_time - last_user[chat_id]['timestamp']
+        
+        if time_diff < 20:  # Within 20 seconds
+            last_user[chat_id]['count'] += 1
+            
+            if last_user[chat_id]['count'] >= 10:
+                warned_users[user_id] = current_time
+                return True
+        else:
+            # Reset if more than 20 seconds passed
+            last_user[chat_id] = {'user_id': user_id, 'count': 1, 'timestamp': current_time}
+    else:
+        last_user[chat_id] = {'user_id': user_id, 'count': 1, 'timestamp': current_time}
     
-    return config
+    return False
 
-async def update_group_config(chat_id: int, update_fields: Dict):
-    """Update group configuration"""
-    await group_config_collection.update_one(
-        {"group_id": str(chat_id)},
-        {"$set": update_fields},
-        upsert=True
-    )
-
-async def check_admin(update: Update, context: CallbackContext) -> bool:
-    """Check if user is admin"""
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    
-    try:
-        member = await context.bot.get_chat_member(chat_id, user_id)
-        return member.status in ['administrator', 'creator']
-    except Exception as e:
-        LOGGER.error(f"Admin check failed: {e}")
-        return False
-
-async def update_leaderboards(user_id: int, coins: int):
-    """Update all leaderboards"""
-    try:
-        current_time = time.time()
-        
-        # Daily leaderboard
-        today = datetime.now().strftime("%Y-%m-%d")
-        await daily_leaderboard_collection.update_one(
-            {"user_id": user_id, "date": today},
-            {"$inc": {"coins": coins}, "$set": {"last_updated": current_time}},
-            upsert=True
-        )
-        
-        # Weekly leaderboard
-        week_num = datetime.now().strftime("%Y-W%W")
-        await weekly_leaderboard_collection.update_one(
-            {"user_id": user_id, "week": week_num},
-            {"$inc": {"coins": coins}, "$set": {"last_updated": current_time}},
-            upsert=True
-        )
-        
-    except Exception as e:
-        LOGGER.error(f"Leaderboard update error: {e}")
-
-# ========== MESSAGE COUNTER ==========
-
+# ========================
+# MESSAGE COUNTER
+# ========================
 async def message_counter(update: Update, context: CallbackContext) -> None:
+    """Count messages and spawn characters"""
+    if not update.effective_chat or not update.effective_user:
+        return
+    
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     
-    # Get group config
-    config = await get_group_config(chat_id)
-    
-    # Check if game is enabled and not paused
-    if not config.get("enabled", True) or config.get("paused", False):
-        return
-    
-    # Global spam detection
-    message_text = update.message.text or ""
-    if chat_id not in spam_counters:
-        spam_counters[chat_id] = {}
-    
-    if user_id not in spam_counters[chat_id]:
-        spam_counters[chat_id][user_id] = {"messages": []}
-    
-    user_spam = spam_counters[chat_id][user_id]
-    current_time = time.time()
-    
-    # Clean old messages (older than 30 seconds)
-    user_spam["messages"] = [
-        msg for msg in user_spam["messages"] 
-        if current_time - msg["time"] < 30
-    ]
-    
-    # Check for repeated messages
-    user_spam["messages"].append({
-        "text": message_text,
-        "time": current_time
-    })
-    
-    # Count same messages
-    same_count = 0
-    for msg in user_spam["messages"]:
-        if msg["text"] == message_text:
-            same_count += 1
-    
-    # If same message sent 5+ times in 30 seconds, ignore
-    if same_count >= 5:
-        # Silent cooldown - just return without processing
-        return
-    
-    # Original anti-spam logic
+    # Initialize lock
     if chat_id not in locks:
         locks[chat_id] = asyncio.Lock()
-    lock = locks[chat_id]
     
-    async with lock:
-        # Get chat frequency from config
-        message_frequency = config.get("drop_frequency", 100)
+    async with locks[chat_id]:
+        # Anti-spam check
+        if await check_spam(chat_id, user_id):
+            if user_id not in warned_users or time.time() - warned_users[user_id] > 590:
+                await update.message.reply_text(
+                    f"⚠️ {to_small_caps('dont spam')} {escape(update.effective_user.first_name)}...\n"
+                    f"{to_small_caps('your messages will be ignored for 10 minutes')}..."
+                )
+            return
         
-        # User spam detection
-        if chat_id in last_user and last_user[chat_id]['user_id'] == user_id:
-            last_user[chat_id]['count'] += 1
-            if last_user[chat_id]['count'] >= 10:
-                if user_id in warned_users and time.time() - warned_users[user_id] < 600:
-                    return
-                else:
-                    await update.message.reply_text(
-                        f"⚠️ Don't Spam {update.effective_user.first_name}...\n"
-                        f"Your Messages Will be ignored for 10 Minutes..."
-                    )
-                    warned_users[user_id] = time.time()
-                    return
-        else:
-            last_user[chat_id] = {'user_id': user_id, 'count': 1}
+        # Get message frequency
+        chat_frequency = await user_totals_collection.find_one({'chat_id': chat_id})
+        message_frequency = chat_frequency.get('message_frequency', 100) if chat_frequency else 100
         
-        # Initialize message count if not exists
-        if chat_id not in message_counts:
-            message_counts[chat_id] = 0
+        # Increment counter
+        message_counts[chat_id] = message_counts.get(chat_id, 0) + 1
         
-        # Increment message counter
-        message_counts[chat_id] += 1
-        
-        LOGGER.debug(f"Chat {chat_id}: Message count = {message_counts[chat_id]}/{message_frequency}")
-        
-        # Check if it's time for a character drop
+        # Spawn character
         if message_counts[chat_id] >= message_frequency:
-            if await send_image(update, context, config):
-                # Reset counter after successful drop
-                message_counts[chat_id] = 0
-                LOGGER.info(f"Character dropped in chat {chat_id}. Counter reset to 0.")
+            await send_image(update, context)
+            message_counts[chat_id] = 0
 
-# ========== CHARACTER DROP FUNCTION ==========
-
-async def send_image(update: Update, context: CallbackContext, config: Dict) -> bool:
-    """Send character image to chat, returns True if sent successfully"""
+# ========================
+# CHARACTER SPAWN
+# ========================
+async def send_image(update: Update, context: CallbackContext) -> None:
+    """Spawn a new character"""
     chat_id = update.effective_chat.id
     
-    try:
-        # Get cached characters
-        all_characters = await get_cached_characters()
-        if not all_characters:
-            LOGGER.error("No characters found in database")
-            return False
-        
-        # Initialize sent characters list for this chat
-        if str(chat_id) not in sent_characters:
-            sent_characters[str(chat_id)] = []
-        
-        # Reset if all characters have been sent
-        if len(sent_characters[str(chat_id)]) >= len(all_characters):
-            sent_characters[str(chat_id)] = []
-        
-        # Filter out already sent characters
-        available_chars = [c for c in all_characters if c['id'] not in sent_characters[str(chat_id)]]
-        if not available_chars:
-            available_chars = all_characters  # Reset if no available chars
-        
-        # Select random character
-        character = random.choice(available_chars)
-        
-        # Update tracking
-        sent_characters[str(chat_id)].append(character['id'])
-        last_characters[chat_id] = character
-        
-        # Remove first correct guess for this chat
-        if chat_id in first_correct_guesses:
-            del first_correct_guesses[chat_id]
-        
-        # Update group name only
-        await update_group_config(chat_id, {
-            "group_name": update.effective_chat.title if update.effective_chat else ""
-        })
-        
-        # Send character image
-        await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=character['img_url'],
-            caption=f"""🎮 A New {character['rarity']} Character Appeared!
-💰 Guess Reward: {RARITY_COINS.get(character['rarity'], 100)} coins
+    all_characters = list(await collection.find({}).to_list(length=None))
+    
+    if not all_characters:
+        return
+    
+    if chat_id not in sent_characters:
+        sent_characters[chat_id] = []
+    
+    if len(sent_characters[chat_id]) >= len(all_characters):
+        sent_characters[chat_id] = []
+    
+    available = [c for c in all_characters if c['id'] not in sent_characters[chat_id]]
+    character = random.choice(available)
+    
+    sent_characters[chat_id].append(character['id'])
+    last_characters[chat_id] = character
+    
+    if chat_id in first_correct_guesses:
+        del first_correct_guesses[chat_id]
+    
+    rarity_text = to_small_caps(f"a new {character['rarity']} character appeared")
+    guess_text = to_small_caps("guess character name and add to your harem")
+    
+    await context.bot.send_photo(
+        chat_id=chat_id,
+        photo=character['img_url'],
+        caption=f"{rarity_text}...\n/{guess_text}",
+        parse_mode='HTML'
+    )
 
-/guess Character Name and add to Your Collection""",
-            parse_mode='Markdown'
-        )
-        return True
-        
-    except Exception as e:
-        LOGGER.error(f"Error in send_image: {e}")
-        return False
-
-# ========== GUESS FUNCTION (NO COOLDOWN) ==========
-
+# ========================
+# GUESS COMMAND
+# ========================
 async def guess(update: Update, context: CallbackContext) -> None:
-    """Guess function WITHOUT COOLDOWN"""
+    """Handle character guessing"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     
-    # Check if character exists in this chat
     if chat_id not in last_characters:
-        await update.message.reply_text("❌ No character to guess! Wait for one to appear.")
         return
     
-    # Check if already guessed
     if chat_id in first_correct_guesses:
-        guesser_id = first_correct_guesses[chat_id]
-        if guesser_id == user_id:
-            await update.message.reply_text("✅ You already guessed this character!")
-        else:
-            await update.message.reply_text("❌ This character was already guessed by someone else!")
+        await update.message.reply_text(f'❌ {to_small_caps("already guessed by someone")}... {to_small_caps("try next time")}')
         return
     
-    # ✅ REMOVED: Per-user guess cooldown check completely
-    # No more cooldown collection or time delays
+    guess = ' '.join(context.args).lower() if context.args else ''
     
-    # Check wrong guesses limit for this character
-    character_id = last_characters[chat_id]['id']
-    wrong_data = await wrong_guesses_collection.find_one({
-        "chat_id": chat_id,
-        "character_id": character_id
-    })
-    
-    if wrong_data and wrong_data.get("count", 0) >= 10:
-        await update.message.reply_text("💨 This character disappeared due to too many wrong guesses!")
-        # Remove character from current drop
-        if chat_id in last_characters:
-            del last_characters[chat_id]
+    if "()" in guess or "&" in guess:
+        await update.message.reply_text(f"❌ {to_small_caps('you cannot use these types of words in your guess')}")
         return
     
-    # Get guess from command arguments
-    if not context.args:
-        await update.message.reply_text("❌ Please provide a guess! Example: /guess Naruto")
-        return
+    name_parts = last_characters[chat_id]['name'].lower().split()
     
-    guess_text = ' '.join(context.args).lower().strip()
-    
-    # Validate guess
-    if "()" in guess_text or "&" in guess_text.lower():
-        await update.message.reply_text("❌ Invalid characters in guess!")
-        return
-    
-    # Get correct character name parts
-    character = last_characters[chat_id]
-    correct_name = character['name'].lower()
-    name_parts = correct_name.split()
-    
-    # Check if guess is correct
-    is_correct = (
-        guess_text == correct_name or
-        sorted(name_parts) == sorted(guess_text.split()) or
-        any(part == guess_text for part in name_parts)
-    )
-    
-    if is_correct:
-        # Mark as guessed
+    if sorted(name_parts) == sorted(guess.split()) or any(part == guess for part in name_parts):
         first_correct_guesses[chat_id] = user_id
+        character = last_characters[chat_id]
         
-        # Calculate coins earned
-        coins_earned = RARITY_COINS.get(character['rarity'], 100)
+        # Step 1: Congratulations message with coins
+        congrats_msg = await update.message.reply_text(
+            f"🎉 {to_small_caps('congratulations')} <b>{escape(update.effective_user.first_name)}</b>! +100 {to_small_caps('coins')} 🎉",
+            parse_mode='HTML'
+        )
         
-        # Update user data
+        # Step 2: React with emoji
+        try:
+            await congrats_msg.set_reaction("🎉")
+        except:
+            pass
+        
+        # Update user in database
         user = await user_collection.find_one({'id': user_id})
         if user:
-            # Update existing user
             update_fields = {}
             if hasattr(update.effective_user, 'username') and update.effective_user.username != user.get('username'):
                 update_fields['username'] = update.effective_user.username
             if update.effective_user.first_name != user.get('first_name'):
                 update_fields['first_name'] = update.effective_user.first_name
-            
-            # Add character if not already in collection
-            if character['id'] not in [c['id'] for c in user.get('characters', [])]:
-                update_fields.setdefault('$push', {})['characters'] = character
-            
-            # Update coins
-            update_fields.setdefault('$inc', {})['coins'] = coins_earned
-            
-            # Update user
-            if '$push' in update_fields or '$inc' in update_fields:
-                await user_collection.update_one({'id': user_id}, update_fields)
-            elif update_fields:
+            if update_fields:
                 await user_collection.update_one({'id': user_id}, {'$set': update_fields})
+            
+            await user_collection.update_one(
+                {'id': user_id}, 
+                {
+                    '$push': {'characters': character},
+                    '$inc': {'coins': 100}
+                }
+            )
         else:
-            # Create new user
             await user_collection.insert_one({
                 'id': user_id,
-                'username': update.effective_user.username if hasattr(update.effective_user, 'username') else None,
+                'username': getattr(update.effective_user, 'username', None),
                 'first_name': update.effective_user.first_name,
                 'characters': [character],
-                'coins': coins_earned,
-                'joined_date': datetime.now()
+                'coins': 100
             })
         
-        # Update group user totals
-        group_user_total = await group_user_totals_collection.find_one({
-            'user_id': user_id, 
-            'group_id': chat_id
-        })
-        
+        # Update group stats
+        group_user_total = await group_user_totals_collection.find_one({'user_id': user_id, 'group_id': chat_id})
         if group_user_total:
             await group_user_totals_collection.update_one(
-                {'user_id': user_id, 'group_id': chat_id},
-                {
-                    '$inc': {'count': 1, 'coins': coins_earned},
-                    '$set': {
-                        'username': update.effective_user.username if hasattr(update.effective_user, 'username') else None,
-                        'first_name': update.effective_user.first_name
-                    }
-                }
+                {'user_id': user_id, 'group_id': chat_id}, 
+                {'$inc': {'count': 1}}
             )
         else:
             await group_user_totals_collection.insert_one({
                 'user_id': user_id,
                 'group_id': chat_id,
-                'username': update.effective_user.username if hasattr(update.effective_user, 'username') else None,
+                'username': getattr(update.effective_user, 'username', None),
                 'first_name': update.effective_user.first_name,
-                'count': 1,
-                'coins': coins_earned
-            })
-        
-        # Update global group stats
-        group_info = await top_global_groups_collection.find_one({'group_id': chat_id})
-        if group_info:
-            await top_global_groups_collection.update_one(
-                {'group_id': chat_id},
-                {
-                    '$inc': {'count': 1},
-                    '$set': {'group_name': update.effective_chat.title}
-                }
-            )
-        else:
-            await top_global_groups_collection.insert_one({
-                'group_id': chat_id,
-                'group_name': update.effective_chat.title,
                 'count': 1
             })
         
-        # Update leaderboards
-        await update_leaderboards(user_id, coins_earned)
-        
-        # Clear wrong guesses for this character
-        await wrong_guesses_collection.delete_one({
-            "chat_id": chat_id,
-            "character_id": character_id
-        })
-        
-        # Create inline keyboard
-        keyboard = [[
-            InlineKeyboardButton(
-                "📜 See Collection", 
-                switch_inline_query_current_chat=f"collection.{user_id}"
-            ),
-            InlineKeyboardButton(
-                "🏆 Leaderboard", 
-                callback_data=f"leaderboard_{chat_id}"
-            )
-        ]]
-        
-        # Send success message
-        await update.message.reply_text(
-            f'<b><a href="tg://user?id={user_id}">{escape(update.effective_user.first_name)}</a></b> '
-            f'🎉 <b>Correct Guess!</b>\n\n'
-            f'📛 <b>Name:</b> {character["name"]}\n'
-            f'🎬 <b>Anime:</b> {character["anime"]}\n'
-            f'⭐ <b>Rarity:</b> {character["rarity"]}\n'
-            f'💰 <b>Coins Earned:</b> +{coins_earned}\n\n'
-            f'✅ Added to your collection! Use /harem to view.',
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        
-    else:
-        # Wrong guess - increment counter
-        current_time = time.time()
-        await wrong_guesses_collection.update_one(
+        # Update global group stats
+        await top_global_groups_collection.update_one(
+            {'group_id': chat_id},
             {
-                "chat_id": chat_id,
-                "character_id": character_id,
-                "character_name": character['name']
-            },
-            {
-                "$inc": {"count": 1},
-                "$set": {"last_wrong": current_time}
+                '$set': {'group_name': update.effective_chat.title},
+                '$inc': {'count': 1}
             },
             upsert=True
         )
         
-        # Get current wrong count
-        wrong_data = await wrong_guesses_collection.find_one({
-            "chat_id": chat_id,
-            "character_id": character_id
-        })
+        # Step 3: Character card
+        keyboard = [[InlineKeyboardButton("ʜᴀʀᴇᴍ", switch_inline_query_current_chat=f"collection.{user_id}")]]
         
-        wrongs = wrong_data.get("count", 1) if wrong_data else 1
-        
-        if wrongs >= 10:
-            # Character disappears
-            await update.message.reply_text(
-                "💨 <b>The character disappeared!</b>\n"
-                "Too many wrong guesses (10/10)",
-                parse_mode='HTML'
-            )
-            # Remove character from current drop
-            if chat_id in last_characters:
-                del last_characters[chat_id]
-        else:
-            await update.message.reply_text(
-                f'❌ <b>Wrong guess!</b>\n'
-                f'Attempts: {wrongs}/10\n\n'
-                f'💡 Hint: Try checking spelling or use full name.',
-                parse_mode='HTML'
-            )
-
-# ========== LEADERBOARD FUNCTIONS (FIXED) ==========
-
-async def topdaily(update: Update, context: CallbackContext):
-    """Daily leaderboard - FIXED INDEXING"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    try:
-        pipeline = [
-            {"$match": {"date": today}},
-            {"$sort": {"coins": -1}},
-            {"$limit": 10},
-            {"$lookup": {
-                "from": "user_collection",
-                "localField": "user_id",
-                "foreignField": "id",
-                "as": "user_info"
-            }}
-        ]
-        
-        top_users = await daily_leaderboard_collection.aggregate(pipeline).to_list(length=10)
-        
-        if not top_users:
-            await update.message.reply_text("📊 No daily stats yet! Start guessing characters!")
-            return
-        
-        message = "🏆 *DAILY LEADERBOARD* 🏆\n"
-        message += f"📅 {today}\n\n"
-        
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-        
-        for i, user in enumerate(top_users, 1):
-            user_info_list = user.get("user_info", [])
-            
-            # ✅ FIXED: Safe indexing with fallback
-            if user_info_list and len(user_info_list) > 0:
-                user_info = user_info_list[0]
-                username = user_info.get("first_name", f"User_{user['user_id']}")
-            else:
-                username = f"User_{user['user_id']}"
-            
-            coins = user.get("coins", 0)
-            
-            medal = medals[i-1] if i <= 10 else f"{i}."
-            message += f"{medal} {escape_markdown(username)}: *{coins}* coins\n"
-        
-        message += f"\nNext reset in: *24 hours*"
-        await update.message.reply_text(message, parse_mode='Markdown')
-        
-    except Exception as e:
-        LOGGER.error(f"Daily leaderboard error: {e}")
-        await update.message.reply_text("❌ Error loading daily leaderboard")
-
-async def topweekly(update: Update, context: CallbackContext):
-    """Weekly leaderboard - FIXED INDEXING"""
-    week_num = datetime.now().strftime("%Y-W%W")
-    
-    try:
-        pipeline = [
-            {"$match": {"week": week_num}},
-            {"$sort": {"coins": -1}},
-            {"$limit": 10},
-            {"$lookup": {
-                "from": "user_collection",
-                "localField": "user_id",
-                "foreignField": "id",
-                "as": "user_info"
-            }}
-        ]
-        
-        top_users = await weekly_leaderboard_collection.aggregate(pipeline).to_list(length=10)
-        
-        if not top_users:
-            await update.message.reply_text("📊 No weekly stats yet! Start guessing characters!")
-            return
-        
-        message = "🏆 *WEEKLY LEADERBOARD* 🏆\n"
-        message += f"📅 Week {week_num.split('-')[1]}\n\n"
-        
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-        
-        for i, user in enumerate(top_users, 1):
-            user_info_list = user.get("user_info", [])
-            
-            # ✅ FIXED: Safe indexing with fallback
-            if user_info_list and len(user_info_list) > 0:
-                user_info = user_info_list[0]
-                username = user_info.get("first_name", f"User_{user['user_id']}")
-            else:
-                username = f"User_{user['user_id']}"
-            
-            coins = user.get("coins", 0)
-            
-            medal = medals[i-1] if i <= 10 else f"{i}."
-            message += f"{medal} {escape_markdown(username)}: *{coins}* coins\n"
-        
-        # Calculate days until reset (next Monday)
-        today = datetime.now()
-        days_until_monday = (7 - today.weekday()) % 7
-        if days_until_monday == 0:
-            days_until_monday = 7
-        
-        message += f"\nNext reset in: *{days_until_monday} days*"
-        await update.message.reply_text(message, parse_mode='Markdown')
-        
-    except Exception as e:
-        LOGGER.error(f"Weekly leaderboard error: {e}")
-        await update.message.reply_text("❌ Error loading weekly leaderboard")
-
-async def topglobal(update: Update, context: CallbackContext):
-    """Global all-time leaderboard"""
-    try:
-        pipeline = [
-            {"$sort": {"coins": -1}},
-            {"$limit": 10},
-            {"$project": {
-                "_id": 0,
-                "id": 1,
-                "first_name": 1,
-                "username": 1,
-                "coins": 1,
-                "characters_count": {"$size": "$characters"}
-            }}
-        ]
-        
-        top_users = await user_collection.aggregate(pipeline).to_list(length=10)
-        
-        if not top_users:
-            await update.message.reply_text("📊 No global stats yet!")
-            return
-        
-        message = "🌍 *GLOBAL LEADERBOARD* 🌍\n\n"
-        
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-        
-        for i, user in enumerate(top_users, 1):
-            username = user.get("first_name", f"User_{user['id']}")
-            coins = user.get("coins", 0)
-            count = user.get("characters_count", 0)
-            
-            medal = medals[i-1] if i <= 10 else f"{i}."
-            message += f"{medal} *{escape_markdown(username)}*\n"
-            message += f"   💰 {coins} coins | 👥 {count} characters\n\n"
-        
-        await update.message.reply_text(message, parse_mode='Markdown')
-        
-    except Exception as e:
-        LOGGER.error(f"Global leaderboard error: {e}")
-        await update.message.reply_text("❌ Error loading global leaderboard")
-
-# ========== ADMIN COMMANDS ==========
-
-async def setfrequency(update: Update, context: CallbackContext):
-    """Set drop frequency for current group"""
-    if not await check_admin(update, context):
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /setfrequency <number>\nExample: /setfrequency 50")
-        return
-    
-    frequency = int(context.args[0])
-    if frequency < 1:
-        await update.message.reply_text("❌ Frequency must be at least 1")
-        return
-    
-    chat_id = update.effective_chat.id
-    await update_group_config(chat_id, {"drop_frequency": frequency})
-    
-    # Reset counter for this group
-    chat_id_str = str(chat_id)
-    if chat_id_str in message_counts:
-        message_counts[chat_id_str] = 0
-    
-    await update.message.reply_text(f"✅ Drop frequency set to *{frequency} messages*\nMessage counter has been reset to 0.", parse_mode='Markdown')
-
-async def setfrequencyall(update: Update, context: CallbackContext):
-    """✅ NEW: Set drop frequency for ALL GROUPS"""
-    if not await check_admin(update, context):
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("Usage: /setfrequencyall <number>\nExample: /setfrequencyall 75")
-        return
-    
-    frequency = int(context.args[0])
-    if frequency < 1:
-        await update.message.reply_text("❌ Frequency must be at least 1")
-        return
-    
-    # Update ALL groups in the database
-    result = await group_config_collection.update_many(
-        {},
-        {"$set": {"drop_frequency": frequency}}
-    )
-    
-    # Reset message counts for ALL groups
-    global message_counts
-    message_counts.clear()
-    
-    await update.message.reply_text(
-        f"✅ Drop frequency set to *{frequency} messages* for ALL groups\n"
-        f"• Updated {result.modified_count} groups\n"
-        f"• Message counters have been reset globally",
-        parse_mode='Markdown'
-    )
-
-async def pausegame(update: Update, context: CallbackContext):
-    """Pause game in group"""
-    if not await check_admin(update, context):
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    
-    chat_id = update.effective_chat.id
-    await update_group_config(chat_id, {"paused": True})
-    
-    await update.message.reply_text("⏸️ *Game paused* in this group\nUse /resumegame to resume", parse_mode='Markdown')
-
-async def resumegame(update: Update, context: CallbackContext):
-    """Resume game in group"""
-    if not await check_admin(update, context):
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    
-    chat_id = update.effective_chat.id
-    await update_group_config(chat_id, {"paused": False})
-    
-    await update.message.reply_text("▶️ *Game resumed* in this group", parse_mode='Markdown')
-
-async def forcedrop(update: Update, context: CallbackContext):
-    """Force character drop"""
-    if not await check_admin(update, context):
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    
-    chat_id = update.effective_chat.id
-    config = await get_group_config(chat_id)
-    
-    if await send_image(update, context, config):
-        # Reset counter after forced drop
-        chat_id_str = str(chat_id)
-        if chat_id_str in message_counts:
-            message_counts[chat_id_str] = 0
-        await update.message.reply_text("🎮 *Character drop forced!*\nMessage counter has been reset.", parse_mode='Markdown')
+        await update.message.reply_text(
+            f'<b>ɴᴀᴍᴇ:</b> {character["name"]}\n'
+            f'<b>ᴀɴɪᴍᴇ:</b> {character["anime"]}\n'
+            f'<b>ʀᴀʀɪᴛʏ:</b> {character["rarity"]}\n\n'
+            f'{to_small_caps("successfully added to your harem")} ✅',
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     else:
-        await update.message.reply_text("❌ Failed to force drop")
+        await update.message.reply_text(f'❌ {to_small_caps("please write correct character name")}')
 
-async def gameinfo(update: Update, context: CallbackContext):
-    """Show game settings"""
-    chat_id = update.effective_chat.id
-    config = await get_group_config(chat_id)
-    
-    # Get current message count
-    current_count = message_counts.get(str(chat_id), 0)
-    frequency = config.get("drop_frequency", 100)
-    
-    message = (
-        f"⚙️ *Game Settings*\n\n"
-        f"• Status: {'⏸️ Paused' if config.get('paused') else '▶️ Active'}\n"
-        f"• Drop Frequency: {frequency} messages\n"
-        f"• Messages counted: {current_count}/{frequency}\n"
-        f"• Messages until next drop: {frequency - current_count}\n\n"
-        f"*Admin Commands:*\n"
-        f"/setfrequency <number> - Set for this group\n"
-        f"/setfrequencyall <number> - Set for ALL groups\n"
-        f"/pausegame /resumegame\n"
-        f"/forcedrop /gameinfo"
-    )
-    
-    await update.message.reply_text(message, parse_mode='Markdown')
-
-# ========== EXISTING FUNCTIONS ==========
-
+# ========================
+# FAVORITE COMMAND
+# ========================
 async def fav(update: Update, context: CallbackContext) -> None:
+    """Set favorite character"""
     user_id = update.effective_user.id
     
     if not context.args:
-        await update.message.reply_text('Please provide Character id...\nExample: /fav 123')
+        await update.message.reply_text(to_small_caps('please provide character id'))
         return
     
     character_id = context.args[0]
-    
     user = await user_collection.find_one({'id': user_id})
+    
     if not user:
-        await update.message.reply_text('You have not collected any characters yet.')
+        await update.message.reply_text(to_small_caps('you have not guessed any characters yet'))
         return
     
-    # Find character in user's collection
     character = next((c for c in user.get('characters', []) if c['id'] == character_id), None)
+    
     if not character:
-        await update.message.reply_text('This character is not in your collection.')
+        await update.message.reply_text(to_small_caps('this character is not in your collection'))
         return
     
-    # Update favorites
-    await user_collection.update_one(
-        {'id': user_id},
-        {'$set': {'favorites': [character_id]}}
+    await user_collection.update_one({'id': user_id}, {'$set': {'favorites': [character_id]}})
+    await update.message.reply_text(f'{to_small_caps("character")} {character["name"]} {to_small_caps("has been added to your favorite")}')
+
+# ========================
+# FREQUENCY COMMANDS
+# ========================
+async def setfrequency(update: Update, context: CallbackContext) -> None:
+    """Set spawn frequency for current chat (Admin only)"""
+    chat_id = str(update.effective_chat.id)
+    user_id = update.effective_user.id
+    
+    # Check if user is admin
+    chat_member = await context.bot.get_chat_member(chat_id, user_id)
+    if chat_member.status not in ['creator', 'administrator']:
+        await update.message.reply_text(f"❌ {to_small_caps('only admins can use this command')}")
+        return
+    
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text(f"{to_small_caps('usage')}: /setfrequency [number]")
+        return
+    
+    frequency = int(context.args[0])
+    
+    if frequency < 10:
+        await update.message.reply_text(f"❌ {to_small_caps('minimum frequency is 10 messages')}")
+        return
+    
+    await user_totals_collection.update_one(
+        {'chat_id': chat_id},
+        {'$set': {'message_frequency': frequency}},
+        upsert=True
     )
     
     await update.message.reply_text(
-        f'⭐ *{character["name"]}* has been added to your favorites!',
-        parse_mode='Markdown'
+        f"✅ {to_small_caps('spawn frequency set to')} {frequency} {to_small_caps('messages')}"
     )
 
-# ========== CLEANUP TASKS (UPDATED) ==========
+async def setfrequencyall(update: Update, context: CallbackContext) -> None:
+    """Set global default spawn frequency (Owner only)"""
+    user_id = update.effective_user.id
+    
+    if user_id != OWNER_ID:
+        await update.message.reply_text(f"❌ {to_small_caps('only owner can use this command')}")
+        return
+    
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text(f"{to_small_caps('usage')}: /setfrequencyall [number]")
+        return
+    
+    frequency = int(context.args[0])
+    
+    if frequency < 10:
+        await update.message.reply_text(f"❌ {to_small_caps('minimum frequency is 10 messages')}")
+        return
+    
+    # Update all chats without custom frequency
+    result = await user_totals_collection.update_many(
+        {},
+        {'$set': {'message_frequency': frequency}}
+    )
+    
+    await update.message.reply_text(
+        f"✅ {to_small_caps('global spawn frequency set to')} {frequency} {to_small_caps('messages')}\n"
+        f"{to_small_caps('updated')} {result.modified_count} {to_small_caps('chats')}"
+    )
 
-async def cleanup_tasks(context: CallbackContext):
-    """Periodic cleanup tasks - called by JobQueue"""
-    try:
-        # Clean old wrong guesses (older than 24 hours)
-        cutoff_24h = time.time() - 86400
-        deleted_wrong_guesses = await wrong_guesses_collection.delete_many({
-            "last_wrong": {"$lt": cutoff_24h}
-        })
-        
-        # Clean up old warned users
-        current_time = time.time()
-        expired_warns = [uid for uid, warn_time in warned_users.items() if current_time - warn_time > 600]
-        for uid in expired_warns:
-            del warned_users[uid]
-        
-        LOGGER.info(f"Cleanup completed: {deleted_wrong_guesses.deleted_count} wrong guesses removed, "
-                   f"{len(expired_warns)} warned users cleared")
-        
-    except Exception as e:
-        LOGGER.error(f"Cleanup error: {e}")
+# ========================
+# HOT-LOAD COMMAND
+# ========================
+async def connect(update: Update, context: CallbackContext) -> None:
+    """Hot-load a module (Owner only)"""
+    user_id = update.effective_user.id
+    
+    if user_id != OWNER_ID:
+        await update.message.reply_text(f"❌ {to_small_caps('only owner can use this command')}")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(f"{to_small_caps('usage')}: /connect <module_name>")
+        return
+    
+    module_name = context.args[0]
+    modules_dir = Path(__file__).parent / "shivu" / "modules"
+    module_path = modules_dir / f"{module_name}.py"
+    
+    if not module_path.exists():
+        await update.message.reply_text(f"❌ {to_small_caps('module not found')}: {module_name}")
+        return
+    
+    # Reload if already loaded
+    if module_name in loaded_modules:
+        try:
+            importlib.reload(loaded_modules[module_name])
+            await update.message.reply_text(f"🔄 {to_small_caps('reloaded module')}: {module_name}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ {to_small_caps('reload failed')}: {e}")
+        return
+    
+    # Load new module
+    if load_module(str(module_path), module_name):
+        await update.message.reply_text(f"✅ {to_small_caps('loaded module')}: {module_name}")
+    else:
+        await update.message.reply_text(f"❌ {to_small_caps('failed to load')}: {module_name}")
 
-# ========== CACHE REFRESH FUNCTION ==========
-
-async def refresh_character_cache(context: CallbackContext = None):
-    """Refresh character cache"""
-    await get_cached_characters()
-
-# ========== MAIN FUNCTION (UPDATED) ==========
-
+# ========================
+# MAIN FUNCTION
+# ========================
 def main() -> None:
-    """Run bot."""
+    """Initialize and run the bot"""
+    LOGGER.info("🚀 Starting Future-Proof Modular Bot...")
     
-    # Add admin commands
-    application.add_handler(CommandHandler("setfrequency", setfrequency, block=False))
-    application.add_handler(CommandHandler("setfrequencyall", setfrequencyall, block=False))  # ✅ NEW
-    application.add_handler(CommandHandler("pausegame", pausegame, block=False))
-    application.add_handler(CommandHandler("resumegame", resumegame, block=False))
-    application.add_handler(CommandHandler("forcedrop", forcedrop, block=False))
-    application.add_handler(CommandHandler("gameinfo", gameinfo, block=False))
+    # Auto-load all modules
+    auto_load_modules()
     
-    # Add leaderboard commands
-    application.add_handler(CommandHandler("topdaily", topdaily, block=False))
-    application.add_handler(CommandHandler("topweekly", topweekly, block=False))
-    application.add_handler(CommandHandler("topglobal", topglobal, block=False))
-    application.add_handler(CommandHandler("top", topglobal, block=False))  # Alias
-    
-    # Existing handlers
+    # Register core handlers
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(CommandHandler("fav", fav, block=False))
+    application.add_handler(CommandHandler("setfrequency", setfrequency, block=False))
+    application.add_handler(CommandHandler("setfrequencyall", setfrequencyall, block=False))
+    application.add_handler(CommandHandler("connect", connect, block=False))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
     
-    # Schedule periodic cleanup using JobQueue
-    application.job_queue.run_repeating(
-        cleanup_tasks,
-        interval=3600,  # Run every hour (3600 seconds)
-        first=10  # Start after 10 seconds
-    )
+    LOGGER.info("✅ All handlers registered")
+    LOGGER.info(f"📊 Database: Connected to {MONGO_URL[:20]}...")
+    LOGGER.info(f"👑 Owner ID: {OWNER_ID}")
     
-    # Initialize character cache on startup using JobQueue
-    application.job_queue.run_once(
-        lambda context: asyncio.create_task(get_cached_characters()),
-        when=0  # Run immediately
-    )
-    
-    # Schedule cache refresh every 5 minutes (300 seconds)
-    application.job_queue.run_repeating(
-        lambda context: asyncio.create_task(get_cached_characters()),
-        interval=300,  # Every 5 minutes
-        first=60  # Start after 1 minute
-    )
-    
-    # Start the bot
-    LOGGER.info("Starting bot with all modifications...")
+    # Run bot
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     shivuu.start()
-    LOGGER.info("Bot started with all requested modifications")
+    LOGGER.info("✅ Bot client started")
     main()

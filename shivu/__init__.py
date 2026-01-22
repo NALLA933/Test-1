@@ -47,3 +47,9 @@ user_collection = db["user_collection_lmaoooo"]
 group_user_totals_collection = db['group_user_totalsssssss']
 top_global_groups_collection = db['top_global_groups']
 pm_users = db['total_pm_users']
+
+# Backward compatibility aliases (for old imports in modules)
+sudo_users = SUDO_USERS
+api_id = API_ID
+api_hash = API_HASH
+mongo_url = MONGO_URL

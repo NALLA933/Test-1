@@ -1,3 +1,6 @@
+async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    print("Command Received!") # Console mein check karein
+    # ... baki code ...
 import asyncio
 from typing import Dict, Any, Optional, List
 import aiohttp

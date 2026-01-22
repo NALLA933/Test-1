@@ -1,4 +1,4 @@
-Import os
+import os
 import sys
 from typing import List
 
@@ -33,15 +33,14 @@ class Config:
     MONGO_URL: str = os.getenv("MONGO_URL", "mongodb+srv://ravi:ravi12345@cluster0.hndinhj.mongodb.net/?retryWrites=true&w=majority")
     
     # Media
-    # Media
-VIDEO_URL: List[str] = [
-    url.strip()
-    for url in os.getenv(
-        "VIDEO_URL",
-        "https://files.catbox.moe/iqeaeb.mp4,https://files.catbox.moe/fp7m2d.mp4"
-    ).split(",")
-    if url.strip()
-]
+    VIDEO_URL: List[str] = [
+        url.strip()
+        for url in os.getenv(
+            "VIDEO_URL",
+            "https://files.catbox.moe/iqeaeb.mp4,https://files.catbox.moe/fp7m2d.mp4"
+        ).split(",")
+        if url.strip()
+    ]
     
     # Community Links
     SUPPORT_CHAT: str = os.getenv("SUPPORT_CHAT", "THE_DRAGON_SUPPORT")

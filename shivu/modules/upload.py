@@ -1,6 +1,3 @@
-async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print("Command Received!") # Console mein check karein
-    # ... baki code ...
 import asyncio
 from typing import Dict, Any, Optional, List
 import aiohttp
@@ -10,7 +7,7 @@ from telegram.ext import CommandHandler, ContextTypes
 from telegram.error import BadRequest
 from telegram.ext import Application
 
-from shivu import sudo_users, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
+from shivu import application, sudo_users, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
 
 # Global aiohttp session for reuse
 SESSION: Optional[aiohttp.ClientSession] = None
@@ -105,7 +102,7 @@ async def send_channel_message(
             f"{action} by <a href='tg://user?id={user_id}'>{user_name}</a>"
         )
         
-        bot = context.application.bot
+        bot = context.bot
         
         if action == "Added" or 'message_id' not in character:
             message = await bot.send_photo(
@@ -127,7 +124,7 @@ async def send_channel_message(
         error_msg = str(e).lower()
         if "not found" in error_msg or "message to edit not found" in error_msg:
             # Message was deleted from channel, send new one
-            bot = context.application.bot
+            bot = context.bot
             message = await bot.send_photo(
                 chat_id=CHARA_CHANNEL_ID,
                 photo=character['img_url'],
@@ -139,7 +136,6 @@ async def send_channel_message(
 
 async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle character upload command with both reply-to-photo and URL methods."""
-    # Fix: Convert user ID to string for comparison
     if str(update.effective_user.id) not in sudo_users:
         await update.message.reply_text('Ask My Owner...')
         return
@@ -147,7 +143,6 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         # Check if message is a reply to a photo
         if update.message.reply_to_message and update.message.reply_to_message.photo:
-            # Method 1: Reply to photo
             if not context.args or len(context.args) != 3:
                 await update.message.reply_text(
                     "❌ When replying to a photo, use: /upload character-name anime-name rarity-number\n"
@@ -156,20 +151,17 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 return
             
             char_raw, anime_raw, rarity_raw = context.args
-            # Get the best quality photo file_id
             photo_sizes = update.message.reply_to_message.photo
             img_file_id = get_best_photo_file_id(photo_sizes)
             img_url = img_file_id
             
         else:
-            # Method 2: With image URL
             if not context.args or len(context.args) != 4:
                 await update.message.reply_text(WRONG_FORMAT_TEXT)
                 return
             
             img_url, char_raw, anime_raw, rarity_raw = context.args
             
-            # Validate image URL (skip validation for Telegram file_ids)
             if not img_url.startswith('Ag') and not await validate_image_url(img_url):
                 await update.message.reply_text(
                     '❌ Invalid or inaccessible image URL.\n'
@@ -177,7 +169,6 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
                 return
 
-        # Parse rarity
         try:
             rarity_num = int(rarity_raw)
             if rarity_num not in RARITY_MAP:
@@ -190,7 +181,6 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text('❌ Rarity must be a number (1-5).')
             return
 
-        # Generate character data
         character = {
             'img_url': img_url,
             'name': char_raw.replace('-', ' ').title(),
@@ -199,7 +189,6 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             'id': str(await get_next_sequence_number('character_id')).zfill(6)
         }
 
-        # Send to channel and get message ID
         message_id = await send_channel_message(
             context, character, 
             update.effective_user.id, 
@@ -208,12 +197,10 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         character['message_id'] = message_id
         
-        # Insert into database
         await collection.insert_one(character)
         await update.message.reply_text('✅ CHARACTER ADDED SUCCESSFULLY!')
         
     except Exception as e:
-        # Try to insert without channel message
         try:
             if 'character' in locals():
                 await collection.insert_one(character)
@@ -232,7 +219,6 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle character deletion command."""
-    # Fix: Convert user ID to string for comparison
     if str(update.effective_user.id) not in sudo_users:
         await update.message.reply_text('Ask my Owner to use this Command...')
         return
@@ -243,18 +229,15 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     character_id = context.args[0]
     
-    # Find and delete character
     character = await collection.find_one_and_delete({'id': character_id})
     
     if not character:
         await update.message.reply_text('❌ Character not found in database.')
         return
 
-    # Try to delete from channel
     try:
         if 'message_id' in character:
-            bot = context.application.bot
-            await bot.delete_message(
+            await context.bot.delete_message(
                 chat_id=CHARA_CHANNEL_ID,
                 message_id=character['message_id']
             )
@@ -278,7 +261,6 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle character update command."""
-    # Fix: Convert user ID to string for comparison
     if str(update.effective_user.id) not in sudo_users:
         await update.message.reply_text('You do not have permission to use this command.')
         return
@@ -292,20 +274,17 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     char_id, field, new_value = context.args
 
-    # Validate field
     if field not in VALID_FIELDS:
         await update.message.reply_text(
             f'❌ Invalid field. Valid fields: {", ".join(VALID_FIELDS)}'
         )
         return
 
-    # Get existing character
     character = await collection.find_one({'id': char_id})
     if not character:
         await update.message.reply_text('❌ Character not found.')
         return
 
-    # Process new value based on field type
     update_data = {}
     if field in ['name', 'anime']:
         update_data[field] = new_value.replace('-', ' ').title()
@@ -319,14 +298,12 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except ValueError:
             await update.message.reply_text('❌ Rarity must be a number (1-5).')
             return
-    else:  # img_url
-        # Allow both Telegram file_ids and URLs
+    else:
         if not new_value.startswith('Ag') and not await validate_image_url(new_value):
             await update.message.reply_text('❌ Invalid or inaccessible image URL.')
             return
         update_data[field] = new_value
 
-    # Update database
     updated_character = await collection.find_one_and_update(
         {'id': char_id},
         {'$set': update_data},
@@ -337,20 +314,16 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('❌ Failed to update character in database.')
         return
 
-    # Update channel message
     try:
-        bot = context.application.bot
-        
         if field == 'img_url':
-            # For image URL changes, we need to send a new message
             if 'message_id' in updated_character:
                 try:
-                    await bot.delete_message(
+                    await context.bot.delete_message(
                         chat_id=CHARA_CHANNEL_ID,
                         message_id=updated_character['message_id']
                     )
                 except BadRequest:
-                    pass  # Message might already be deleted
+                    pass
             
             new_message_id = await send_channel_message(
                 context, updated_character,
@@ -359,14 +332,12 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Updated"
             )
             
-            # Update message_id in database
             await collection.update_one(
                 {'id': char_id},
                 {'$set': {'message_id': new_message_id}}
             )
             
         elif 'message_id' in updated_character:
-            # For other updates, edit existing message
             await send_channel_message(
                 context, updated_character,
                 update.effective_user.id,
@@ -379,7 +350,6 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except BadRequest as e:
         error_msg = str(e).lower()
         if "not found" in error_msg or "message to edit not found" in error_msg:
-            # Channel message was deleted, send new one
             new_message_id = await send_channel_message(
                 context, updated_character,
                 update.effective_user.id,
@@ -400,11 +370,10 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f'✅ Database updated but channel update failed: {str(e)}'
         )
 
-def setup_handlers(application: Application) -> None:
-    """Register command handlers."""
-    application.add_handler(CommandHandler("upload", upload))
-    application.add_handler(CommandHandler("delete", delete))
-    application.add_handler(CommandHandler("update", update))
+# Register handlers
+application.add_handler(CommandHandler("upload", upload))
+application.add_handler(CommandHandler("delete", delete))
+application.add_handler(CommandHandler("update", update))
 
 async def cleanup_session() -> None:
     """Cleanup global session on shutdown."""

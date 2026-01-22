@@ -564,7 +564,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rank, count = await get_user_group_rank(user_id, chat_id)
             if rank > 0:
                 message = f"👥 <b>Your Group Rank:</b> #{rank}\n"
-                message += f🎯 <b>Guesses:</b> {count}"
+                message += f"🎯 <b>Guesses:</b> {count}"
             else:
                 message = "📭 You haven't guessed any characters in this group yet."
         

@@ -1,4 +1,3 @@
-```python
 import asyncio
 from typing import Dict, Any, Optional, List
 import aiohttp
@@ -439,4 +438,3 @@ async def cleanup_session() -> None:
     global SESSION
     if SESSION and not SESSION.closed:
         await SESSION.close()
-```

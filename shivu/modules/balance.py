@@ -404,10 +404,10 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         target_chat = await context.bot.get_chat(target_id)
         target_name = escape(getattr(target_chat, "first_name", str(target_id)))
         confirmed_text = f"✓ <b>ᴘᴀʏᴍᴇɴᴛ sᴜᴄᴄᴇssғᴜʟ</b>\n\n" \
-                         f"sᴇɴᴅᴇʀ: <a href='tg://user?id={sender_id}'>{sender_name}</a>\n" \
+                         f"ꜱᴇɴᴅᴇʀ: <a href='tg://user?id={sender_id}'>{sender_name}</a>\n" \
                          f"ʀᴇᴄɪᴘɪᴇɴᴛ: <a href='tg://user?id={target_id}'>{target_name}</a>\n" \
                          f"ᴀᴍᴏᴜɴᴛ: <b>{amount:,}</b> ᴄᴏɪɴs\n\n" \
-                         f"ɴᴇxᴛ ᴘᴀʏᴍᴇɴᴛ ᴀʟʟᴏᴡᴇᴅ ᴀғᴛᴇʀ {PAY_COOLDOWN_SECONDS} sᴇᴄᴏɴᴅs."
+                         f"ɴᴇxᴛ ᴘᴀʏᴍᴇɴᴛ ᴀʟʟᴏᴡᴇᴅ ᴀғᴛᴇʀ {PAY_COOLDOWN_SECONDS} ꜱᴇᴄᴏɴᴅꜱ."
         await query.edit_message_text(confirmed_text, parse_mode="HTML")
     except Exception:
         pass

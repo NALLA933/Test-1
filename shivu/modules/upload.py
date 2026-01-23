@@ -146,11 +146,18 @@ async def send_channel_message(
         )
 
         bot = context.bot
+        
+        # FIX: Channel should ALWAYS use Telegram file_id if available
+        # img_url might be None during upload, so use img_file_id first
+        photo_source = character.get('img_file_id') or character.get('img_url')
+        
+        if not photo_source:
+            raise ValueError("No valid photo source found for channel message")
 
         if action == "Added" or 'message_id' not in character:
             message = await bot.send_photo(
                 chat_id=CHARA_CHANNEL_ID,
-                photo=character['img_url'],
+                photo=photo_source,
                 caption=caption,
                 parse_mode='HTML'
             )
@@ -167,14 +174,28 @@ async def send_channel_message(
         error_msg = str(e).lower()
         if "not found" in error_msg or "message to edit not found" in error_msg:
             bot = context.bot
+            # FIX: Use img_file_id first for fallback message too
+            photo_source = character.get('img_file_id') or character.get('img_url')
+            if not photo_source:
+                raise ValueError("No valid photo source found for channel message")
+            
             message = await bot.send_photo(
                 chat_id=CHARA_CHANNEL_ID,
-                photo=character['img_url'],
+                photo=photo_source,
                 caption=caption,
                 parse_mode='HTML'
             )
             return message.message_id
         raise
+
+async def background_convert_file_id(character_id: str, file_id: str) -> None:
+    """Background task to convert Telegram file_id to public URL for inline queries."""
+    try:
+        from .image_converter import start_image_conversion
+        await start_image_conversion(character_id, file_id)
+    except Exception as e:
+        # Silent error - background task failure shouldn't affect user
+        print(f"Background conversion failed for character {character_id}: {e}")
 
 async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id not in Config.SUDO_USERS:
@@ -239,10 +260,10 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await collection.insert_one(character)
         
+        # FIX: Use asyncio.create_task() instead of application.create_task()
         # Start background task to convert file_id to public URL
         try:
-            from .image_converter import start_image_conversion
-            application.create_task(start_image_conversion(character_id, img_file_id))
+            asyncio.create_task(background_convert_file_id(character_id, img_file_id))
         except Exception as e:
             # Silent error - background task failure shouldn't affect user
             pass
@@ -348,10 +369,10 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 'img_url': None  # Clear old public URL, will be updated by background task
             }
             
+            # FIX: Use asyncio.create_task() instead of application.create_task()
             # Start background task to convert new file_id to public URL
             try:
-                from .image_converter import start_image_conversion
-                application.create_task(start_image_conversion(char_id, new_file_id))
+                asyncio.create_task(background_convert_file_id(char_id, new_file_id))
             except Exception as e:
                 # Silent error - background task failure shouldn't affect user
                 pass

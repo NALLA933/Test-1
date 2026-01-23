@@ -3,16 +3,18 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from shivu import user_totals_collection, shivuu
-from shivu.config import OWNER_ID
+from shivu.config import Config
 
 
 # -------------------------
 # Owner check helper
 # -------------------------
 def is_owner(user_id: int) -> bool:
-    if isinstance(OWNER_ID, (list, tuple, set)):
-        return user_id in OWNER_ID
-    return user_id == OWNER_ID
+    """
+    Check whether the given user_id is the bot owner.
+    Config.OWNER_ID is expected to be an int.
+    """
+    return user_id == Config.OWNER_ID
 
 
 # =========================
@@ -21,9 +23,11 @@ def is_owner(user_id: int) -> bool:
 @shivuu.on_message(filters.command("changetime"))
 async def change_time_all_groups(client: Client, message: Message):
 
+    # Safety check
     if not message.from_user:
         return
 
+    # Owner only
     if not is_owner(message.from_user.id):
         await message.reply_text("❌ Only Bot Owner can use this command.")
         return
@@ -31,7 +35,7 @@ async def change_time_all_groups(client: Client, message: Message):
     args = message.command
     if len(args) != 2:
         await message.reply_text(
-            "⚠️ Usage:\n`/changetime <frequency>`"
+            "⚠️ **Usage:**\n`/changetime <frequency>`"
         )
         return
 
@@ -56,12 +60,14 @@ async def change_time_all_groups(client: Client, message: Message):
 
         await message.reply_text(
             f"✅ **Global Frequency Updated**\n\n"
-            f"⏱ New Frequency: `{new_frequency}`\n"
-            f"📊 Groups Updated: `{result.modified_count}`"
+            f"⏱ **New Frequency:** `{new_frequency}`\n"
+            f"📊 **Groups Updated:** `{result.modified_count}`"
         )
 
     except Exception as e:
-        await message.reply_text(f"❌ Failed:\n`{e}`")
+        await message.reply_text(
+            f"❌ Failed to update global frequency:\n`{e}`"
+        )
 
 
 # =========================
@@ -70,9 +76,11 @@ async def change_time_all_groups(client: Client, message: Message):
 @shivuu.on_message(filters.command("ctime") & filters.group)
 async def change_time_single_group(client: Client, message: Message):
 
+    # Safety check
     if not message.from_user:
         return
 
+    # Owner only
     if not is_owner(message.from_user.id):
         await message.reply_text("❌ Only Bot Owner can use this command.")
         return
@@ -80,7 +88,7 @@ async def change_time_single_group(client: Client, message: Message):
     args = message.command
     if len(args) != 2:
         await message.reply_text(
-            "⚠️ Usage:\n`/ctime <frequency>`"
+            "⚠️ **Usage:**\n`/ctime <frequency>`"
         )
         return
 
@@ -102,9 +110,11 @@ async def change_time_single_group(client: Client, message: Message):
 
         await message.reply_text(
             f"✅ **Group Frequency Updated**\n\n"
-            f"👥 Group: `{message.chat.title}`\n"
-            f"⏱ New Frequency: `{new_frequency}`"
+            f"👥 **Group:** `{message.chat.title}`\n"
+            f"⏱ **New Frequency:** `{new_frequency}`"
         )
 
     except Exception as e:
-        await message.reply_text(f"❌ Failed:\n`{e}`")
+        await message.reply_text(
+            f"❌ Failed to update group frequency:\n`{e}`"
+        )

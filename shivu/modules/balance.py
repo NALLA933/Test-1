@@ -226,7 +226,7 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/pay <user_id|@username|reply> <amount> - Initiate payment."""
     if not context.args and not update.message.reply_to_message:
-        usage_text = premium_format("Usage: /pay <user_id|@username> <amount>  (or reply with /pay <amount>)")
+        usage_text = premium_format("Usage: /pay <amount>")
         await update.message.reply_text(usage_text)
         return
 
@@ -249,7 +249,7 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         amount_str = context.args[0]
     else:
         if len(context.args) < 2:
-            await update.message.reply_text(premium_format("Usage: /pay <user_id|@username|reply> <amount>"))
+            await update.message.reply_text(premium_format("Usage: /pay <reply> <amount>"))
             return
         raw_target = context.args[0]
         amount_str = context.args[1]

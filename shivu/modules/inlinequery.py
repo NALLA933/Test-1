@@ -5,8 +5,7 @@ from cachetools import TTLCache
 from pymongo import MongoClient, ASCENDING
 
 from telegram import Update, InlineQueryResultPhoto
-from telegram.ext import InlineQueryHandler, CallbackContext, CommandHandler 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import InlineQueryHandler, CallbackContext
 from telegram.error import BadRequest
 
 from shivu import user_collection, collection, application, db
@@ -30,8 +29,8 @@ def is_valid_inline_photo_url(img_url: str) -> bool:
     if not img_url or not isinstance(img_url, str):
         return False
     
-    # Skip Telegram file_ids (starts with 'Ag')
-    if img_url.startswith('Ag'):
+    # Skip Telegram file_ids (common patterns)
+    if img_url.startswith(('Ag', 'BAAC', 'CAAC')):
         return False
     
     # Must be a valid HTTP/HTTPS URL
@@ -39,7 +38,6 @@ def is_valid_inline_photo_url(img_url: str) -> bool:
         return False
     
     # Telegram inline mode ONLY accepts direct image URLs with specific extensions
-    # Check for image file extensions (case-insensitive)
     valid_extensions = ('.jpg', '.jpeg', '.png', '.webp')
     img_url_lower = img_url.lower()
     
@@ -47,11 +45,10 @@ def is_valid_inline_photo_url(img_url: str) -> bool:
     if not img_url_lower.endswith(valid_extensions):
         return False
     
-    # Additional check to ensure it's a direct image URL, not a page
-    # Skip URLs with query parameters that might redirect
+    # Strip query parameters for checking
     if '?' in img_url:
-        base_url = img_url.split('?')[0]
-        if not base_url.lower().endswith(valid_extensions):
+        base_url = img_url.split('?')[0].lower()
+        if not base_url.endswith(valid_extensions):
             return False
     
     return True
@@ -93,12 +90,32 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
     valid_characters = []
     for character in all_characters:
         img_url = character.get('img_url')
-        if img_url and is_valid_inline_photo_url(img_url):
-            # Ensure the character has all required fields
-            if all(key in character for key in ['id', 'name', 'anime', 'rarity']):
-                valid_characters.append(character)
+        if not img_url:
+            continue
+        
+        # Skip file_ids
+        if img_url.startswith('Ag'):
+            continue
+            
+        # Must be HTTP/HTTPS
+        if not img_url.startswith(('http://', 'https://')):
+            continue
+            
+        # Must end with valid extension
+        img_url_lower = img_url.lower()
+        if not (img_url_lower.endswith('.jpg') or 
+                img_url_lower.endswith('.jpeg') or 
+                img_url_lower.endswith('.png') or 
+                img_url_lower.endswith('.webp')):
+            continue
+            
+        # Check with regex pattern
+        if not re.search(r'\.(jpg|jpeg|png|webp)$', img_url_lower):
+            continue
+            
+        valid_characters.append(character)
     
-    # Calculate pagination based on VALID characters only
+    # Calculate pagination
     total_valid = len(valid_characters)
     characters = valid_characters[offset:offset+50]
     
@@ -112,7 +129,7 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
     for character in characters:
         img_url = character.get('img_url')
         
-        # Final safety check
+        # Final validation check
         if not img_url or not is_valid_inline_photo_url(img_url):
             continue
             
@@ -137,19 +154,15 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
         )
 
     try:
-        # Only send results if we have valid ones
         if results:
-            await update.inline_query.answer(results, next_offset=next_offset, cache_time=5, auto_pagination=True)
+            await update.inline_query.answer(results, next_offset=next_offset, cache_time=5)
         else:
-            # Send empty result if no valid images
             await update.inline_query.answer([], next_offset="", cache_time=5)
     except BadRequest as e:
         error_message = str(e).lower()
-        if "photo_invalid" in error_message or "query_id_invalid" in error_message:
-            # Final safety net: Send empty results if Telegram rejects
+        if "photo_invalid" in error_message:
             await update.inline_query.answer([], next_offset="", cache_time=5)
         else:
-            # Re-raise other errors
             raise
 
 application.add_handler(InlineQueryHandler(inlinequery, block=False))

@@ -24,19 +24,39 @@ You have two options:
 2️⃣ **With image URL**: Use:
    `/upload image-url character-name anime-name rarity-number`
 
-📊 Rarity Map:
-• 1 ⚪ Common
-• 2 🟣 Rare
-• 3 🟡 Legendary
-• 4 🟢 Medium
-• 5 💮 Special Edition"""
+📊 Rarity Map (1-15):
+• 1  ⚪ Common
+• 2  🔵 Rare
+• 3  🟡 Legendary
+• 4  💮 Special
+• 5  👹 Ancient
+• 6  🎐 Celestial
+• 7  🔮 Epic
+• 8  🪐 Cosmic
+• 9  ⚰️ Nightmare
+• 10 🌬️ Frostborn
+• 11 💝 Valentine
+• 12 🌸 Spring
+• 13 🏖️ Tropical
+• 14 🍭 Kawaii
+• 15 🧬 Hybrid"""
 
 RARITY_MAP = {
     1: "⚪ Common",
-    2: "🟣 Rare", 
+    2: "🔵 Rare",
     3: "🟡 Legendary",
-    4: "🟢 Medium",
-    5: "💮 Special Edition"
+    4: "💮 Special",
+    5: "👹 Ancient",
+    6: "🎐 Celestial",
+    7: "🔮 Epic",
+    8: "🪐 Cosmic",
+    9: "⚰️ Nightmare",
+    10: "🌬️ Frostborn",
+    11: "💝 Valentine",
+    12: "🌸 Spring",
+    13: "🏖️ Tropical",
+    14: "🍭 Kawaii",
+    15: "🧬 Hybrid"
 }
 
 VALID_FIELDS = ['img_url', 'name', 'anime', 'rarity']
@@ -54,13 +74,13 @@ async def validate_image_url(url: str) -> bool:
     # Check if it's a Telegram file_id (starts with 'Ag')
     if url.startswith('Ag'):
         return True
-    
+
     session = await get_session()
     try:
         async with session.head(url) as response:
             if response.status != 200:
                 return False
-            
+
             # Check if content type is image
             content_type = response.headers.get('Content-Type', '').lower()
             return content_type.startswith('image/')
@@ -102,9 +122,9 @@ async def send_channel_message(
             f"<b>ID:</b> {character['id']}\n"
             f"{action} by <a href='tg://user?id={user_id}'>{user_name}</a>"
         )
-        
+
         bot = context.bot
-        
+
         if action == "Added" or 'message_id' not in character:
             message = await bot.send_photo(
                 chat_id=CHARA_CHANNEL_ID,
@@ -150,19 +170,19 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     "Example: /upload nezuko demon-slayer 4"
                 )
                 return
-            
+
             char_raw, anime_raw, rarity_raw = context.args
             photo_sizes = update.message.reply_to_message.photo
             img_file_id = get_best_photo_file_id(photo_sizes)
             img_url = img_file_id
-            
+
         else:
             if not context.args or len(context.args) != 4:
                 await update.message.reply_text(WRONG_FORMAT_TEXT)
                 return
-            
+
             img_url, char_raw, anime_raw, rarity_raw = context.args
-            
+
             if not img_url.startswith('Ag') and not await validate_image_url(img_url):
                 await update.message.reply_text(
                     '❌ Invalid or inaccessible image URL.\n'
@@ -174,12 +194,12 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             rarity_num = int(rarity_raw)
             if rarity_num not in RARITY_MAP:
                 await update.message.reply_text(
-                    '❌ Invalid rarity. Please use 1, 2, 3, 4, or 5.'
+                    f'❌ Invalid rarity. Please use a number between 1 and {max(RARITY_MAP.keys())}.'
                 )
                 return
             rarity = RARITY_MAP[rarity_num]
         except ValueError:
-            await update.message.reply_text('❌ Rarity must be a number (1-5).')
+            await update.message.reply_text(f'❌ Rarity must be a number (1-{max(RARITY_MAP.keys())}).')
             return
 
         character = {
@@ -197,10 +217,10 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Added"
         )
         character['message_id'] = message_id
-        
+
         await collection.insert_one(character)
         await update.message.reply_text('✅ CHARACTER ADDED SUCCESSFULLY!')
-        
+
     except Exception as e:
         try:
             if 'character' in locals():
@@ -229,9 +249,9 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     character_id = context.args[0]
-    
+
     character = await collection.find_one_and_delete({'id': character_id})
-    
+
     if not character:
         await update.message.reply_text('❌ Character not found in database.')
         return
@@ -293,11 +313,13 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             rarity_num = int(new_value)
             if rarity_num not in RARITY_MAP:
-                await update.message.reply_text('❌ Invalid rarity. Please use 1, 2, 3, 4, or 5.')
+                await update.message.reply_text(
+                    f'❌ Invalid rarity. Please use a number between 1 and {max(RARITY_MAP.keys())}.'
+                )
                 return
             update_data[field] = RARITY_MAP[rarity_num]
         except ValueError:
-            await update.message.reply_text('❌ Rarity must be a number (1-5).')
+            await update.message.reply_text(f'❌ Rarity must be a number (1-{max(RARITY_MAP.keys())}).')
             return
     else:
         if not new_value.startswith('Ag') and not await validate_image_url(new_value):
@@ -325,19 +347,19 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     )
                 except BadRequest:
                     pass
-            
+
             new_message_id = await send_channel_message(
                 context, updated_character,
                 update.effective_user.id,
                 update.effective_user.first_name,
                 "Updated"
             )
-            
+
             await collection.update_one(
                 {'id': char_id},
                 {'$set': {'message_id': new_message_id}}
             )
-            
+
         elif 'message_id' in updated_character:
             await send_channel_message(
                 context, updated_character,
@@ -345,9 +367,9 @@ async def update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 update.effective_user.first_name,
                 "Updated"
             )
-        
+
         await update.message.reply_text('✅ Character updated successfully!')
-        
+
     except BadRequest as e:
         error_msg = str(e).lower()
         if "not found" in error_msg or "message to edit not found" in error_msg:

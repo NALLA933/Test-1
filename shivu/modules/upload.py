@@ -73,7 +73,23 @@ def format_character_id(sequence_number: int) -> str:
     return str(sequence_number)
 
 def format_update_help(fields: list) -> str:
-    help_text = "📝 ᴜᴘᴅᴀᴛᴇ ᴄᴏᴍᴍᴀɴᴅ ᴜꜱᴀɢᴇ:\n\nᴜᴘᴅᴀᴛᴇ ᴡɪᴛʜ ᴠᴀʟᴜᴇ: /update id field new_value\n\nᴜᴘᴅᴀᴛᴇ ɪᴍᴀɢᴇ (ʀᴇᴘʟʏ ᴛᴏ ᴘʜᴏᴛᴏ): /update id img_url\n\nᴠᴀʟɪᴅ ꜰɪᴇʟᴅꜱ: img_url, name, anime, rarity\n\nᴇxᴀᴍᴘʟᴇꜱ: /update 12 name Nezuko Kamado /update 12 anime Demon Slayer /update 12 rarity 5 /update 12 img_url"
+    """Format update command help message (small-caps UI)."""
+
+    help_text = (
+        "📝 ᴜᴘᴅᴀᴛᴇ ᴄᴏᴍᴍᴀɴᴅ ᴜꜱᴀɢᴇ:\n\n"
+        "ᴜᴘᴅᴀᴛᴇ ᴡɪᴛʜ ᴠᴀʟᴜᴇ:\n"
+        "/update id field new_value\n\n"
+        "ᴜᴘᴅᴀᴛᴇ ɪᴍᴀɢᴇ (ʀᴇᴘʟʏ ᴛᴏ ᴘʜᴏᴛᴏ):\n"
+        "/update id img_url\n\n"
+        f"ᴠᴀʟɪᴅ ꜰɪᴇʟᴅꜱ:\n"
+        f"{', '.join(fields)}\n\n"
+        "ᴇxᴀᴍᴘʟᴇꜱ:\n"
+        "/update 12 name Nezuko Kamado\n"
+        "/update 12 anime Demon Slayer\n"
+        "/update 12 rarity 5\n"
+        "/update 12 img_url"
+    )
+
     return help_text
 
 async def get_session() -> aiohttp.ClientSession:

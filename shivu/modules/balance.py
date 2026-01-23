@@ -54,12 +54,12 @@ def safe_small_caps(text: str) -> str:
 # Premium Emoji Mapping
 PREMIUM_EMOJIS = {
     # Standard emojis to premium replacements
-    '💰': '💎',  # Money bag to diamond
+    '💰': '💰',  # Money bag to diamond
     '💵': '💠',  # Dollar banknote to gem
     '💳': '⚜️',  # Credit card to fleur-de-lis
     '💸': '🪽',  # Money with wings to winged emoji
-    '✅': '✔️',  # Check mark to heavy check
-    '❌': '✖️',  # Cross mark to heavy multiplication
+    '✅': '✓',  # Check mark to heavy check
+    '❌': '✘',  # Cross mark to heavy multiplication
     '⚠️': '❗',   # Warning to exclamation
     '⏳': '⏱️',   # Hourglass to stopwatch
 }
@@ -123,16 +123,16 @@ async def validate_payment_target(target_id: int, context: ContextTypes.DEFAULT_
         
         # Check if it's a bot
         if hasattr(target_chat, 'is_bot') and target_chat.is_bot:
-            return False, "✖️ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ᴛᴏ ʙᴏᴛs ᴏʀ ᴄʜᴀɴɴᴇʟs."
+            return False, "✘ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ᴛᴏ ʙᴏᴛs ᴏʀ ᴄʜᴀɴɴᴇʟs."
         
         # Check if it's a channel or group
         if target_chat.type in ['channel', 'group', 'supergroup']:
-            return False, "✖️ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ᴛᴏ ʙᴏᴛs ᴏʀ ᴄʜᴀɴɴᴇʟs."
+            return False, "✘ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ᴛᴏ ʙᴏᴛs ᴏʀ ᴄʜᴀɴɴᴇʟs."
         
         return True, None
     except Exception as e:
         LOGGER.error(f"Error validating payment target {target_id}: {e}")
-        return False, "✖️ ɪɴᴠᴀʟɪᴅ ᴛᴀʀɢᴇᴛ ᴜsᴇʀ."
+        return False, "✘ ɪɴᴠᴀʟɪᴅ ᴛᴀʀɢᴇᴛ ᴜsᴇʀ."
 
 # ---------- Helpers ----------
 async def _ensure_balance_doc(user_id: int) -> Dict[str, Any]:
@@ -220,7 +220,7 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     name = escape(getattr(target, "first_name", str(user_id)))
     
     # Fixed: Proper HTML structure with preserved tags
-    message = f"💎 <b>{name}</b>'s {safe_small_caps('Balance')}: <b>{bal:,}</b> ᴄᴏɪɴs"
+    message = f"💰 <b>{name}</b>'s {safe_small_caps('Balance')}: <b>{bal:,}</b> ᴄᴏɪɴs"
     await update.message.reply_text(message, parse_mode="HTML")
 
 async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -263,11 +263,11 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 target_id = None
 
     if not target_id:
-        await update.message.reply_text(premium_format("✖️ ᴄᴏᴜʟᴅ ɴᴏᴛ ʀᴇsᴏʟᴠᴇ ᴛᴀʀɢᴇᴛ ᴜsᴇʀ. ᴜsᴇ ᴜsᴇʀ ɪᴅ, @ᴜsᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴛʜᴇɪʀ ᴍᴇssᴀɢᴇ."))
+        await update.message.reply_text(premium_format("✘ ᴄᴏᴜʟᴅ ɴᴏᴛ ʀᴇsᴏʟᴠᴇ ᴛᴀʀɢᴇᴛ ᴜsᴇʀ. ᴜsᴇ ᴜsᴇʀ ɪᴅ, @ᴜsᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴛʜᴇɪʀ ᴍᴇssᴀɢᴇ."))
         return
 
     if target_id == sender.id:
-        await update.message.reply_text(premium_format("✖️ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ʏᴏᴜʀsᴇʟғ."))
+        await update.message.reply_text(premium_format("✓ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ʏᴏᴜʀsᴇʟғ."))
         return
 
     # Enhanced validation
@@ -280,17 +280,17 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         amount = int(amount_str)
     except Exception:
-        await update.message.reply_text(premium_format("✖️ ɪɴᴠᴀʟɪᴅ ᴀᴍᴏᴜɴᴛ. ᴜsᴇ ᴀ ᴘᴏsɪᴛɪᴠᴇ ɪɴᴛᴇɢᴇʀ."))
+        await update.message.reply_text(premium_format("✘ ɪɴᴠᴀʟɪᴅ ᴀᴍᴏᴜɴᴛ. ᴜsᴇ ᴀ ᴘᴏsɪᴛɪᴠᴇ ɪɴᴛᴇɢᴇʀ."))
         return
 
     if amount <= 0:
-        await update.message.reply_text(premium_format("✖️ ᴀᴍᴏᴜɴᴛ ᴍᴜsᴛ ʙᴇ ɢʀᴇᴀᴛᴇʀ ᴛʜᴀɴ ᴢᴇʀᴏ."))
+        await update.message.reply_text(premium_format("✘ ᴀᴍᴏᴜɴᴛ ᴍᴜsᴛ ʙᴇ ɢʀᴇᴀᴛᴇʀ ᴛʜᴀɴ ᴢᴇʀᴏ."))
         return
 
     # Check sender balance
     bal = await get_balance(sender.id)
     if bal < amount:
-        await update.message.reply_text(premium_format(f"✖️ ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ᴄᴏɪɴs. ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ: {bal:,}"))
+        await update.message.reply_text(premium_format(f"✘ ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ᴄᴏɪɴs. ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ: {bal:,}"))
         return
 
     # Create pending payment
@@ -322,8 +322,8 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✔️ ᴄᴏɴғɪʀᴍ", callback_data=f"pay_confirm:{token}"),
-            InlineKeyboardButton("✖️ ᴄᴀɴᴄᴇʟ", callback_data=f"pay_cancel:{token}")
+            InlineKeyboardButton("✓ ᴄᴏɴғɪʀᴍ", callback_data=f"pay_confirm:{token}"),
+            InlineKeyboardButton("✘ ᴄᴀɴᴄᴇʟ", callback_data=f"pay_cancel:{token}")
         ]
     ])
 
@@ -370,7 +370,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if action == "pay_cancel":
         try:
-            await query.edit_message_text(premium_format("✖️ ᴘᴀʏᴍᴇɴᴛ ᴄᴀɴᴄᴇʟʟᴇᴅ ʙʏ sᴇɴᴅᴇʀ."))
+            await query.edit_message_text(premium_format("✘ ᴘᴀʏᴍᴇɴᴛ ᴄᴀɴᴄᴇʟʟᴇᴅ ʙʏ sᴇɴᴅᴇʀ."))
         except Exception:
             pass
         pending_payments.pop(token, None)
@@ -403,7 +403,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         sender_name = escape(getattr(query.from_user, "first_name", str(sender_id)))
         target_chat = await context.bot.get_chat(target_id)
         target_name = escape(getattr(target_chat, "first_name", str(target_id)))
-        confirmed_text = f"✅ <b>ᴘᴀʏᴍᴇɴᴛ sᴜᴄᴄᴇssғᴜʟ</b>\n\n" \
+        confirmed_text = f"✓ <b>ᴘᴀʏᴍᴇɴᴛ sᴜᴄᴄᴇssғᴜʟ</b>\n\n" \
                          f"sᴇɴᴅᴇʀ: <a href='tg://user?id={sender_id}'>{sender_name}</a>\n" \
                          f"ʀᴇᴄɪᴘɪᴇɴᴛ: <a href='tg://user?id={target_id}'>{target_name}</a>\n" \
                          f"ᴀᴍᴏᴜɴᴛ: <b>{amount:,}</b> ᴄᴏɪɴs\n\n" \
@@ -434,10 +434,10 @@ async def admin_addbal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     try:
         new_bal = await change_balance(target, amount)
-        message = f"✅ ᴜᴘᴅᴀᴛᴇᴅ ʙᴀʟᴀɴᴄᴇ ғᴏʀ <a href='tg://user?id={target}'>ᴜsᴇʀ</a>: <b>{new_bal:,}</b>"
+        message = f"✓ ᴜᴘᴅᴀᴛᴇᴅ ʙᴀʟᴀɴᴄᴇ ғᴏʀ <a href='tg://user?id={target}'>ᴜsᴇʀ</a>: <b>{new_bal:,}</b>"
         await update.message.reply_text(message, parse_mode="HTML")
     except Exception:
-        await update.message.reply_text(premium_format("✖️ ғᴀɪʟᴇᴅ ᴛᴏ ᴜᴘᴅᴀᴛᴇ ʙᴀʟᴀɴᴄᴇ."))
+        await update.message.reply_text(premium_format("✘ ғᴀɪʟᴇᴅ ᴛᴏ ᴜᴘᴅᴀᴛᴇ ʙᴀʟᴀɴᴄᴇ."))
 
 # Register handlers
 application.add_handler(CommandHandler(["balance", "bal"], balance_cmd, block=False))

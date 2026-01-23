@@ -389,7 +389,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     success = await _atomic_transfer(sender_id, target_id, amount)
     if not success:
         try:
-            await query.edit_message_text(premium_format("✖️ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ: ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ᴏʀ ɪɴᴛᴇʀɴᴀʟ ᴇʀʀᴏʀ."))
+            await query.edit_message_text(premium_format("✘ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ: ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ᴏʀ ɪɴᴛᴇʀɴᴀʟ ᴇʀʀᴏʀ."))
         except Exception:
             pass
         pending_payments.pop(token, None)

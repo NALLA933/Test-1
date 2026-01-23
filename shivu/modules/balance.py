@@ -3,26 +3,107 @@ import uuid
 from html import escape
 from typing import Optional, Dict, Any
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, User, Chat
 from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes
 
 from pymongo import ReturnDocument
 
 from shivu import application, db, LOGGER, OWNER_ID, SUDO_USERS
 
+# ---------- Premium Styling Helpers ----------
+
+# Small Caps Unicode Mapping
+SMALL_CAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
+    'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
+    'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ',
+    'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
+    'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
+    'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ',
+    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
+    ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
+    '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '=': '=',
+    '+': '+', '*': '*', '/': '/', '\\': '\\', '|': '|', '_': '_', '"': '"',
+    "'": "'", '`': '`', '~': '~', '@': '@', '#': '#', '$': '$', '%': '%',
+    '^': '^', '&': '&', ';': ';', '<': '<', '>': '>', '0': '0', '1': '1',
+    '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7', '8': '8',
+    '9': '9'
+}
+
+def small_caps(text: str) -> str:
+    """Convert text to small caps Unicode characters."""
+    return ''.join(SMALL_CAPS_MAP.get(char, char) for char in text)
+
+# Premium Emoji Mapping
+PREMIUM_EMOJIS = {
+    # Standard emojis to premium replacements
+    '💰': '💎',  # Money bag to diamond
+    '💵': '💠',  # Dollar banknote to gem
+    '💳': '⚜️',  # Credit card to fleur-de-lis
+    '💸': '🪽',  # Money with wings to winged emoji
+    '✅': '✔️',  # Check mark to heavy check
+    '❌': '✖️',  # Cross mark to heavy multiplication
+    '⚠️': '❗',   # Warning to exclamation
+    '⏳': '⏱️',   # Hourglass to stopwatch
+    
+    # Text labels with premium emojis
+    'Balance': '💎 ʙᴀʟᴀɴᴄᴇ',
+    'Payment': '⚜️ ᴘᴀʏᴍᴇɴᴛ',
+    'Confirm': '✔️ ᴄᴏɴғɪʀᴍ',
+    'Cancel': '✖️ ᴄᴀɴᴄᴇʟ',
+    'Coins': '💠 ᴄᴏɪɴs',
+    'Transaction': '🪽 ᴛʀᴀɴsᴀᴄᴛɪᴏɴ',
+    'Success': '✅ sᴜᴄᴄᴇss',
+    'Failed': '❌ ғᴀɪʟᴇᴅ',
+    'Error': '❗ ᴇʀʀᴏʀ'
+}
+
+def premium_text(text: str) -> str:
+    """Apply premium styling to text with emoji replacements."""
+    for key, value in PREMIUM_EMOJIS.items():
+        text = text.replace(key, value)
+    
+    # Convert remaining text to small caps where appropriate
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        if any(word in line for word in ['Balance', 'Payment', 'Confirm', 'Cancel', 
+                                         'Coins', 'Transaction', 'Success', 'Error']):
+            lines[i] = small_caps(line)
+    return '\n'.join(lines)
+
 # Collections
 user_balance_coll = db.get_collection("user_balance")  # documents: { user_id, balance, ... }
 
 # In-memory pending payments and cooldowns
-# pending_payments[token] = {"sender_id": int, "target_id": int, "amount": int, "created_at": float, "message_id": int, "chat_id": int}
 pending_payments: Dict[str, Dict[str, Any]] = {}
-# cooldowns[sender_id] = timestamp_when_next_pay_allowed
 pay_cooldowns: Dict[int, float] = {}
 
 # Configuration
 PENDING_EXPIRY_SECONDS = 5 * 60   # pending confirmation expires after 5 minutes
 PAY_COOLDOWN_SECONDS = 60         # sender must wait 60 seconds after a confirmed payment
 
+# ---------- Enhanced Validation ----------
+async def validate_payment_target(target_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, Optional[str]]:
+    """
+    Validate if target is a regular user (not bot, channel, or group).
+    Returns (is_valid, error_message)
+    """
+    try:
+        target_chat = await context.bot.get_chat(target_id)
+        
+        # Check if it's a bot
+        if hasattr(target_chat, 'is_bot') and target_chat.is_bot:
+            return False, "❌ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ᴛᴏ ʙᴏᴛs ᴏʀ ᴄʜᴀɴɴᴇʟs."
+        
+        # Check if it's a channel
+        if target_chat.type in ['channel', 'group', 'supergroup']:
+            return False, "❌ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ᴛᴏ ʙᴏᴛs ᴏʀ ᴄʜᴀɴɴᴇʟs."
+        
+        return True, None
+    except Exception as e:
+        LOGGER.error(f"Error validating payment target {target_id}: {e}")
+        return False, "❌ ɪɴᴠᴀʟɪᴅ ᴛᴀʀɢᴇᴛ ᴜsᴇʀ."
 
 # ---------- Helpers ----------
 async def _ensure_balance_doc(user_id: int) -> Dict[str, Any]:
@@ -99,7 +180,6 @@ async def _atomic_transfer(sender_id: int, receiver_id: int, amount: int) -> boo
             LOGGER.exception("Rollback failed for sender %s after transfer failure", sender_id)
         return False
 
-
 # ---------- Command handlers ----------
 async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -128,17 +208,8 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     bal = await get_balance(user_id)
     name = escape(getattr(target, "first_name", str(user_id)))
     
-    # Premium balance display
-    progress_fill = min(int((bal % 10000) / 10000 * 10), 10)  # Visual progress indicator
-    progress_bar = "[" + "■" * progress_fill + "□" * (10 - progress_fill) + "]"
-    
-    await update.message.reply_text(
-        f"◆  ᴡᴀʟʟᴇᴛ  sᴛᴀᴛᴜs  ━━━━━━━━━━━━━━━━━\n\n"
-        f"• ᴜsᴇʀ: <b>{name}</b>\n"
-        f"• ʙᴀʟᴀɴᴄᴇ: <b>{bal:,} ᴄᴏɪɴs</b>\n"
-        f"• ᴠᴀᴜʟᴛ: {progress_bar}",
-        parse_mode="HTML"
-    )
+    message = premium_text(f"💎 <b>{name}'s Balance: <b>{bal:,}</b> ᴄᴏɪɴs")
+    await update.message.reply_text(message, parse_mode="HTML")
 
 
 async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -147,11 +218,7 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     Initiate a payment — creates a pending confirmation with Confirm/Cancel buttons.
     """
     if not context.args and not update.message.reply_to_message:
-        await update.message.reply_text(
-            "◆ ᴛʀᴀɴsғᴇʀ ɢᴜɪᴅᴇ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴜsᴀɢᴇ: /pay <ᴜsᴇʀ_ɪᴅ|@ᴜsᴇʀɴᴀᴍᴇ> <ᴀᴍᴏᴜɴᴛ>\n"
-            "• ᴀʟᴛᴇʀɴᴀᴛᴇ: ʀᴇᴘʟʏ ᴡɪᴛʜ /pay <ᴀᴍᴏᴜɴᴛ>"
-        )
+        await update.message.reply_text(premium_text("Usage: /pay <user_id|@username> <amount>  (or reply with /pay <amount>)"))
         return
 
     sender = update.effective_user
@@ -161,13 +228,7 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     next_allowed = pay_cooldowns.get(sender.id, 0)
     if now < next_allowed:
         remaining = int(next_allowed - now)
-        cooldown_bar = "[" + "■" * (10 - min(remaining, 10)) + "□" * min(remaining, 10) + "]"
-        await update.message.reply_text(
-            f"◆ ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ ━━━━━━━━━━━━━━━━━\n\n"
-            f"• ᴡᴀɪᴛ ᴛɪᴍᴇ: {remaining}s\n"
-            f"• ʀᴇᴍᴀɪɴɪɴɢ: {cooldown_bar}\n\n"
-            f"ɴᴇxᴛ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ᴀᴠᴀɪʟᴀʙʟᴇ sᴏᴏɴ..."
-        )
+        await update.message.reply_text(premium_text(f"⏱️ ʏᴏᴜ ᴍᴜsᴛ ᴡᴀɪᴛ {remaining}s ʙᴇғᴏʀᴇ sᴛᴀʀᴛɪɴɢ ᴀɴᴏᴛʜᴇʀ ᴘᴀʏᴍᴇɴᴛ."))
         return
 
     # Resolve target and amount
@@ -181,10 +242,7 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         # /pay <target> <amount>
         if len(context.args) < 2:
-            await update.message.reply_text(
-                "◆ ɪɴᴠᴀʟɪᴅ sʏɴᴛᴀx ━━━━━━━━━━━━━━━━━\n\n"
-                "• ᴜsᴀɢᴇ: /pay <ᴜsᴇʀ_ɪᴅ|@ᴜsᴇʀɴᴀᴍᴇ|ʀᴇᴘʟʏ> <ᴀᴍᴏᴜɴᴛ>"
-            )
+            await update.message.reply_text(premium_text("Usage: /pay <user_id|@username|reply> <amount>"))
             return
         raw_target = context.args[0]
         amount_str = context.args[1]
@@ -198,51 +256,34 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 target_id = None
 
     if not target_id:
-        await update.message.reply_text(
-            "◆ ᴜsᴇʀ ɴᴏᴛ ғᴏᴜɴᴅ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴜsᴇ ᴠᴀʟɪᴅ ᴜsᴇʀ ɪᴅ\n"
-            "• ᴏʀ @ᴜsᴇʀɴᴀᴍᴇ\n"
-            "• ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴛʜᴇɪʀ ᴍᴇssᴀɢᴇ"
-        )
+        await update.message.reply_text(premium_text("❌ ᴄᴏᴜʟᴅ ɴᴏᴛ ʀᴇsᴏʟᴠᴇ ᴛᴀʀɢᴇᴛ ᴜsᴇʀ. ᴜsᴇ ᴜsᴇʀ ɪᴅ, @ᴜsᴇʀɴᴀᴍᴇ ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴛʜᴇɪʀ ᴍᴇssᴀɢᴇ."))
         return
 
     if target_id == sender.id:
-        await update.message.reply_text(
-            "◆ sᴇʟғ-ᴛʀᴀɴsғᴇʀ ɴᴏᴛ ᴀʟʟᴏᴡᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴛʀᴀɴsᴀᴄᴛɪᴏɴs ᴛᴏ sᴇʟғ ᴀʀᴇ ʀᴇsᴛʀɪᴄᴛᴇᴅ\n"
-            "• ᴜsᴇ ᴀɴᴏᴛʜᴇʀ ᴡᴀʟʟᴇᴛ ᴀᴅᴅʀᴇss"
-        )
+        await update.message.reply_text(premium_text("❌ ʏᴏᴜ ᴄᴀɴɴᴏᴛ ᴘᴀʏ ʏᴏᴜʀsᴇʟғ."))
+        return
+
+    # Enhanced validation: Check if target is a regular user
+    is_valid, error_msg = await validate_payment_target(target_id, context)
+    if not is_valid:
+        await update.message.reply_text(premium_text(error_msg))
         return
 
     # parse amount
     try:
         amount = int(amount_str)
     except Exception:
-        await update.message.reply_text(
-            "◆ ɪɴᴠᴀʟɪᴅ ᴀᴍᴏᴜɴᴛ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴜsᴇ ᴀ ᴘᴏsɪᴛɪᴠᴇ ɪɴᴛᴇɢᴇʀ ᴠᴀʟᴜᴇ\n"
-            "• ᴅᴇᴄɪᴍᴀʟs ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ"
-        )
+        await update.message.reply_text(premium_text("❌ ɪɴᴠᴀʟɪᴅ ᴀᴍᴏᴜɴᴛ. ᴜsᴇ ᴀ ᴘᴏsɪᴛɪᴠᴇ ɪɴᴛᴇɢᴇʀ."))
         return
 
     if amount <= 0:
-        await update.message.reply_text(
-            "◆ ᴍɪɴɪᴍᴜᴍ ᴀᴍᴏᴜɴᴛ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴛʀᴀɴsғᴇʀ ᴀᴍᴏᴜɴᴛ ᴍᴜsᴛ ʙᴇ > 𝟶\n"
-            "• ᴍɪɴɪᴍᴜᴍ: 𝟷 ᴄᴏɪɴ"
-        )
+        await update.message.reply_text(premium_text("❌ ᴀᴍᴏᴜɴᴛ ᴍᴜsᴛ ʙᴇ ɢʀᴇᴀᴛᴇʀ ᴛʜᴀɴ ᴢᴇʀᴏ."))
         return
 
     # Check sender balance quickly (best-effort)
     bal = await get_balance(sender.id)
     if bal < amount:
-        await update.message.reply_text(
-            f"◆ ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ━━━━━━━━━━━━━━━━━\n\n"
-            f"• ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ: <b>{bal:,} ᴄᴏɪɴs</b>\n"
-            f"• ʀᴇǫᴜɪʀᴇᴅ: <b>{amount:,} ᴄᴏɪɴs</b>\n"
-            f"• ᴅᴇғɪᴄɪᴛ: <b>{amount - bal:,} ᴄᴏɪɴs</b>",
-            parse_mode="HTML"
-        )
+        await update.message.reply_text(premium_text(f"❌ ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ᴄᴏɪɴs. ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ: {bal:,}"))
         return
 
     # Create pending payment
@@ -265,19 +306,18 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         target_name = str(target_id)
 
     sender_name = escape(getattr(sender, "first_name", str(sender.id)))
-    text = (
-        f"◆ ᴘᴇɴᴅɪɴɢ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ━━━━━━━━━━━━━━━━━\n\n"
-        f"• sᴇɴᴅᴇʀ: <a href='tg://user?id={sender.id}'>{sender_name}</a>\n"
-        f"• ʀᴇᴄɪᴘɪᴇɴᴛ: <a href='tg://user?id={target_id}'>{target_name}</a>\n"
-        f"• ᴀᴍᴏᴜɴᴛ: <b>{amount:,} ᴄᴏɪɴs</b>\n"
-        f"• ɪᴅ: <code>{token[:8]}...{token[-4:]}</code>\n\n"
-        f"ᴄᴏɴғɪʀᴍ ᴛʜɪs ᴛʀᴀɴsғᴇʀ?"
+    text = premium_text(
+        f"❗ <b>ᴘᴀʏᴍᴇɴᴛ ᴄᴏɴғɪʀᴍᴀᴛɪᴏɴ</b>\n\n"
+        f"sᴇɴᴅᴇʀ: <a href='tg://user?id={sender.id}'>{sender_name}</a>\n"
+        f"ʀᴇᴄɪᴘɪᴇɴᴛ: <a href='tg://user?id={target_id}'>{target_name}</a>\n"
+        f"ᴀᴍᴏᴜɴᴛ: <b>{amount:,}</b> ᴄᴏɪɴs\n\n"
+        f"ᴀʀᴇ ʏᴏᴜ sᴜʀᴇ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴘʀᴏᴄᴇᴇᴅ?"
     )
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✔ ᴄᴏɴғɪʀᴍ", callback_data=f"pay_confirm:{token}"),
-            InlineKeyboardButton("✘ ᴄᴀɴᴄᴇʟ", callback_data=f"pay_cancel:{token}")
+            InlineKeyboardButton(premium_text("✔️ ᴄᴏɴғɪʀᴍ"), callback_data=f"pay_confirm:{token}"),
+            InlineKeyboardButton(premium_text("✖️ ᴄᴀɴᴄᴇʟ"), callback_data=f"pay_cancel:{token}")
         ]
     ])
 
@@ -302,11 +342,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     pending = pending_payments.get(token)
     if not pending:
         try:
-            await query.edit_message_text(
-                "◆ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ɪɴᴠᴀʟɪᴅ ━━━━━━━━━━━━━━━━━\n\n"
-                "• ᴇxᴘɪʀᴇᴅ ᴏʀ ɪɴᴠᴀʟɪᴅ ʀᴇǫᴜᴇsᴛ\n"
-                "• ɪɴɪᴛɪᴀᴛᴇ ɴᴇᴡ ᴛʀᴀɴsғᴇʀ"
-            )
+            await query.edit_message_text(premium_text("❌ ᴛʜɪs ᴘᴀʏᴍᴇɴᴛ ʀᴇǫᴜᴇsᴛ ʜᴀs ᴇxᴘɪʀᴇᴅ ᴏʀ ɪs ɪɴᴠᴀʟɪᴅ."))
         except Exception:
             pass
         return
@@ -320,18 +356,14 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_who_clicked = query.from_user.id
     if user_who_clicked != sender_id:
         # show alert
-        await query.answer("Only the payment initiator can confirm or cancel this payment.", show_alert=True)
+        await query.answer(premium_text("ᴏɴʟʏ ᴛʜᴇ ᴘᴀʏᴍᴇɴᴛ ɪɴɪᴛɪᴀᴛᴏʀ ᴄᴀɴ ᴄᴏɴғɪʀᴍ ᴏʀ ᴄᴀɴᴄᴇʟ ᴛʜɪs ᴘᴀʏᴍᴇɴᴛ."), show_alert=True)
         return
 
     # Check expiry
     if time.time() - created_at > PENDING_EXPIRY_SECONDS:
         # expired
         try:
-            await query.edit_message_text(
-                "◆ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ᴇxᴘɪʀᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-                "• 5-ᴍɪɴᴜᴛᴇ ᴠᴀʟɪᴅɪᴛʏ ᴇxᴘɪʀᴇᴅ\n"
-                "• ɪɴɪᴛɪᴀᴛᴇ ɴᴇᴡ ᴛʀᴀɴsғᴇʀ"
-            )
+            await query.edit_message_text(premium_text("⏱️ ᴛʜɪs ᴘᴀʏᴍᴇɴᴛ ʀᴇǫᴜᴇsᴛ ʜᴀs ᴇxᴘɪʀᴇᴅ."))
         except Exception:
             pass
         pending_payments.pop(token, None)
@@ -339,11 +371,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if action == "pay_cancel":
         try:
-            await query.edit_message_text(
-                "◆ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-                "• ʀᴇǫᴜᴇsᴛ ᴛᴇʀᴍɪɴᴀᴛᴇᴅ ʙʏ sᴇɴᴅᴇʀ\n"
-                "• ғᴜɴᴅs ʀᴇᴍᴀɪɴ ᴜɴᴄʜᴀɴɢᴇᴅ"
-            )
+            await query.edit_message_text(premium_text("✖️ ᴘᴀʏᴍᴇɴᴛ ᴄᴀɴᴄᴇʟʟᴇᴅ ʙʏ sᴇɴᴅᴇʀ."))
         except Exception:
             pass
         pending_payments.pop(token, None)
@@ -355,13 +383,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     next_allowed = pay_cooldowns.get(sender_id, 0)
     if now < next_allowed:
         remaining = int(next_allowed - now)
-        cooldown_bar = "[" + "□" * min(remaining, 10) + "■" * (10 - min(remaining, 10)) + "]"
-        await query.edit_message_text(
-            f"◆ ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ ━━━━━━━━━━━━━━━━━\n\n"
-            f"• ᴡᴀɪᴛ ᴛɪᴍᴇ: {remaining}s\n"
-            f"• sᴛᴀᴛᴜs: {cooldown_bar}\n\n"
-            f"ᴛʀʏ ᴀɢᴀɪɴ sʜᴏʀᴛʟʏ..."
-        )
+        await query.edit_message_text(premium_text(f"⏱️ ʏᴏᴜ ᴍᴜsᴛ ᴡᴀɪᴛ {remaining}s ʙᴇғᴏʀᴇ ᴍᴀᴋɪɴɢ ᴀɴᴏᴛʜᴇʀ ᴘᴀʏᴍᴇɴᴛ."))
         pending_payments.pop(token, None)
         return
 
@@ -370,12 +392,7 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not success:
         # likely insufficient funds or error
         try:
-            await query.edit_message_text(
-                "◆ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-                "• ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs\n"
-                "• ᴏʀ ɪɴᴛᴇʀɴᴀʟ ᴇʀʀᴏʀ\n\n"
-                "ᴄʜᴇᴄᴋ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ"
-            )
+            await query.edit_message_text(premium_text("❌ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ ғᴀɪʟᴇᴅ: ɪɴsᴜғғɪᴄɪᴇɴᴛ ғᴜɴᴅs ᴏʀ ɪɴᴛᴇʀɴᴀʟ ᴇʀʀᴏʀ."))
         except Exception:
             pass
         pending_payments.pop(token, None)
@@ -389,14 +406,12 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         sender_name = escape(getattr(query.from_user, "first_name", str(sender_id)))
         target_chat = await context.bot.get_chat(target_id)
         target_name = escape(getattr(target_chat, "first_name", str(target_id)))
-        confirmed_text = (
-            f"◆ ᴛʀᴀɴsᴀᴄᴛɪᴏɴ sᴜᴄᴄᴇssғᴜʟ ━━━━━━━━━━━━━━━━━\n\n"
-            f"• sᴇɴᴅᴇʀ: <a href='tg://user?id={sender_id}'>{sender_name}</a>\n"
-            f"• ʀᴇᴄɪᴘɪᴇɴᴛ: <a href='tg://user?id={target_id}'>{target_name}</a>\n"
-            f"• ᴀᴍᴏᴜɴᴛ: <b>{amount:,} ᴄᴏɪɴs</b>\n"
-            f"• sᴛᴀᴛᴜs: ᴠᴇʀɪғɪᴇᴅ\n"
-            f"• ᴛxɪᴅ: <code>{token[:12]}...</code>\n\n"
-            f"ɴᴇxᴛ ᴛʀᴀɴsғᴇʀ ɪɴ {PAY_COOLDOWN_SECONDS}s"
+        confirmed_text = premium_text(
+            f"✅ <b>ᴘᴀʏᴍᴇɴᴛ sᴜᴄᴄᴇssғᴜʟ</b>\n\n"
+            f"sᴇɴᴅᴇʀ: <a href='tg://user?id={sender_id}'>{sender_name}</a>\n"
+            f"ʀᴇᴄɪᴘɪᴇɴᴛ: <a href='tg://user?id={target_id}'>{target_name}</a>\n"
+            f"ᴀᴍᴏᴜɴᴛ: <b>{amount:,}</b> ᴄᴏɪɴs\n\n"
+            f"ɴᴇxᴛ ᴘᴀʏᴍᴇɴᴛ ᴀʟʟᴏᴡᴇᴅ ᴀғᴛᴇʀ {PAY_COOLDOWN_SECONDS} sᴇᴄᴏɴᴅs."
         )
         await query.edit_message_text(confirmed_text, parse_mode="HTML")
     except Exception:
@@ -412,47 +427,28 @@ async def admin_addbal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """
     user_id = update.effective_user.id
     if user_id != OWNER_ID and user_id not in SUDO_USERS:
-        await update.message.reply_text(
-            "◆ ᴀᴄᴄᴇss ᴅᴇɴɪᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ɪɴsᴜғғɪᴄɪᴇɴᴛ ᴘʀɪᴠɪʟᴇɢᴇs\n"
-            "• ᴀᴅᴍɪɴ ᴄᴏᴍᴍᴀɴᴅ ᴏɴʟʏ"
-        )
+        await update.message.reply_text(premium_text("❌ ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ."))
         return
 
     if len(context.args) < 2:
-        await update.message.reply_text(
-            "◆ ᴀᴅᴍɪɴ: ᴀᴅᴊᴜsᴛ ʙᴀʟᴀɴᴄᴇ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴜsᴀɢᴇ: /addbal <ᴜsᴇʀ_ɪᴅ> <ᴀᴍᴏᴜɴᴛ>\n"
-            "• ᴘᴏsɪᴛɪᴠᴇ/ɴᴇɢᴀᴛɪᴠᴇ ᴠᴀʟᴜᴇs ᴀʟʟᴏᴡᴇᴅ"
-        )
+        await update.message.reply_text(premium_text("Usage: /addbal <user_id> <amount>"))
         return
 
     try:
         target = int(context.args[0])
         amount = int(context.args[1])
     except ValueError:
-        await update.message.reply_text(
-            "◆ ɪɴᴠᴀʟɪᴅ ᴘᴀʀᴀᴍᴇᴛᴇʀs ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴜsᴇʀ_ɪᴅ ᴍᴜsᴛ ʙᴇ ɪɴᴛᴇɢᴇʀ\n"
-            "• ᴀᴍᴏᴜɴᴛ ᴍᴜsᴛ ʙᴇ ɪɴᴛᴇɢᴇʀ"
-        )
+        await update.message.reply_text(premium_text("❌ ɪɴᴠᴀʟɪᴅ ᴀʀɢᴜᴍᴇɴᴛs."))
         return
 
     try:
         new_bal = await change_balance(target, amount)
         await update.message.reply_text(
-            f"◆ ʙᴀʟᴀɴᴄᴇ ᴜᴘᴅᴀᴛᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-            f"• ᴜsᴇʀ: <a href='tg://user?id={target}'>ᴡᴀʟʟᴇᴛ</a>\n"
-            f"• ᴀᴅᴊᴜsᴛᴍᴇɴᴛ: {amount:+,} ᴄᴏɪɴs\n"
-            f"• ɴᴇᴡ ʙᴀʟᴀɴᴄᴇ: <b>{new_bal:,} ᴄᴏɪɴs</b>",
+            premium_text(f"✅ ᴜᴘᴅᴀᴛᴇᴅ ʙᴀʟᴀɴᴄᴇ ғᴏʀ <a href='tg://user?id={target}'>ᴜsᴇʀ</a>: <b>{new_bal:,}</b>"), 
             parse_mode="HTML"
         )
     except Exception:
-        await update.message.reply_text(
-            "◆ ᴜᴘᴅᴀᴛᴇ ғᴀɪʟᴇᴅ ━━━━━━━━━━━━━━━━━\n\n"
-            "• ᴅᴀᴛᴀʙᴀsᴇ ᴇʀʀᴏʀ\n"
-            "• ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ"
-        )
+        await update.message.reply_text(premium_text("❌ ғᴀɪʟᴇᴅ ᴛᴏ ᴜᴘᴅᴀᴛᴇ ʙᴀʟᴀɴᴄᴇ."))
 
 
 # Register handlers

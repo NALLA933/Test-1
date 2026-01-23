@@ -12,24 +12,20 @@ from pymongo import ReturnDocument
 from shivu import application, db, LOGGER, OWNER_ID, SUDO_USERS
 
 # Collections
-user_balance_coll = db.get_collection("user_balance")  # documents: { user_id, balance, ... }
-user_collection = db.get_collection("users")  # documents: { user_id, ... } - tracks who started bot
+user_balance_coll = db.get_collection("user_balance")
+user_collection = db.get_collection("users")
 
 # In-memory pending payments and cooldowns
-# pending_payments[token] = {"sender_id": int, "target_id": int, "amount": int, "created_at": float, "message_id": int, "chat_id": int}
 pending_payments: Dict[str, Dict[str, Any]] = {}
-# cooldowns[sender_id] = timestamp_when_next_pay_allowed
 pay_cooldowns: Dict[int, float] = {}
 
 # Configuration
-PENDING_EXPIRY_SECONDS = 5 * 60   # pending confirmation expires after 5 minutes
-PAY_COOLDOWN_SECONDS = 60         # sender must wait 60 seconds after a confirmed payment
+PENDING_EXPIRY_SECONDS = 5 * 60
+PAY_COOLDOWN_SECONDS = 60
 BOT_START_URL = "https://t.me/Senpai_Waifu_Grabbing_Bot?start=_tgr_1tTPLUQwNjI1"
 
 
-# ---------- Helpers ----------
 async def _ensure_balance_doc(user_id: int) -> Dict[str, Any]:
-    """Ensure a balance document exists for the user and return it."""
     try:
         await user_balance_coll.update_one(
             {"user_id": user_id},
@@ -44,16 +40,11 @@ async def _ensure_balance_doc(user_id: int) -> Dict[str, Any]:
 
 
 async def get_balance(user_id: int) -> int:
-    """Return integer balance for a user."""
     doc = await _ensure_balance_doc(user_id)
     return int(doc.get("balance", 0))
 
 
 async def change_balance(user_id: int, amount: int) -> int:
-    """
-    Atomically change balance by `amount` (positive or negative).
-    Returns the new balance after change.
-    """
     if amount == 0:
         return await get_balance(user_id)
 
@@ -67,15 +58,10 @@ async def change_balance(user_id: int, amount: int) -> int:
 
 
 async def _atomic_transfer(sender_id: int, receiver_id: int, amount: int) -> bool:
-    """
-    Atomically transfer coins from sender -> receiver using conditional decrement.
-    Returns True on success, False on insufficient funds or error.
-    """
     if amount <= 0:
         return False
 
     try:
-        # decrement sender only if they have enough balance
         sender_after = await user_balance_coll.find_one_and_update(
             {"user_id": sender_id, "balance": {"$gte": amount}},
             {"$inc": {"balance": -amount}},
@@ -86,16 +72,13 @@ async def _atomic_transfer(sender_id: int, receiver_id: int, amount: int) -> boo
         return False
 
     if sender_after is None:
-        # insufficient funds
         return False
 
     try:
-        # increment receiver
         await user_balance_coll.update_one({"user_id": receiver_id}, {"$inc": {"balance": amount}}, upsert=True)
         return True
     except Exception:
         LOGGER.exception("Failed to increment receiver %s; attempting rollback to sender %s", receiver_id, sender_id)
-        # rollback: attempt to refund sender
         try:
             await user_balance_coll.update_one({"user_id": sender_id}, {"$inc": {"balance": amount}}, upsert=True)
         except Exception:
@@ -104,10 +87,6 @@ async def _atomic_transfer(sender_id: int, receiver_id: int, amount: int) -> boo
 
 
 async def _has_user_started_bot(user_id: int) -> bool:
-    """
-    Check if a user has started the bot in DM.
-    Returns True if the user exists in the user_collection, False otherwise.
-    """
     try:
         doc = await user_collection.find_one({"user_id": user_id})
         return doc is not None
@@ -117,45 +96,32 @@ async def _has_user_started_bot(user_id: int) -> bool:
 
 
 async def _validate_payment_target(context: ContextTypes.DEFAULT_TYPE, target_id: int) -> tuple[bool, Optional[str], Optional[Chat]]:
-    """
-    Validate that the target is a real user (not bot, group, channel).
-    Returns: (is_valid, error_message, chat_object)
-    """
     try:
         target_chat = await context.bot.get_chat(target_id)
     except Exception as e:
         LOGGER.exception("Failed to get chat for target %s", target_id)
         return False, "❌ Could not find this user. Please check the user ID.", None
 
-    # Check if target is a private chat (user)
     if target_chat.type != ChatType.PRIVATE:
         if target_chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-            return False, "❌ Payments are only allowed to individual users, not groups.", None
+            return False, "❌ Payments are only allowed to individual users.", None
         elif target_chat.type == ChatType.CHANNEL:
-            return False, "❌ Payments are only allowed to individual users, not channels.", None
+            return False, "❌ Payments are only allowed to individual users.", None
         else:
             return False, "❌ Payments are only allowed to individual users.", None
 
-    # Check if target is a bot
     if target_chat.is_bot:
         return False, "❌ You can only pay real users, not bots.", None
 
     return True, None, target_chat
 
 
-# ---------- Command handlers ----------
 async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /balance [@username|id] or reply
-    Show balance for yourself or given user.
-    """
     target = update.effective_user
-    # Try to resolve argument or reply target
     if context.args:
         arg = context.args[0]
         if arg.isdigit():
             try:
-                # fetch chat to get display name
                 target = await context.bot.get_chat(int(arg))
             except Exception:
                 target = update.effective_user
@@ -174,22 +140,12 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /pay <user_id|@username|reply> <amount>
-    Initiate a payment — creates a pending confirmation with Confirm/Cancel buttons.
-    
-    UPGRADED FEATURES:
-    - Only allows payments to real users (not bots, groups, channels)
-    - Requires receiver to have started the bot in DM
-    - Shows "Start Bot" button if receiver hasn't started
-    """
     if not context.args and not update.message.reply_to_message:
         await update.message.reply_text("Usage: /pay <user_id|@username> <amount>  (or reply with /pay <amount>)")
         return
 
     sender = update.effective_user
 
-    # Check cooldown for sender
     now = time.time()
     next_allowed = pay_cooldowns.get(sender.id, 0)
     if now < next_allowed:
@@ -197,16 +153,13 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"⏳ You must wait {remaining}s before starting another payment.")
         return
 
-    # Resolve target and amount
     target_id: Optional[int] = None
     amount_str: Optional[str] = None
 
     if update.message.reply_to_message and len(context.args) == 1:
-        # /pay <amount> as a reply
         target_id = update.message.reply_to_message.from_user.id
         amount_str = context.args[0]
     else:
-        # /pay <target> <amount>
         if len(context.args) < 2:
             await update.message.reply_text("Usage: /pay <user_id|@username|reply> <amount>")
             return
@@ -229,13 +182,11 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ You cannot pay yourself.")
         return
 
-    # UPGRADE: Validate that target is a real user (not bot, group, channel)
     is_valid, error_msg, target_chat = await _validate_payment_target(context, target_id)
     if not is_valid:
         await update.message.reply_text(error_msg)
         return
 
-    # Parse amount
     try:
         amount = int(amount_str)
     except Exception:
@@ -246,13 +197,11 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Amount must be greater than zero.")
         return
 
-    # Check sender balance quickly (best-effort)
     bal = await get_balance(sender.id)
     if bal < amount:
-        await update.message.reply_text(f"❌ You don't have enough coins. Your balance: <b>{bal:,}</b>", parse_mode="HTML")
+        await update.message.reply_text(f"❌ Insufficient balance. Your balance: <b>{bal:,}</b> coins", parse_mode="HTML")
         return
 
-    # UPGRADE: Check if receiver has started the bot in DM
     receiver_started = await _has_user_started_bot(target_id)
     if not receiver_started:
         target_name = escape(getattr(target_chat, "first_name", str(target_id)))
@@ -266,14 +215,12 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
         return
 
-    # Create pending payment
     token = uuid.uuid4().hex
     created_at = time.time()
     
     target_name = escape(getattr(target_chat, "first_name", str(target_id)))
     sender_name = escape(getattr(sender, "first_name", str(sender.id)))
     
-    # Store pending payment
     pending_payments[token] = {
         "sender_id": sender.id,
         "target_id": target_id,
@@ -300,25 +247,14 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ])
 
     msg = await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
-    # Store message id for later edits
     pending_payments[token]["message_id"] = msg.message_id
 
 
 async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Handle callback queries for pay_confirm:{token} and pay_cancel:{token}
-    
-    UPGRADED FEATURES:
-    - Immediately disables buttons on confirm/cancel
-    - Shows "Processing..." state during transaction
-    - Sends DM notification to receiver on success
-    - Prevents double-click/race conditions
-    """
     query = update.callback_query
-    await query.answer()  # acknowledge
+    await query.answer()
 
     data = query.data or ""
-    # expected formats: pay_confirm:<token> or pay_cancel:<token>
     if not data.startswith("pay_confirm:") and not data.startswith("pay_cancel:"):
         return
 
@@ -338,16 +274,12 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     sender_name = pending.get("sender_name", str(sender_id))
     target_name = pending.get("target_name", str(target_id))
 
-    # Only sender can confirm/cancel
     user_who_clicked = query.from_user.id
     if user_who_clicked != sender_id:
-        # Show alert
         await query.answer("⚠️ Only the payment initiator can confirm or cancel this payment.", show_alert=True)
         return
 
-    # Check expiry
     if time.time() - created_at > PENDING_EXPIRY_SECONDS:
-        # Expired
         try:
             await query.edit_message_text("⏳ This payment request has expired.")
         except Exception:
@@ -355,7 +287,6 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         pending_payments.pop(token, None)
         return
 
-    # UPGRADE: Handle cancel - disable buttons immediately
     if action == "pay_cancel":
         try:
             cancelled_text = (
@@ -371,7 +302,6 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         pending_payments.pop(token, None)
         return
 
-    # UPGRADE: action == pay_confirm - show processing state immediately
     try:
         processing_text = (
             f"⏳ <b>Processing Payment...</b>\n\n"
@@ -380,7 +310,6 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"Amount: <b>{amount:,}</b> coins\n\n"
             f"Please wait..."
         )
-        # Disable buttons by showing processing button
         processing_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("⏳ Processing...", callback_data="pay_processing")]
         ])
@@ -388,7 +317,6 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         pass
 
-    # Final check for cooldown (in case another pay occurred meanwhile)
     now = time.time()
     next_allowed = pay_cooldowns.get(sender_id, 0)
     if now < next_allowed:
@@ -397,16 +325,13 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         pending_payments.pop(token, None)
         return
 
-    # Perform atomic transfer
     success = await _atomic_transfer(sender_id, target_id, amount)
     if not success:
-        # Likely insufficient funds or error
         try:
             bal = await get_balance(sender_id)
             await query.edit_message_text(
                 f"❌ <b>Transaction Failed</b>\n\n"
-                f"Insufficient funds or internal error.\n"
-                f"Your current balance: <b>{bal:,}</b> coins",
+                f"Insufficient balance. Your balance: <b>{bal:,}</b> coins",
                 parse_mode="HTML"
             )
         except Exception:
@@ -414,10 +339,8 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         pending_payments.pop(token, None)
         return
 
-    # Success: set cooldown for sender
     pay_cooldowns[sender_id] = time.time() + PAY_COOLDOWN_SECONDS
 
-    # UPGRADE: Edit original message to show confirmed (clean UI, no buttons)
     try:
         confirmed_text = (
             f"✅ <b>Payment Successful</b>\n\n"
@@ -430,7 +353,6 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         pass
 
-    # UPGRADE: Send DM notification to receiver
     try:
         receiver_notification = (
             f"💰 <b>Payment Received!</b>\n\n"
@@ -444,16 +366,11 @@ async def pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
     except Exception:
         LOGGER.exception("Failed to send payment notification to receiver %s", target_id)
-        # Don't fail the payment if notification fails
 
     pending_payments.pop(token, None)
 
 
 async def admin_addbal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /addbal <user_id> <amount> - admin-only adjust balance
-    Restricted to OWNER_ID and SUDO_USERS.
-    """
     user_id = update.effective_user.id
     if user_id != OWNER_ID and user_id not in SUDO_USERS:
         await update.message.reply_text("❌ Not authorized.")
@@ -477,7 +394,6 @@ async def admin_addbal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("❌ Failed to update balance.")
 
 
-# Register handlers
 application.add_handler(CommandHandler(["balance", "bal"], balance_cmd, block=False))
 application.add_handler(CommandHandler("pay", pay_cmd, block=False))
 application.add_handler(CallbackQueryHandler(pay_callback, pattern=r"^pay_", block=False))

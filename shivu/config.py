@@ -2,6 +2,7 @@ import os
 import sys
 from typing import List
 
+
 class Config:
     """Base configuration class for the Telegram bot."""
     
@@ -19,9 +20,9 @@ class Config:
     # Owner and Sudo Users
     OWNER_ID: int = int(os.getenv("OWNER_ID", "7818323042"))
     SUDO_USERS: List[int] = [
-        int(user_id.strip()) 
-        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527").split(",") 
-        if user_id.strip()
+        int(user_id.strip())
+        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527").split(",")
+        if user_id.strip().isdigit()
     ]
     
     # Group and Channel IDs
@@ -29,7 +30,10 @@ class Config:
     CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003150808065"))
     
     # Database
-    MONGO_URL: str = os.getenv("MONGO_URL", "mongodb+srv://ravi:ravi12345@cluster0.hndinhj.mongodb.net/?retryWrites=true&w=majority")
+    MONGO_URL: str = os.getenv(
+        "MONGO_URL",
+        "mongodb+srv://ravi:ravi12345@cluster0.hndinhj.mongodb.net/?retryWrites=true&w=majority"
+    )
     
     # Media
     VIDEO_URL: List[str] = [
@@ -74,19 +78,24 @@ class Config:
         if errors:
             print("❌ Configuration Error(s):")
             for error in errors:
-                print(f"  - {error}")
+                print(f"   - {error}")
             print("\n💡 Please set the required environment variables and try again.")
             sys.exit(1)
         
         # Add OWNER_ID to SUDO_USERS if not already present
         if cls.OWNER_ID not in cls.SUDO_USERS:
             cls.SUDO_USERS.append(cls.OWNER_ID)
-        
+
+
 class Production(Config):
     """Production environment configuration."""
     LOGGER: bool = True
-  class Development(Config):
+
+
+class Development(Config):
     """Development environment configuration."""
     LOGGER: bool = True
-    # Auto-validate configuration on import
+
+
+# Auto-validate configuration on import
 Config.validate()

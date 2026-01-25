@@ -1,13 +1,3 @@
-"""
-ANIME CHARACTER MANAGEMENT BOT - ATOMIC & FAIL-SAFE IMAGE SYSTEM
-Version: 2.0 Production Grade (PTB v22+ Fixed)
-Author: Senior Backend Engineer
-License: MIT
-
-SUPPORTED MEDIA: PHOTO and DOCUMENT only
-GIF/VIDEO/ANIMATION: BLOCKED
-"""
-
 import os
 import sys
 import asyncio

@@ -1,4 +1,3 @@
-```python
 """
 ANIME CHARACTER MANAGEMENT BOT - ATOMIC & FAIL-SAFE IMAGE SYSTEM
 Version: 2.0 Production Grade (PTB v22+ Fixed)

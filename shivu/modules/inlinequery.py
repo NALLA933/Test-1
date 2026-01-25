@@ -5,8 +5,8 @@ from cachetools import TTLCache
 from pymongo import MongoClient, ASCENDING
 
 from telegram import Update, InlineQueryResultPhoto
-from telegram.ext import InlineQueryHandler, CallbackContext
-from telegram.error import BadRequest
+from telegram.ext import InlineQueryHandler, CallbackContext, CommandHandler 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from shivu import user_collection, collection, application, db
 
@@ -23,35 +23,6 @@ db.user_collection.create_index([('characters.img_url', ASCENDING)])
 
 all_characters_cache = TTLCache(maxsize=10000, ttl=36000)
 user_collection_cache = TTLCache(maxsize=10000, ttl=60)
-
-def is_valid_inline_photo_url(img_url: str) -> bool:
-    """Check if image URL is valid for Telegram inline mode with STRICT validation."""
-    if not img_url or not isinstance(img_url, str):
-        return False
-    
-    # Skip Telegram file_ids (common patterns)
-    if img_url.startswith(('Ag', 'BAAC', 'CAAC')):
-        return False
-    
-    # Must be a valid HTTP/HTTPS URL
-    if not img_url.startswith(('http://', 'https://')):
-        return False
-    
-    # Telegram inline mode ONLY accepts direct image URLs with specific extensions
-    valid_extensions = ('.jpg', '.jpeg', '.png', '.webp')
-    img_url_lower = img_url.lower()
-    
-    # Check if URL ends with valid image extension
-    if not img_url_lower.endswith(valid_extensions):
-        return False
-    
-    # Strip query parameters for checking
-    if '?' in img_url:
-        base_url = img_url.split('?')[0].lower()
-        if not base_url.endswith(valid_extensions):
-            return False
-    
-    return True
 
 async def inlinequery(update: Update, context: CallbackContext) -> None:
     query = update.inline_query.query
@@ -86,53 +57,15 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
                 all_characters = list(await collection.find({}).to_list(length=None))
                 all_characters_cache['all_characters'] = all_characters
 
-    # STRICT FILTERING: Only include characters with valid inline image URLs
-    valid_characters = []
-    for character in all_characters:
-        img_url = character.get('img_url')
-        if not img_url:
-            continue
-        
-        # Skip file_ids
-        if img_url.startswith('Ag'):
-            continue
-            
-        # Must be HTTP/HTTPS
-        if not img_url.startswith(('http://', 'https://')):
-            continue
-            
-        # Must end with valid extension
-        img_url_lower = img_url.lower()
-        if not (img_url_lower.endswith('.jpg') or 
-                img_url_lower.endswith('.jpeg') or 
-                img_url_lower.endswith('.png') or 
-                img_url_lower.endswith('.webp')):
-            continue
-            
-        # Check with regex pattern
-        if not re.search(r'\.(jpg|jpeg|png|webp)$', img_url_lower):
-            continue
-            
-        valid_characters.append(character)
-    
-    # Calculate pagination
-    total_valid = len(valid_characters)
-    characters = valid_characters[offset:offset+50]
-    
+    characters = all_characters[offset:offset+50]
     if len(characters) > 50:
         characters = characters[:50]
-        next_offset = str(offset + 50) if offset + 50 < total_valid else ""
+        next_offset = str(offset + 50)
     else:
-        next_offset = str(offset + len(characters)) if offset + len(characters) < total_valid else ""
+        next_offset = str(offset + len(characters))
 
     results = []
     for character in characters:
-        img_url = character.get('img_url')
-        
-        # Final validation check
-        if not img_url or not is_valid_inline_photo_url(img_url):
-            continue
-            
         global_count = await user_collection.count_documents({'characters.id': character['id']})
         anime_characters = await collection.count_documents({'anime': character['anime']})
 
@@ -142,27 +75,16 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
             caption = f"<b> Look At <a href='tg://user?id={user['id']}'>{(escape(user.get('first_name', user['id'])))}</a>'s Character</b>\n\n🌸: <b>{character['name']} (x{user_character_count})</b>\n🏖️: <b>{character['anime']} ({user_anime_characters}/{anime_characters})</b>\n<b>{character['rarity']}</b>\n\n<b>🆔️:</b> {character['id']}"
         else:
             caption = f"<b>Look At This Character !!</b>\n\n🌸:<b> {character['name']}</b>\n🏖️: <b>{character['anime']}</b>\n<b>{character['rarity']}</b>\n🆔️: <b>{character['id']}</b>\n\n<b>Globally Guessed {global_count} Times...</b>"
-        
         results.append(
             InlineQueryResultPhoto(
-                thumbnail_url=img_url,
+                thumbnail_url=character['img_url'],
                 id=f"{character['id']}_{time.time()}",
-                photo_url=img_url,
+                photo_url=character['img_url'],
                 caption=caption,
                 parse_mode='HTML'
             )
         )
 
-    try:
-        if results:
-            await update.inline_query.answer(results, next_offset=next_offset, cache_time=5)
-        else:
-            await update.inline_query.answer([], next_offset="", cache_time=5)
-    except BadRequest as e:
-        error_message = str(e).lower()
-        if "photo_invalid" in error_message:
-            await update.inline_query.answer([], next_offset="", cache_time=5)
-        else:
-            raise
+    await update.inline_query.answer(results, next_offset=next_offset, cache_time=5)
 
 application.add_handler(InlineQueryHandler(inlinequery, block=False))

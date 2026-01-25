@@ -1728,8 +1728,8 @@ if __name__ == "__main__":
 
 ### ✅ **Atomic Guarantees Preserved**
 # - Catbox failure -> No Telegram upload -> No database entry
-- Database failure → Telegram message deleted
-- All rollbacks working correctly
+# - Database failure → Telegram message deleted
+# - All rollbacks working correctly
 
 ### ✅ **User-Friendly Error Messages**
 - Clear rejection messages for GIF/VIDEO

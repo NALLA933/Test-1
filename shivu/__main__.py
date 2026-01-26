@@ -17,6 +17,8 @@ from shivu import (
     user_collection,
     user_totals_collection,
     shivuu,
+    user_balance_coll,
+    change_balance,
 )
 from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
 from shivu.modules import ALL_MODULES
@@ -79,7 +81,7 @@ def to_small_caps(text: str) -> str:
         ' ': ' ', '!': '!', ':': ':', '.': '.', ',': ',', "'": "'", '"': '"', '?': '?', 
         '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '-': '-', '_': '_'
     }
-    
+
     # Convert emojis and special characters properly
     result = []
     for char in text:
@@ -88,7 +90,7 @@ def to_small_caps(text: str) -> str:
         else:
             # Keep emojis and unsupported characters as-is
             result.append(char)
-    
+
     return ''.join(result)
 
 def get_rarity_display(character: Dict[str, Any]) -> str:
@@ -124,6 +126,7 @@ async def _update_user_info(user_id: int, tg_user: Update.effective_user) -> Non
                 'username': getattr(tg_user, 'username', None),
                 'first_name': tg_user.first_name,
                 'characters': [],
+                'balance': 0,  # Initialize balance
             }
             if update_fields:
                 base.update(update_fields)
@@ -300,7 +303,8 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # combine args into a lowercase guess string
     guess_text = ' '.join(context.args).strip().lower() if context.args else ''
     if not guess_text:
-        await update.message.reply_text(to_small_caps("Please provide a guess, e.g. /guess Alice"))
+        # Command text ko normal font mein rakhein
+        await update.message.reply_text("Please provide a guess, e.g. /guess Alice")
         return
 
     # disallow suspicious characters
@@ -321,12 +325,10 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Remove _id field to avoid MongoDB errors
         character_to_store.pop('_id', None)
 
-        # Update user's balance with 100 coins
+        # STEP 1: Update user's balance with 100 coins
         try:
-            await user_collection.update_one(
-                {'id': user_id}, 
-                {'$inc': {'balance': 100}}
-            )
+            # Use change_balance helper function
+            await change_balance(user_id, 100)
         except Exception as e:
             LOGGER.exception(f"Failed to update user balance: {e}")
 
@@ -350,11 +352,17 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             LOGGER.exception("Failed updating group/global stats")
 
-        # STEP 1: Reward Notification Message
-        reward_message = to_small_caps(
-            "ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉  ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ ɪᴛ ʀɪɢʜᴛ! ᴀꜱ ᴀ ʀᴇᴡᴀʀᴅ, 100 ᴄᴏɪɴꜱ ʜᴀᴠᴇ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ."
+        # STEP 1: Coin Alert Message (with reaction)
+        coin_alert_msg = await update.message.reply_text(
+            to_small_caps("ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉 ᴀᴀᴘɴᴇ ꜱʜɪ ɢᴜᴇꜱꜱ ᴋɪʏᴀ ʜᴀɪ ɪꜱʟɪʏᴇ ᴀᴀᴘᴋᴏ ʙᴀʟᴀɴᴄᴇ ᴍᴇ 100 ᴄᴏɪɴ ᴀᴅᴅ ᴋᴀʀ ᴅɪʏᴇ ʜᴀɪ."),
+            parse_mode='HTML'
         )
-        await update.message.reply_text(reward_message, parse_mode='HTML')
+        
+        # Set reaction on the coin alert message
+        try:
+            await coin_alert_msg.set_reaction("🎉")
+        except Exception as e:
+            LOGGER.exception(f"Failed to set reaction: {e}")
 
         # STEP 2: Character Reveal Message
         safe_name = escape(update.effective_user.first_name or "")
@@ -364,20 +372,18 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         safe_rarity = escape(rarity_display)
         character_id = escape(str(character.get('id', 'Unknown')))
 
-        # Create character reveal message with small caps
-        reveal_message = to_small_caps(
-            f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ🎉 {safe_name}! ᴛʜɪꜱ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ.🎊\n"
-            f"ɴᴀᴍᴇ: {character_name}\n"
-            f"ᴀɴɪᴍᴇ: {anime_name}\n"
-            f"ʀᴀʀɪᴛʏ: {safe_rarity}\n"
-            f"ɪᴅ: {character_id}\n"
-            f"ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ."
-        )
+        # Create character reveal message with specified formatting
+        reveal_message = to_small_caps(f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ {safe_name} ʏᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴀᴘᴋᴇ ʜᴀʀᴇᴍ ᴍᴇ ᴀᴅᴅ ᴋɪʏᴀ ɢʏᴀ ʜᴀɪ.\n\n"
+                                       f"👤 ɴᴀᴍᴇ: {character_name}\n"
+                                       f"🎬 ᴀɴɪᴍᴇ: {anime_name}\n"
+                                       f"✨ ʀᴀʀɪᴛʏ: {safe_rarity}\n"
+                                       f"🆔 ɪᴅ: {character_id}\n\n"
+                                       f"✅ ꜱᴜᴄᴄᴇꜱꜱ ꜰᴜʟʟ ᴀᴅᴅ ʜᴀʀᴇᴍ.")
 
         # keyboard that shows inline query for the user's collection in this chat
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton(
-                to_small_caps("ꜱᴇᴇ ʜᴀʀᴇᴍ"), 
+                "ꜱᴇᴇ ʜᴀʀᴇᴍ",  # Button text already in small caps
                 switch_inline_query_current_chat=f"collection.{user_id}"
             )]]
         )
@@ -439,12 +445,33 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         LOGGER.exception("Failed to set favorite character")
         await update.message.reply_text(to_small_caps("Failed to mark favorite. Please try again later."))
 
+async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /balance command to check user's coin balance."""
+    if not update.effective_user:
+        return
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # Get user's balance from database
+        user_data = await user_collection.find_one({'id': user_id})
+        if user_data:
+            balance = user_data.get('balance', 0)
+            balance_msg = f"Your current balance: {balance} coins"
+            await update.message.reply_text(balance_msg)
+        else:
+            await update.message.reply_text("You don't have a balance yet. Start guessing characters to earn coins!")
+    except Exception as e:
+        LOGGER.exception(f"Failed to fetch balance: {e}")
+        await update.message.reply_text("Failed to fetch your balance. Please try again later.")
+
 def main() -> None:
     """Run the bot - register handlers and start polling."""
     # Register commands
     # Keep block=False to allow concurrency where Application was created with appropriate executor
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(CommandHandler("fav", fav, block=False))
+    application.add_handler(CommandHandler("balance", balance_command, block=False))  # Add balance command
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
 
     # Start polling (drop pending updates by default)

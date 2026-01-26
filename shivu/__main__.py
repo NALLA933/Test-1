@@ -382,5 +382,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     shivuu.start()
-    LOGGER.info("Bot started")
+    LOGGER.info("Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ɪs Bᴀᴄᴋ Bᴀʙᴇ)
     main()

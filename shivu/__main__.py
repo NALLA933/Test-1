@@ -25,10 +25,30 @@ from shivu.modules import ALL_MODULES
 for module_name in ALL_MODULES:
     importlib.import_module("shivu.modules." + module_name)
 
-# Constants
+# --- CONFIGURATION START ---
 SPAM_REPEAT_THRESHOLD = 10        
 SPAM_IGNORE_SECONDS = 10 * 60    
 DEFAULT_MESSAGE_FREQUENCY = 100  
+
+# 🔥 UPDATED RARITY MAP (Aapki List) 🔥
+RARITY_MAP = {
+    1: "⚪ ᴄᴏᴍᴍᴏɴ",
+    2: "🔵 ʀᴀʀᴇ",
+    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
+    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
+    5: "👹 ᴀɴᴄɪᴇɴᴛ",
+    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
+    7: "🔮 ᴇᴘɪᴄ",
+    8: "🪐 ᴄᴏꜱᴍɪᴄ",
+    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
+    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
+    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
+    12: "🌸 ꜱᴘʀɪɴɢ",
+    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
+    14: "🍭 ᴋᴀᴡᴀɪɪ",
+    15: "🧬 ʜʏʙʀɪᴅ"
+}
+# --- CONFIGURATION END ---
 
 # In-memory runtime state
 locks: Dict[str, asyncio.Lock] = {}
@@ -139,7 +159,6 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if last_time and (time.time() - last_time) < SPAM_IGNORE_SECONDS:
                     return
                 try:
-                    # UPDATED SPAM MESSAGE HERE
                     user_first_name = str(update.effective_user.first_name)
                     await update.message.reply_text(
                         f"⚠️ Don't spam, {escape(user_first_name)}. Your messages will be ignored for 10 minutes."
@@ -179,9 +198,14 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     last_characters[chat_id] = character
     first_correct_guesses.pop(chat_id, None)
 
-    # FIXED: Added str() to prevent 'int' object has no attribute 'replace'
-    rarity_text = str(character.get('rarity', 'Unknown'))
-    
+    # 🔥 FIX: Map Numeric Rarity to Custom Emoji/Text
+    try:
+        raw_rarity = int(character.get('rarity'))
+    except (ValueError, TypeError):
+        raw_rarity = 'Unknown'
+
+    rarity_text = RARITY_MAP.get(raw_rarity, str(raw_rarity))
+
     caption = (
         f"A new {escape(rarity_text)} character appeared!\n"
         f"Guess the character name with /guess <name> to add them to your harem."
@@ -219,22 +243,29 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("See Harem", switch_inline_query_current_chat=f"collection.{user_id}")]])
         
-        # FIXED: Added str() everywhere to be safe
         safe_name = escape(str(update.effective_user.first_name or ""))
+        
+        # 🔥 FIX: Mapping Logic for Guess Reply
+        try:
+            raw_rarity = int(character.get('rarity'))
+        except (ValueError, TypeError):
+            raw_rarity = 'Unknown'
+            
+        rarity_text = RARITY_MAP.get(raw_rarity, str(raw_rarity))
+        
         char_name = escape(str(character.get("name", "Unknown")))
-        char_rarity = escape(str(character.get("rarity", "Unknown")))
 
         reply_text = (
             f'<b><a href="tg://user?id={user_id}">{safe_name}</a></b> you guessed a new character ✅\n\n'
             f'NAME: <b>{char_name}</b>\n'
-            f'RARITY: <b>{char_rarity}</b>'
+            f'RARITY: <b>{escape(rarity_text)}</b>'
         )
         await update.message.reply_text(reply_text, reply_markup=keyboard, parse_mode='HTML')
     else:
         await update.message.reply_text("Please write the correct character name. ❌")
 
 def main() -> None:
-    # Register commands (Removed 'fav' handler)
+    # Register commands
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
 

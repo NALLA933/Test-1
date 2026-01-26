@@ -354,7 +354,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         # STEP 1: Coin Alert Message (with reaction)
         coin_alert_msg = await update.message.reply_text(
-            to_small_caps("ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉 ᴀᴀᴘɴᴇ ꜱʜɪ ɢᴜᴇꜱꜱ ᴋɪʏᴀ ʜᴀɪ ɪꜱʟɪʏᴇ ᴀᴀᴘᴋᴏ ʙᴀʟᴀɴᴄᴇ ᴍᴇ 100 ᴄᴏɪɴ ᴀᴅᴅ ᴋᴀʀ ᴅɪʏᴇ ʜᴀɪ."),
+            to_small_caps("✨ ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉  ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ ɪᴛ ʀɪɢʜᴛ! ᴀꜱ ᴀ ʀᴇᴡᴀʀᴅ, 100 ᴄᴏɪɴꜱ ʜᴀᴠᴇ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ.."),
             parse_mode='HTML'
         )
         
@@ -373,7 +373,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         character_id = escape(str(character.get('id', 'Unknown')))
 
         # Create character reveal message with specified formatting
-        reveal_message = to_small_caps(f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ {safe_name} ʏᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴀᴘᴋᴇ ʜᴀʀᴇᴍ ᴍᴇ ᴀᴅᴅ ᴋɪʏᴀ ɢʏᴀ ʜᴀɪ.\n\n"
+        reveal_message = to_small_caps(f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ {safe_name} ᴛʜɪꜱ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ.\n\n"
                                        f"👤 ɴᴀᴍᴇ: {character_name}\n"
                                        f"🎬 ᴀɴɪᴍᴇ: {anime_name}\n"
                                        f"✨ ʀᴀʀɪᴛʏ: {safe_rarity}\n"

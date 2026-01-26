@@ -64,6 +64,33 @@ def escape_markdown(text: str) -> str:
     """Escape Markdown-ish characters (kept for legacy usage)."""
     return _escape_markdown_re.sub(r'\\\1', text or '')
 
+def to_small_caps(text: str) -> str:
+    """
+    Convert normal text to small caps unicode characters
+    """
+    mapping = {
+        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 
+        'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 
+        's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
+        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ',
+        'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ',
+        'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
+        '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7', '8': '8', '9': '9',
+        ' ': ' ', '!': '!', ':': ':', '.': '.', ',': ',', "'": "'", '"': '"', '?': '?', 
+        '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '-': '-', '_': '_'
+    }
+    
+    # Convert emojis and special characters properly
+    result = []
+    for char in text:
+        if char in mapping:
+            result.append(mapping[char])
+        else:
+            # Keep emojis and unsupported characters as-is
+            result.append(char)
+    
+    return ''.join(result)
+
 def get_rarity_display(character: Dict[str, Any]) -> str:
     """
     Convert character rarity to safe display string.
@@ -178,7 +205,7 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 # warn and throttle
                 try:
                     await update.message.reply_text(
-                        f"⚠️ Don't spam, {escape(update.effective_user.first_name)}.\nYour messages will be ignored for {SPAM_IGNORE_SECONDS // 60} minutes."
+                        to_small_caps(f"⚠️ Don't spam, {escape(update.effective_user.first_name)}.\nYour messages will be ignored for {SPAM_IGNORE_SECONDS // 60} minutes.")
                     )
                 except Exception:
                     LOGGER.exception("Failed to send spam warning")
@@ -208,7 +235,7 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     if not all_characters:
         try:
-            await context.bot.send_message(chat_id=chat_id, text="No characters available right now.")
+            await context.bot.send_message(chat_id=chat_id, text=to_small_caps("No characters available right now."))
         except Exception:
             LOGGER.exception("Failed to notify about empty collection")
         return
@@ -235,7 +262,7 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     first_correct_guesses.pop(chat_id, None)
 
     rarity_display = get_rarity_display(character)
-    caption = (
+    caption = to_small_caps(
         f"A new {escape(rarity_display)} character appeared!\n"
         f"Guess the character name with /guess <name> to add them to your harem."
     )
@@ -267,18 +294,18 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if chat_id in first_correct_guesses:
-        await update.message.reply_text("❌ Already guessed by someone. Try next time.")
+        await update.message.reply_text(to_small_caps("❌ Already guessed by someone. Try next time."))
         return
 
     # combine args into a lowercase guess string
     guess_text = ' '.join(context.args).strip().lower() if context.args else ''
     if not guess_text:
-        await update.message.reply_text("Please provide a guess, e.g. /guess Alice")
+        await update.message.reply_text(to_small_caps("Please provide a guess, e.g. /guess Alice"))
         return
 
     # disallow suspicious characters
     if "()" in guess_text or "&" in guess_text:
-        await update.message.reply_text("You can't use these characters in your guess.")
+        await update.message.reply_text(to_small_caps("You can't use these characters in your guess."))
         return
 
     character = last_characters.get(chat_id)
@@ -293,7 +320,16 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         character_to_store = character.copy()
         # Remove _id field to avoid MongoDB errors
         character_to_store.pop('_id', None)
-        
+
+        # Update user's balance with 100 coins
+        try:
+            await user_collection.update_one(
+                {'id': user_id}, 
+                {'$inc': {'balance': 100}}
+            )
+        except Exception as e:
+            LOGGER.exception(f"Failed to update user balance: {e}")
+
         # update/create user doc and append character to their collection atomically
         try:
             await _update_user_info(user_id, update.effective_user)
@@ -304,7 +340,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception as e:
             LOGGER.exception(f"Failed updating user character collection: {e}")
-            await update.message.reply_text("Failed to add character to your collection. Please try again.")
+            await update.message.reply_text(to_small_caps("Failed to add character to your collection. Please try again."))
             return
 
         # update group & global stats
@@ -314,33 +350,57 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             LOGGER.exception("Failed updating group/global stats")
 
-        # keyboard that shows inline query for the user's collection in this chat
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("See Harem", switch_inline_query_current_chat=f"collection.{user_id}")]]
+        # STEP 1: Reward Notification Message
+        reward_message = to_small_caps(
+            "ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉  ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ ɪᴛ ʀɪɢʜᴛ! ᴀꜱ ᴀ ʀᴇᴡᴀʀᴅ, 100 ᴄᴏɪɴꜱ ʜᴀᴠᴇ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ."
+        )
+        await update.message.reply_text(reward_message, parse_mode='HTML')
+
+        # STEP 2: Character Reveal Message
+        safe_name = escape(update.effective_user.first_name or "")
+        character_name = escape(character.get('name', 'Unknown'))
+        anime_name = escape(character.get('anime', 'Unknown'))
+        rarity_display = get_rarity_display(character)
+        safe_rarity = escape(rarity_display)
+        character_id = escape(str(character.get('id', 'Unknown')))
+
+        # Create character reveal message with small caps
+        reveal_message = to_small_caps(
+            f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ🎉 {safe_name}! ᴛʜɪꜱ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ.🎊\n"
+            f"ɴᴀᴍᴇ: {character_name}\n"
+            f"ᴀɴɪᴍᴇ: {anime_name}\n"
+            f"ʀᴀʀɪᴛʏ: {safe_rarity}\n"
+            f"ɪᴅ: {character_id}\n"
+            f"ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ."
         )
 
-        # safe user-first name escaping for HTML
-        safe_name = escape(update.effective_user.first_name or "")
-
-        # reply with HTML parse mode
-        rarity_display = get_rarity_display(character)
-        reply_text = (
-            f'<b><a href="tg://user?id={user_id}">{safe_name}</a></b> you guessed a new character ✅\n\n'
-            f'NAME: <b>{escape(character.get("name", "Unknown"))}</b>\n'
-            f'RARITY: <b>{escape(rarity_display)}</b>'
+        # keyboard that shows inline query for the user's collection in this chat
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton(
+                to_small_caps("ꜱᴇᴇ ʜᴀʀᴇᴍ"), 
+                switch_inline_query_current_chat=f"collection.{user_id}"
+            )]]
         )
 
         try:
-            await update.message.reply_text(reply_text, reply_markup=keyboard, parse_mode='HTML')
+            await update.message.reply_text(
+                reveal_message, 
+                reply_markup=keyboard, 
+                parse_mode='HTML'
+            )
         except Exception:
-            LOGGER.exception("Failed to send success reply")
+            LOGGER.exception("Failed to send character reveal reply")
             # fallback plain text
             try:
-                await update.message.reply_text(f"You guessed {character.get('name', 'a character')} ✅")
+                await update.message.reply_text(
+                    to_small_caps(f"You guessed {character.get('name', 'a character')} ✅")
+                )
             except Exception:
                 LOGGER.exception("Failed fallback reply")
     else:
-        await update.message.reply_text("Please write the correct character name. ❌")
+        await update.message.reply_text(
+            to_small_caps("Please write the correct character name. ❌")
+        )
 
 async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Mark one of the user's collected characters as favorite using /fav <character_id>."""
@@ -350,7 +410,7 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     args = context.args or []
     if not args:
-        await update.message.reply_text("Please provide a character id: /fav <id>")
+        await update.message.reply_text(to_small_caps("Please provide a character id: /fav <id>"))
         return
 
     character_id = args[0]
@@ -362,22 +422,22 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = None
 
     if not user or not user.get('characters'):
-        await update.message.reply_text("You have not collected any characters yet.")
+        await update.message.reply_text(to_small_caps("You have not collected any characters yet."))
         return
 
     # check if character is present in user's collection
     character = next((c for c in user['characters'] if c.get('id') == character_id), None)
     if not character:
-        await update.message.reply_text("That character is not in your collection.")
+        await update.message.reply_text(to_small_caps("That character is not in your collection."))
         return
 
     # add to favorites (use $addToSet to avoid duplicates)
     try:
         await user_collection.update_one({'id': user_id}, {'$addToSet': {'favorites': character_id}})
-        await update.message.reply_text(f'Character {character.get("name")} has been added to your favorites.')
+        await update.message.reply_text(to_small_caps(f'Character {character.get("name")} has been added to your favorites.'))
     except Exception:
         LOGGER.exception("Failed to set favorite character")
-        await update.message.reply_text("Failed to mark favorite. Please try again later.")
+        await update.message.reply_text(to_small_caps("Failed to mark favorite. Please try again later."))
 
 def main() -> None:
     """Run the bot - register handlers and start polling."""

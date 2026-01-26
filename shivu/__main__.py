@@ -289,13 +289,23 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # mark first correct guess
         first_correct_guesses[chat_id] = user_id
 
+        # Create a clean character object without _id
+        character_to_store = character.copy()
+        # Remove _id field to avoid MongoDB errors
+        character_to_store.pop('_id', None)
+        
         # update/create user doc and append character to their collection atomically
         try:
             await _update_user_info(user_id, update.effective_user)
-            # push character into user's characters array
-            await user_collection.update_one({'id': user_id}, {'$addToSet': {'characters': character}})
-        except Exception:
-            LOGGER.exception("Failed updating user character collection")
+            # Use $push to allow duplicates in user's collection
+            await user_collection.update_one(
+                {'id': user_id}, 
+                {'$push': {'characters': character_to_store}}
+            )
+        except Exception as e:
+            LOGGER.exception(f"Failed updating user character collection: {e}")
+            await update.message.reply_text("Failed to add character to your collection. Please try again.")
+            return
 
         # update group & global stats
         try:

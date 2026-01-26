@@ -139,6 +139,10 @@ async def _update_top_global_groups(chat_id: int, chat_title: Optional[str]) -> 
 async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat or not update.effective_user:
         return
+    
+    # 🐛 BUG FIX #1: Handle private chats - don't spawn characters in DMs
+    if update.effective_chat.type == 'private':
+        return
 
     chat_id_str = str(update.effective_chat.id)
     user_id = update.effective_user.id
@@ -181,7 +185,8 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chat_id = update.effective_chat.id
     try:
         all_characters = await collection.find({}).to_list(length=None)
-    except Exception:
+    except Exception as e:
+        LOGGER.exception("Failed to fetch characters: %s", e)
         all_characters = []
 
     if not all_characters:
@@ -213,8 +218,8 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     try:
         await context.bot.send_photo(chat_id=chat_id, photo=character.get('img_url'), caption=caption)
-    except Exception:
-        pass
+    except Exception as e:
+        LOGGER.exception("Failed to send character image: %s", e)
 
 async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat or not update.effective_user:
@@ -223,7 +228,11 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
-    if chat_id not in last_characters or chat_id in first_correct_guesses:
+    # 🐛 BUG FIX #2: Check if character exists before proceeding
+    if chat_id not in last_characters:
+        return
+    
+    if chat_id in first_correct_guesses:
         return
 
     guess_text = ' '.join(context.args).strip().lower() if context.args else ''
@@ -232,50 +241,63 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     character = last_characters.get(chat_id)
+    
+    # 🐛 BUG FIX #3: Validate character data exists
+    if not character or not character.get('name'):
+        LOGGER.error(f"Invalid character data for chat {chat_id}")
+        return
+    
     name_parts = (character.get('name') or '').lower().split()
 
     if sorted(name_parts) == sorted(guess_text.split()) or any(part == guess_text for part in name_parts):
         first_correct_guesses[chat_id] = user_id
-        await _update_user_info(user_id, update.effective_user)
         
-        # --- 🔥 FIX START: Database Saving Logic 🔥 ---
-        # 1. Create a copy so we don't mess up the original object
-        character_data = character.copy()
-        
-        # 2. Remove the '_id' field if it exists (This solves the saving error)
-        if '_id' in character_data:
-            del character_data['_id']
-            
-        # 3. Save the clean copy to the user's collection
-        await user_collection.update_one(
-            {'id': user_id}, 
-            {'$addToSet': {'characters': character_data}}
-        )
-        # --- 🔥 FIX END 🔥 ---
-
-        await _update_group_user_totals(user_id, chat_id, update.effective_user)
-        await _update_top_global_groups(chat_id, update.effective_chat.title)
-
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("See Harem", switch_inline_query_current_chat=f"collection.{user_id}")]])
-
-        safe_name = escape(str(update.effective_user.first_name or ""))
-
-        # 🔥 FIX: Mapping Logic for Guess Reply
         try:
-            raw_rarity = int(character.get('rarity'))
-        except (ValueError, TypeError):
-            raw_rarity = 'Unknown'
+            await _update_user_info(user_id, update.effective_user)
+            
+            # 🔥 PRIMARY FIX: Create a copy and remove _id before saving
+            character_copy = dict(character)  # Create a proper copy
+            character_copy.pop('_id', None)  # Remove MongoDB _id field
+            
+            # 🐛 BUG FIX #4: Add error handling for database operations
+            result = await user_collection.update_one(
+                {'id': user_id}, 
+                {'$addToSet': {'characters': character_copy}}
+            )
+            
+            # Optional: Log if character wasn't added (already exists)
+            if result.modified_count == 0:
+                LOGGER.info(f"Character {character.get('id')} already in user {user_id}'s harem")
+            
+            await _update_group_user_totals(user_id, chat_id, update.effective_user)
+            await _update_top_global_groups(chat_id, update.effective_chat.title)
 
-        rarity_text = RARITY_MAP.get(raw_rarity, str(raw_rarity))
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("See Harem", switch_inline_query_current_chat=f"collection.{user_id}")]])
 
-        char_name = escape(str(character.get("name", "Unknown")))
+            safe_name = escape(str(update.effective_user.first_name or ""))
 
-        reply_text = (
-            f'<b><a href="tg://user?id={user_id}">{safe_name}</a></b> you guessed a new character ✅\n\n'
-            f'NAME: <b>{char_name}</b>\n'
-            f'RARITY: <b>{escape(rarity_text)}</b>'
-        )
-        await update.message.reply_text(reply_text, reply_markup=keyboard, parse_mode='HTML')
+            # 🔥 FIX: Mapping Logic for Guess Reply
+            try:
+                raw_rarity = int(character.get('rarity'))
+            except (ValueError, TypeError):
+                raw_rarity = 'Unknown'
+
+            rarity_text = RARITY_MAP.get(raw_rarity, str(raw_rarity))
+
+            char_name = escape(str(character.get("name", "Unknown")))
+
+            reply_text = (
+                f'<b><a href="tg://user?id={user_id}">{safe_name}</a></b> you guessed a new character ✅\n\n'
+                f'NAME: <b>{char_name}</b>\n'
+                f'RARITY: <b>{escape(rarity_text)}</b>'
+            )
+            await update.message.reply_text(reply_text, reply_markup=keyboard, parse_mode='HTML')
+            
+        except Exception as e:
+            LOGGER.exception(f"Error processing correct guess for user {user_id}: %s", e)
+            await update.message.reply_text("An error occurred while saving the character. Please try again.")
+            # Remove from first_correct_guesses to allow retry
+            first_correct_guesses.pop(chat_id, None)
     else:
         await update.message.reply_text("Please write the correct character name. ❌")
 

@@ -25,6 +25,25 @@ from shivu.modules import ALL_MODULES
 for module_name in ALL_MODULES:
     importlib.import_module("shivu.modules." + module_name)
 
+# Rarity display mapping (presentation layer only - DB still stores integers)
+RARITY_MAP = {
+    1: "⚪ ᴄᴏᴍᴍᴏɴ",
+    2: "🔵 ʀᴀʀᴇ",
+    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
+    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
+    5: "👹 ᴀɴᴄɪᴇɴᴛ",
+    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
+    7: "🔮 ᴇᴘɪᴄ",
+    8: "🪐 ᴄᴏꜱᴍɪᴄ",
+    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
+    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
+    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
+    12: "🌸 ꜱᴘʀɪɴɢ",
+    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
+    14: "🍭 ᴋᴀᴡᴀɪɪ",
+    15: "🧬 ʜʏʙʀɪᴅ",
+}
+
 # Constants (tweak as needed)
 SPAM_REPEAT_THRESHOLD = 10        # number of repeated messages to consider spam
 SPAM_IGNORE_SECONDS = 10 * 60    # ignore duration in seconds (10 minutes)
@@ -44,6 +63,15 @@ _escape_markdown_re = re.compile(r'([\\*_`~>#+=\\-|{}.!])')
 def escape_markdown(text: str) -> str:
     """Escape Markdown-ish characters (kept for legacy usage)."""
     return _escape_markdown_re.sub(r'\\\1', text or '')
+
+def get_rarity_display(character: Dict[str, Any]) -> str:
+    """
+    Convert character rarity to safe display string.
+    Handles integer rarity from DB and provides safe fallback.
+    """
+    rarity_raw = character.get('rarity', 'Unknown')
+    rarity_text = RARITY_MAP.get(rarity_raw, str(rarity_raw))
+    return str(rarity_text)  # Ensure always string for html.escape()
 
 async def _get_chat_lock(chat_id: str) -> asyncio.Lock:
     """Return a per-chat asyncio.Lock, creating it if necessary."""
@@ -206,8 +234,9 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     last_characters[chat_id] = character
     first_correct_guesses.pop(chat_id, None)
 
+    rarity_display = get_rarity_display(character)
     caption = (
-        f"A new {escape(character.get('rarity', 'Unknown'))} character appeared!\n"
+        f"A new {escape(rarity_display)} character appeared!\n"
         f"Guess the character name with /guess <name> to add them to your harem."
     )
 
@@ -284,10 +313,11 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         safe_name = escape(update.effective_user.first_name or "")
 
         # reply with HTML parse mode
+        rarity_display = get_rarity_display(character)
         reply_text = (
             f'<b><a href="tg://user?id={user_id}">{safe_name}</a></b> you guessed a new character ✅\n\n'
             f'NAME: <b>{escape(character.get("name", "Unknown"))}</b>\n'
-            f'RARITY: <b>{escape(character.get("rarity", "Unknown"))}</b>'
+            f'RARITY: <b>{escape(rarity_display)}</b>'
         )
 
         try:

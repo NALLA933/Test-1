@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Storage for pending operations
-pending_trades = {}  # {(sender_id, receiver_id): {'chars': (s_char_id, r_char_id), 'timestamp': time, 'message_id': int}}
+pending_trades = {}  # {(sender_id, receiver_id): {'chars': (s_char_id, r_char_id), 'timestamp': time}}
 pending_gifts = {}   # {(sender_id, receiver_id): {'character': char, 'receiver_info': {...}, 'timestamp': time}}
 
 # User locks to prevent concurrent operations
@@ -26,6 +26,22 @@ last_gift_time = {}
 TRADE_COOLDOWN = 60  # 60 seconds
 GIFT_COOLDOWN = 30   # 30 seconds
 PENDING_EXPIRY = 300  # 5 minutes
+
+# Small caps conversion map for premium UI
+SMALL_CAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ',
+    'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ',
+    'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
+    'y': 'ʏ', 'z': 'ᴢ',
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ',
+    'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ',
+    'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
+    'Y': 'ʏ', 'Z': 'ᴢ'
+}
+
+def to_small_caps(text):
+    """Convert text to small caps for premium UI"""
+    return ''.join(SMALL_CAPS_MAP.get(c, c) for c in text)
 
 def get_user_lock(user_id):
     """Get or create a lock for a specific user"""
@@ -51,6 +67,18 @@ async def cleanup_expired_operations():
         del pending_gifts[key]
         logger.info(f"Cleaned expired gift: {key}")
 
+async def auto_cleanup_task():
+    """Background task to auto-cleanup expired operations every 60 seconds"""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            await cleanup_expired_operations()
+        except Exception as e:
+            logger.error(f"Error in auto cleanup task: {e}")
+
+# Start background cleanup task
+asyncio.create_task(auto_cleanup_task())
+
 def check_cooldown(user_id, cooldown_dict, cooldown_time):
     """Check if user is on cooldown"""
     current_time = time.time()
@@ -67,6 +95,32 @@ def format_character_info(character):
     rarity = character.get('rarity', 'Unknown')
     anime = character.get('anime', 'Unknown')
     return f"**{name}**\n⭐ Rarity: {rarity}\n📺 Anime: {anime}"
+
+def format_premium_gift_card(character, sender_name):
+    """Format character as premium gift card with small caps"""
+    name = character.get('name', 'Unknown')
+    anime = character.get('anime', 'Unknown')
+    char_id = character.get('id', 'Unknown')
+    rarity = character.get('rarity', 'Unknown')
+    
+    # Convert to small caps for premium look
+    name_sc = to_small_caps(name)
+    anime_sc = to_small_caps(anime)
+    char_id_sc = to_small_caps(char_id)
+    rarity_sc = to_small_caps(rarity)
+    
+    card = (
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🎁 {to_small_caps('gift card')}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"✨ {to_small_caps('name')}   : **{name_sc}**\n"
+        f"🎬 {to_small_caps('anime')}  : **{anime_sc}**\n"
+        f"🆔 {to_small_caps('id')}     : `{char_id_sc}`\n"
+        f"⭐ {to_small_caps('rarity')} : **{rarity_sc}**\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💎 {to_small_caps('premium gift from')} **{sender_name}**"
+    )
+    return card
 
 
 @shivuu.on_message(filters.command("trade"))
@@ -109,123 +163,24 @@ async def trade(client, message):
     receiver_character_id = message.command[2]
     
     try:
-        # Acquire locks for both users
-        async with get_user_lock(sender_id), get_user_lock(receiver_id):
-            # Fetch user data
-            sender = await user_collection.find_one({'id': sender_id})
-            receiver = await user_collection.find_one({'id': receiver_id})
-            
-            # Check if users exist
-            if not sender:
-                await message.reply_text("❌ You don't have any characters yet!")
-                return
-            
-            if not receiver:
-                await message.reply_text("❌ The other user doesn't have any characters yet!")
-                return
-            
-            # Find characters
-            sender_character = next(
-                (char for char in sender.get('characters', []) if char.get('id') == sender_character_id), 
-                None
-            )
-            receiver_character = next(
-                (char for char in receiver.get('characters', []) if char.get('id') == receiver_character_id), 
-                None
-            )
-            
-            # Validate characters exist
-            if not sender_character:
-                await message.reply_text(
-                    f"❌ You don't have character with ID: `{sender_character_id}`\n\n"
-                    "Use `/collection` to view your characters!"
-                )
-                return
-            
-            if not receiver_character:
-                await message.reply_text(
-                    f"❌ The other user doesn't have character with ID: `{receiver_character_id}`!"
-                )
-                return
-            
-            # Check if already in a pending trade
-            if (sender_id, receiver_id) in pending_trades or (receiver_id, sender_id) in pending_trades:
-                await message.reply_text("❌ You already have a pending trade with this user!")
-                return
-            
-            # Store pending trade
-            pending_trades[(sender_id, receiver_id)] = {
-                'chars': (sender_character_id, receiver_character_id),
-                'timestamp': time.time(),
-                'sender_character': sender_character,
-                'receiver_character': receiver_character
-            }
-            
-            # Create keyboard
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Confirm Trade", callback_data=f"confirm_trade")],
-                [InlineKeyboardButton("❌ Cancel Trade", callback_data=f"cancel_trade")]
-            ])
-            
-            # Send trade proposal
-            trade_msg = (
-                f"📊 **Trade Proposal**\n\n"
-                f"**{message.from_user.first_name}** wants to trade:\n\n"
-                f"**They Give:**\n{format_character_info(sender_character)}\n\n"
-                f"**They Get:**\n{format_character_info(receiver_character)}\n\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"{receiver_mention}, do you accept this trade?"
-            )
-            
-            await message.reply_text(trade_msg, reply_markup=keyboard)
-            
-            # Update cooldown
-            last_trade_time[sender_id] = time.time()
-            
-    except Exception as e:
-        logger.error(f"Error in trade command: {e}")
-        await message.reply_text("❌ An error occurred while processing the trade. Please try again!")
-
-
-@shivuu.on_callback_query(filters.create(lambda _, __, query: query.data in ["confirm_trade", "cancel_trade"]))
-async def on_trade_callback(client, callback_query):
-    """Handle trade confirmation/cancellation"""
-    receiver_id = callback_query.from_user.id
-    
-    # Find the pending trade for this receiver
-    trade_key = None
-    trade_data = None
-    
-    for (sender_id, _receiver_id), data in pending_trades.items():
-        if _receiver_id == receiver_id:
-            trade_key = (sender_id, _receiver_id)
-            trade_data = data
-            break
-    
-    # Check if trade exists
-    if not trade_key:
-        await callback_query.answer("❌ This trade is not for you or has expired!", show_alert=True)
-        return
-    
-    sender_id = trade_key[0]
-    
-    # Check if trade expired
-    if time.time() - trade_data['timestamp'] > PENDING_EXPIRY:
-        del pending_trades[trade_key]
-        await callback_query.message.edit_text("❌ This trade has expired!")
-        return
-    
-    if callback_query.data == "confirm_trade":
-        try:
-            sender_character_id, receiver_character_id = trade_data['chars']
-            
-            # Acquire locks for both users
-            async with get_user_lock(sender_id), get_user_lock(receiver_id):
-                # Re-fetch user data to ensure consistency
+        # DEADLOCK SAFE: Always acquire locks in sorted order
+        first_id, second_id = sorted([sender_id, receiver_id])
+        async with get_user_lock(first_id):
+            async with get_user_lock(second_id):
+                # Fetch user data
                 sender = await user_collection.find_one({'id': sender_id})
                 receiver = await user_collection.find_one({'id': receiver_id})
                 
-                # Verify characters still exist
+                # Check if users exist
+                if not sender:
+                    await message.reply_text("❌ You don't have any characters yet!")
+                    return
+                
+                if not receiver:
+                    await message.reply_text("❌ The other user doesn't have any characters yet!")
+                    return
+                
+                # Find characters
                 sender_character = next(
                     (char for char in sender.get('characters', []) if char.get('id') == sender_character_id), 
                     None
@@ -235,46 +190,151 @@ async def on_trade_callback(client, callback_query):
                     None
                 )
                 
-                if not sender_character or not receiver_character:
-                    await callback_query.message.edit_text(
-                        "❌ Trade failed! One of the characters no longer exists in the collections."
+                # Validate characters exist
+                if not sender_character:
+                    await message.reply_text(
+                        f"❌ You don't have character with ID: `{sender_character_id}`\n\n"
+                        "Use `/collection` to view your characters!"
                     )
-                    del pending_trades[trade_key]
                     return
                 
-                # Remove characters from original owners
-                sender['characters'].remove(sender_character)
-                receiver['characters'].remove(receiver_character)
+                if not receiver_character:
+                    await message.reply_text(
+                        f"❌ The other user doesn't have character with ID: `{receiver_character_id}`!"
+                    )
+                    return
                 
-                # Add characters to new owners
-                sender['characters'].append(receiver_character)
-                receiver['characters'].append(sender_character)
+                # Check if already in a pending trade
+                if (sender_id, receiver_id) in pending_trades or (receiver_id, sender_id) in pending_trades:
+                    await message.reply_text("❌ You already have a pending trade with this user!")
+                    return
                 
-                # Update database
-                await user_collection.update_one(
-                    {'id': sender_id}, 
-                    {'$set': {'characters': sender['characters']}}
+                # Store pending trade
+                pending_trades[(sender_id, receiver_id)] = {
+                    'chars': (sender_character_id, receiver_character_id),
+                    'timestamp': time.time(),
+                    'sender_character': sender_character,
+                    'receiver_character': receiver_character
+                }
+                
+                # Create USER-SPECIFIC keyboard with IDs in callback_data
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Confirm Trade", callback_data=f"confirm_trade:{sender_id}:{receiver_id}")],
+                    [InlineKeyboardButton("❌ Cancel Trade", callback_data=f"cancel_trade:{sender_id}:{receiver_id}")]
+                ])
+                
+                # Send trade proposal
+                trade_msg = (
+                    f"📊 **Trade Proposal**\n\n"
+                    f"**{message.from_user.first_name}** wants to trade:\n\n"
+                    f"**They Give:**\n{format_character_info(sender_character)}\n\n"
+                    f"**They Get:**\n{format_character_info(receiver_character)}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"{receiver_mention}, do you accept this trade?"
                 )
-                await user_collection.update_one(
-                    {'id': receiver_id}, 
-                    {'$set': {'characters': receiver['characters']}}
-                )
                 
-                # Remove from pending
-                del pending_trades[trade_key]
+                await message.reply_text(trade_msg, reply_markup=keyboard)
                 
-                # Success message
-                success_msg = (
-                    f"✅ **Trade Successful!**\n\n"
-                    f"**{callback_query.from_user.first_name}** and their trade partner "
-                    f"have successfully exchanged characters!\n\n"
-                    f"🎉 Enjoy your new characters!"
-                )
-                
-                await callback_query.message.edit_text(success_msg)
-                await callback_query.answer("✅ Trade completed successfully!", show_alert=True)
-                
-                logger.info(f"Trade completed: {sender_id} <-> {receiver_id}")
+                # Update cooldown
+                last_trade_time[sender_id] = time.time()
+            
+    except Exception as e:
+        logger.error(f"Error in trade command: {e}")
+        await message.reply_text("❌ An error occurred while processing the trade. Please try again!")
+
+
+@shivuu.on_callback_query(filters.regex(r"^(confirm_trade|cancel_trade):(\d+):(\d+)$"))
+async def on_trade_callback(client, callback_query):
+    """Handle trade confirmation/cancellation with USER-SPECIFIC verification"""
+    data_parts = callback_query.data.split(":")
+    action = data_parts[0]
+    sender_id = int(data_parts[1])
+    receiver_id = int(data_parts[2])
+    
+    clicker_id = callback_query.from_user.id
+    
+    # SECURITY: Only receiver can interact with trade buttons
+    if clicker_id != receiver_id:
+        await callback_query.answer("❌ This action is not for you!", show_alert=True)
+        return
+    
+    trade_key = (sender_id, receiver_id)
+    
+    # Check if trade exists
+    if trade_key not in pending_trades:
+        await callback_query.answer("❌ This trade has expired or doesn't exist!", show_alert=True)
+        return
+    
+    trade_data = pending_trades[trade_key]
+    
+    # Check if trade expired
+    if time.time() - trade_data['timestamp'] > PENDING_EXPIRY:
+        del pending_trades[trade_key]
+        await callback_query.message.edit_text("❌ This trade has expired!")
+        return
+    
+    if action == "confirm_trade":
+        try:
+            sender_character_id, receiver_character_id = trade_data['chars']
+            
+            # DEADLOCK SAFE: Always acquire locks in sorted order
+            first_id, second_id = sorted([sender_id, receiver_id])
+            async with get_user_lock(first_id):
+                async with get_user_lock(second_id):
+                    # Re-fetch user data to ensure consistency
+                    sender = await user_collection.find_one({'id': sender_id})
+                    receiver = await user_collection.find_one({'id': receiver_id})
+                    
+                    # Verify characters still exist
+                    sender_character = next(
+                        (char for char in sender.get('characters', []) if char.get('id') == sender_character_id), 
+                        None
+                    )
+                    receiver_character = next(
+                        (char for char in receiver.get('characters', []) if char.get('id') == receiver_character_id), 
+                        None
+                    )
+                    
+                    if not sender_character or not receiver_character:
+                        await callback_query.message.edit_text(
+                            "❌ Trade failed! One of the characters no longer exists in the collections."
+                        )
+                        del pending_trades[trade_key]
+                        return
+                    
+                    # Remove characters from original owners
+                    sender['characters'].remove(sender_character)
+                    receiver['characters'].remove(receiver_character)
+                    
+                    # Add characters to new owners
+                    sender['characters'].append(receiver_character)
+                    receiver['characters'].append(sender_character)
+                    
+                    # Update database
+                    await user_collection.update_one(
+                        {'id': sender_id}, 
+                        {'$set': {'characters': sender['characters']}}
+                    )
+                    await user_collection.update_one(
+                        {'id': receiver_id}, 
+                        {'$set': {'characters': receiver['characters']}}
+                    )
+                    
+                    # Remove from pending
+                    del pending_trades[trade_key]
+                    
+                    # Success message
+                    success_msg = (
+                        f"✅ **Trade Successful!**\n\n"
+                        f"**{callback_query.from_user.first_name}** and their trade partner "
+                        f"have successfully exchanged characters!\n\n"
+                        f"🎉 Enjoy your new characters!"
+                    )
+                    
+                    await callback_query.message.edit_text(success_msg)
+                    await callback_query.answer("✅ Trade completed successfully!", show_alert=True)
+                    
+                    logger.info(f"Trade completed: {sender_id} <-> {receiver_id}")
                 
         except Exception as e:
             logger.error(f"Error confirming trade: {e}")
@@ -282,7 +342,7 @@ async def on_trade_callback(client, callback_query):
             if trade_key in pending_trades:
                 del pending_trades[trade_key]
     
-    elif callback_query.data == "cancel_trade":
+    elif action == "cancel_trade":
         # Remove from pending
         del pending_trades[trade_key]
         
@@ -297,8 +357,9 @@ async def on_trade_callback(client, callback_query):
 
 @shivuu.on_message(filters.command("gift"))
 async def gift(client, message):
-    """Handle gift command"""
+    """Handle gift command with PREMIUM UI"""
     sender_id = message.from_user.id
+    sender_name = message.from_user.first_name
     
     # Clean expired operations
     await cleanup_expired_operations()
@@ -371,16 +432,17 @@ async def gift(client, message):
                 'timestamp': time.time()
             }
             
-            # Create keyboard
+            # Create USER-SPECIFIC keyboard with IDs in callback_data
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Confirm Gift", callback_data="confirm_gift")],
-                [InlineKeyboardButton("❌ Cancel Gift", callback_data="cancel_gift")]
+                [InlineKeyboardButton("✅ Confirm Gift", callback_data=f"confirm_gift:{sender_id}:{receiver_id}")],
+                [InlineKeyboardButton("❌ Cancel Gift", callback_data=f"cancel_gift:{sender_id}:{receiver_id}")]
             ])
             
-            # Send gift confirmation
+            # PREMIUM GIFT CARD UI with small caps
+            gift_card = format_premium_gift_card(character, sender_name)
+            
             gift_msg = (
-                f"🎁 **Gift Confirmation**\n\n"
-                f"**Character to Gift:**\n{format_character_info(character)}\n\n"
+                f"{gift_card}\n\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"Are you sure you want to gift this to {receiver_mention}?"
             )
@@ -395,27 +457,29 @@ async def gift(client, message):
         await message.reply_text("❌ An error occurred while processing the gift. Please try again!")
 
 
-@shivuu.on_callback_query(filters.create(lambda _, __, query: query.data in ["confirm_gift", "cancel_gift"]))
+@shivuu.on_callback_query(filters.regex(r"^(confirm_gift|cancel_gift):(\d+):(\d+)$"))
 async def on_gift_callback(client, callback_query):
-    """Handle gift confirmation/cancellation"""
-    sender_id = callback_query.from_user.id
+    """Handle gift confirmation/cancellation with USER-SPECIFIC verification"""
+    data_parts = callback_query.data.split(":")
+    action = data_parts[0]
+    sender_id = int(data_parts[1])
+    receiver_id = int(data_parts[2])
     
-    # Find the pending gift for this sender
-    gift_key = None
-    gift_data = None
+    clicker_id = callback_query.from_user.id
     
-    for (_sender_id, receiver_id), data in pending_gifts.items():
-        if _sender_id == sender_id:
-            gift_key = (_sender_id, receiver_id)
-            gift_data = data
-            break
-    
-    # Check if gift exists
-    if not gift_key:
-        await callback_query.answer("❌ This gift is not for you or has expired!", show_alert=True)
+    # SECURITY: Only sender can interact with gift buttons
+    if clicker_id != sender_id:
+        await callback_query.answer("❌ This action is not for you!", show_alert=True)
         return
     
-    receiver_id = gift_key[1]
+    gift_key = (sender_id, receiver_id)
+    
+    # Check if gift exists
+    if gift_key not in pending_gifts:
+        await callback_query.answer("❌ This gift has expired or doesn't exist!", show_alert=True)
+        return
+    
+    gift_data = pending_gifts[gift_key]
     
     # Check if gift expired
     if time.time() - gift_data['timestamp'] > PENDING_EXPIRY:
@@ -423,68 +487,75 @@ async def on_gift_callback(client, callback_query):
         await callback_query.message.edit_text("❌ This gift request has expired!")
         return
     
-    if callback_query.data == "confirm_gift":
+    if action == "confirm_gift":
         try:
             character = gift_data['character']
             
-            # Acquire locks for both users
-            async with get_user_lock(sender_id), get_user_lock(receiver_id):
-                # Re-fetch sender data
-                sender = await user_collection.find_one({'id': sender_id})
-                
-                # Verify character still exists
-                sender_character = next(
-                    (char for char in sender.get('characters', []) if char.get('id') == character['id']), 
-                    None
-                )
-                
-                if not sender_character:
-                    await callback_query.message.edit_text(
-                        "❌ Gift failed! The character no longer exists in your collection."
+            # DEADLOCK SAFE: Always acquire locks in sorted order
+            first_id, second_id = sorted([sender_id, receiver_id])
+            async with get_user_lock(first_id):
+                async with get_user_lock(second_id):
+                    # Re-fetch sender data
+                    sender = await user_collection.find_one({'id': sender_id})
+                    
+                    # Verify character still exists
+                    sender_character = next(
+                        (char for char in sender.get('characters', []) if char.get('id') == character['id']), 
+                        None
                     )
-                    del pending_gifts[gift_key]
-                    return
-                
-                # Remove character from sender
-                sender['characters'].remove(sender_character)
-                await user_collection.update_one(
-                    {'id': sender_id}, 
-                    {'$set': {'characters': sender['characters']}}
-                )
-                
-                # Add character to receiver
-                receiver = await user_collection.find_one({'id': receiver_id})
-                
-                if receiver:
-                    # Receiver exists, add to their collection
+                    
+                    if not sender_character:
+                        await callback_query.message.edit_text(
+                            "❌ Gift failed! The character no longer exists in your collection."
+                        )
+                        del pending_gifts[gift_key]
+                        return
+                    
+                    # Remove character from sender
+                    sender['characters'].remove(sender_character)
                     await user_collection.update_one(
-                        {'id': receiver_id}, 
-                        {'$push': {'characters': character}}
+                        {'id': sender_id}, 
+                        {'$set': {'characters': sender['characters']}}
                     )
-                else:
-                    # Create new user document for receiver
-                    await user_collection.insert_one({
-                        'id': receiver_id,
-                        'username': gift_data['receiver_username'],
-                        'first_name': gift_data['receiver_first_name'],
-                        'characters': [character],
-                    })
-                
-                # Remove from pending
-                del pending_gifts[gift_key]
-                
-                # Success message
-                success_msg = (
-                    f"🎁 **Gift Sent Successfully!**\n\n"
-                    f"You have gifted **{character.get('name', 'Unknown')}** to "
-                    f"[{gift_data['receiver_first_name']}](tg://user?id={receiver_id})!\n\n"
-                    f"🎉 What a generous gesture!"
-                )
-                
-                await callback_query.message.edit_text(success_msg)
-                await callback_query.answer("✅ Gift sent successfully!", show_alert=True)
-                
-                logger.info(f"Gift completed: {sender_id} -> {receiver_id}")
+                    
+                    # Add character to receiver
+                    receiver = await user_collection.find_one({'id': receiver_id})
+                    
+                    if receiver:
+                        # Receiver exists, add to their collection
+                        await user_collection.update_one(
+                            {'id': receiver_id}, 
+                            {'$push': {'characters': character}}
+                        )
+                    else:
+                        # Create new user document for receiver
+                        await user_collection.insert_one({
+                            'id': receiver_id,
+                            'username': gift_data['receiver_username'],
+                            'first_name': gift_data['receiver_first_name'],
+                            'characters': [character],
+                        })
+                    
+                    # Remove from pending
+                    del pending_gifts[gift_key]
+                    
+                    # PREMIUM SUCCESS MESSAGE with small caps
+                    char_name = character.get('name', 'Unknown')
+                    char_name_sc = to_small_caps(char_name)
+                    
+                    success_msg = (
+                        f"🎉 **{to_small_caps('gift successful')}**\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"💝 **{char_name_sc}** {to_small_caps('has been sent')}\n"
+                        f"{to_small_caps('to')} **{gift_data['receiver_first_name']}**\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"✨ {to_small_caps('thank you for being generous')}"
+                    )
+                    
+                    await callback_query.message.edit_text(success_msg)
+                    await callback_query.answer("✅ Gift sent successfully!", show_alert=True)
+                    
+                    logger.info(f"Gift completed: {sender_id} -> {receiver_id}")
                 
         except Exception as e:
             logger.error(f"Error confirming gift: {e}")
@@ -492,7 +563,7 @@ async def on_gift_callback(client, callback_query):
             if gift_key in pending_gifts:
                 del pending_gifts[gift_key]
     
-    elif callback_query.data == "cancel_gift":
+    elif action == "cancel_gift":
         # Remove from pending
         del pending_gifts[gift_key]
         
@@ -548,4 +619,6 @@ async def clear_pending(client, message):
     """Clear all pending trades and gifts (Admin only)"""
     pending_trades.clear()
     pending_gifts.clear()
-    await message.reply_text("✅ All pending trades and gifts have been cleared!")
+    last_trade_time.clear()
+    last_gift_time.clear()
+    await message.reply_text("✅ All pending operations and cooldowns have been cleared!")

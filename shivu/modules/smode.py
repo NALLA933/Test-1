@@ -43,7 +43,7 @@ def to_small_caps(text: str) -> str:
 
 # ---------- Rarity Configuration ----------
 RARITY_OPTIONS = {
-    "all": {"name": "🌈 All Rarities", "value": None},
+    "all": {"name": "🍃 default", "value": None},
     "1": {"name": "⚪ Common", "value": 1},
     "2": {"name": "🔵 Rare", "value": 2},
     "3": {"name": "🟡 Legendary", "value": 3},
@@ -119,34 +119,34 @@ async def smode_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     # Determine current selection text
     if current_pref is None:
-        current_text = "🌈 All Rarities"
+        current_text = " " + to_small_caps("All Rarities")
     else:
-        current_text = RARITY_OPTIONS.get(str(current_pref), {}).get("name", "Unknown")
+        rarity_info = RARITY_OPTIONS.get(str(current_pref), {})
+        current_text = rarity_info.get("name", "Unknown")
     
-    # Create message
+    # Create message with premium emojis
     caption = (
-        f"<b>⚙️ {to_small_caps('SORTING MODE')}</b>\n\n"
-        f"📊 {to_small_caps('Current Filter:')} <b>{current_text}</b>\n\n"
-        f"💡 {to_small_caps('Select a rarity to filter your harem:')}\n"
-        f"   {to_small_caps('Use /harem or /collection to see filtered results')}"
+        f"<b>✨ {to_small_caps('SMODE')}</b>\n\n"
+        f"🎯 {to_small_caps('Current Model:')} <b>{current_text}</b>\n"
     )
     
-    # Create keyboard with rarity buttons (3 buttons per row)
+    # Create keyboard with rarity buttons (3 buttons per row) - ALL IN SMALL CAPS
     keyboard = []
     row = []
     
-    # Add "All Rarities" button first
+    # Add "All Rarities" button first (DEFAULT)
     row.append(InlineKeyboardButton(
-        "🌈 All Rarities" + (" ✓" if current_pref is None else ""),
+        to_small_caps("🍃 default") + (" ✓" if current_pref is None else ""),
         callback_data="smode_all"
     ))
     keyboard.append(row)
     
-    # Add rarity buttons
+    # Add rarity buttons (ALL IN SMALL CAPS)
     row = []
     for i, (key, data) in enumerate(list(RARITY_OPTIONS.items())[1:], 1):  # Skip "all"
         is_selected = (current_pref == data["value"])
-        button_text = data["name"] + (" ✓" if is_selected else "")
+        # Convert button text to small caps
+        button_text = to_small_caps(data["name"]) + (" ✓" if is_selected else "")
         
         row.append(InlineKeyboardButton(
             button_text,
@@ -161,6 +161,14 @@ async def smode_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Add remaining buttons
     if row:
         keyboard.append(row)
+    
+    # Add Cancel button at the end
+    keyboard.append([
+        InlineKeyboardButton(
+            "❌ " + to_small_caps("Cancel"),
+            callback_data="smode_cancel"
+        )
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -185,15 +193,22 @@ async def smode_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle rarity selection button callbacks"""
     query = update.callback_query
-    await query.answer()
     
     user_id = query.from_user.id
     data = query.data
     
+    # Handle cancel button
+    if data == "smode_cancel":
+        await query.answer("🚫 Cancelled", show_alert=False)
+        await query.message.delete()
+        return
+    
+    await query.answer()
+    
     # Extract rarity from callback data
     if data == "smode_all":
         rarity_filter = None
-        selected_text = "🌈 All Rarities"
+        selected_text = "🍃 " + to_small_caps("default")
     else:
         rarity_key = data.replace("smode_", "")
         rarity_info = RARITY_OPTIONS.get(rarity_key)
@@ -210,28 +225,27 @@ async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # Update message
     message_text = (
-        f"<b>⚙️ {to_small_caps('SORTING MODE')}</b>\n\n"
-        f"📊 {to_small_caps('Current Filter:')} <b>{selected_text}</b>\n\n"
-        f"💡 {to_small_caps('Select a rarity to filter your harem:')}\n"
-        f"   {to_small_caps('Use /harem or /collection to see filtered results')}"
+        f"<b>✨ {to_small_caps('SMODE')}</b>\n\n"
+        f"🎯 {to_small_caps('Current Model:')} <b>{selected_text}</b>\n"
     )
     
-    # Recreate keyboard with updated selection
+    # Recreate keyboard with updated selection (ALL IN SMALL CAPS)
     keyboard = []
     row = []
     
     # Add "All Rarities" button
     row.append(InlineKeyboardButton(
-        "🌈 All Rarities" + (" ✓" if rarity_filter is None else ""),
+        to_small_caps("🍃 default") + (" ✓" if rarity_filter is None else ""),
         callback_data="smode_all"
     ))
     keyboard.append(row)
     
-    # Add rarity buttons
+    # Add rarity buttons (ALL IN SMALL CAPS)
     row = []
     for i, (key, rarity_data) in enumerate(list(RARITY_OPTIONS.items())[1:], 1):
         is_selected = (rarity_filter == rarity_data["value"])
-        button_text = rarity_data["name"] + (" ✓" if is_selected else "")
+        # Convert to small caps
+        button_text = to_small_caps(rarity_data["name"]) + (" ✓" if is_selected else "")
         
         row.append(InlineKeyboardButton(
             button_text,
@@ -244,6 +258,14 @@ async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     if row:
         keyboard.append(row)
+    
+    # Add Cancel button
+    keyboard.append([
+        InlineKeyboardButton(
+            "❌ " + to_small_caps("Cancel"),
+            callback_data="smode_cancel"
+        )
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -295,34 +317,34 @@ async def open_smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Determine current selection text
     if current_pref is None:
-        current_text = "🌈 All Rarities"
+        current_text = "🍃 " + to_small_caps("default")
     else:
-        current_text = RARITY_OPTIONS.get(str(current_pref), {}).get("name", "Unknown")
+        rarity_info = RARITY_OPTIONS.get(str(current_pref), {})
+        current_text = rarity_info.get("name", "Unknown")
     
-    # Create message with image
+    # Create message with premium emojis
     caption = (
-        f"<b>⚙️ {to_small_caps('SORTING MODE')}</b>\n\n"
-        f"📊 {to_small_caps('Current Filter:')} <b>{current_text}</b>\n\n"
-        f"💡 {to_small_caps('Select a rarity to filter your harem:')}\n"
-        f"   {to_small_caps('Use /harem or /collection to see filtered results')}"
+        f"<b>✨ {to_small_caps('SMODE')}</b>\n\n"
+        f"🎯 {to_small_caps('Current Model:')} <b>{current_text}</b>\n"
     )
     
-    # Create keyboard with rarity buttons
+    # Create keyboard with rarity buttons (ALL IN SMALL CAPS)
     keyboard = []
     row = []
     
     # Add "All Rarities" button first
     row.append(InlineKeyboardButton(
-        "🌈 All Rarities" + (" ✓" if current_pref is None else ""),
+        to_small_caps("🍃 default"s") + (" ✓" if current_pref is None else ""),
         callback_data="smode_all"
     ))
     keyboard.append(row)
     
-    # Add rarity buttons
+    # Add rarity buttons (ALL IN SMALL CAPS)
     row = []
     for i, (key, data) in enumerate(list(RARITY_OPTIONS.items())[1:], 1):
         is_selected = (current_pref == data["value"])
-        button_text = data["name"] + (" ✓" if is_selected else "")
+        # Convert to small caps
+        button_text = to_small_caps(data["name"]) + (" ✓" if is_selected else "")
         
         row.append(InlineKeyboardButton(
             button_text,
@@ -335,6 +357,14 @@ async def open_smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if row:
         keyboard.append(row)
+    
+    # Add Cancel button
+    keyboard.append([
+        InlineKeyboardButton(
+            "❌ " + to_small_caps("Cancel"),
+            callback_data="smode_cancel"
+        )
+    ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     

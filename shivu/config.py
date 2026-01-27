@@ -40,7 +40,7 @@ class Config:
         url.strip()
         for url in os.getenv(
             "VIDEO_URL",
-            "https://files.catbox.moe/iqeaeb.mp4,https://files.catbox.moe/fp7m2d.mp4"
+            "https://files.catbox.moe/iqeaeb.mp4,https://files.catbox.moe/fp7m2d.mp4,https://files.catbox.moe/cv8r9i.mp4,https://files.catbox.moe/kz2usa.mp4,https://files.catbox.moe/u3gfz5.mp4,https://files.catbox.moe/4w63xt.mp4,https://files.catbox.moe/3mv64w.mp4,https://files.catbox.moe/n2m9av.mp4,https://files.catbox.moe/lrjr1o.mp4,https://files.catbox.moe/xdmuzm.mp4,https://files.catbox.moe/lqsdnr.mp4,https://files.catbox.moe/3mv64w.mp4"
         ).split(",")
         if url.strip()
     ]

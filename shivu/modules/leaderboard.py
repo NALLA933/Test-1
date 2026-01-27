@@ -45,18 +45,18 @@ async def leaderboard_entry(update: Update, context: CallbackContext) -> None:
     """Main leaderboard entry point with inline buttons."""
     keyboard = [
         [
-            InlineKeyboardButton("🏆 Char Top", callback_data="leaderboard_char"),
-            InlineKeyboardButton("💰 Coin Top", callback_data="leaderboard_coin")
+            InlineKeyboardButton("💠 ᴛᴏᴘ ᴄᴏʟʟᴇᴄᴛᴏʀs", callback_data="leaderboard_char"),
+            InlineKeyboardButton("💸 ᴛᴏᴘ ʙᴀʟᴀɴᴄᴇ", callback_data="leaderboard_coin")
         ],
         [
-            InlineKeyboardButton("👥 Group Top", callback_data="leaderboard_group"),
-            InlineKeyboardButton("⏳ Group User Top", callback_data="leaderboard_group_user")
+            InlineKeyboardButton("⚡ ɢʀᴏᴜᴘ ᴛᴏᴘ", callback_data="leaderboard_group"),
+            InlineKeyboardButton("🍃 ᴛᴏᴘ ᴜsᴇʀs", callback_data="leaderboard_group_user")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     video_url = random.choice(VIDEO_URL)
-    caption = "📊 <b>Leaderboard Menu</b>\n\nChoose a ranking to view:"
+    caption = "📊 <b>Leaderboard Menu</b>\n\nᴄʜᴏᴏsᴇ ᴀ ʀᴀɴᴋɪɴɢ ᴛᴏ ᴠɪᴇᴡ:"
     
     await update.message.reply_video(
         video=video_url,
@@ -67,7 +67,7 @@ async def leaderboard_entry(update: Update, context: CallbackContext) -> None:
 
 
 async def show_char_top() -> str:
-    """Show top 10 users by character count."""
+    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴏᴜɴᴛ."""
     cursor = user_collection.aggregate([
         {
             "$project": {
@@ -81,7 +81,7 @@ async def show_char_top() -> str:
     ])
     leaderboard_data = await cursor.to_list(length=10)
     
-    message = "🏆 <b>TOP 10 USERS WITH MOST CHARACTERS</b>\n\n"
+    message = "🏆 <b>ᴛᴏᴘ 10 ᴜsᴇʀs ᴡɪᴛʜ ᴍᴏsᴛ ᴄʜᴀʀᴀᴄᴛᴇʀs</b>\n\n"
     
     for i, user in enumerate(leaderboard_data, start=1):
         username = user.get('username', '')
@@ -104,7 +104,7 @@ async def show_char_top() -> str:
 
 
 async def show_coin_top() -> str:
-    """Show top 10 users by coin balance."""
+    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏɪɴ ʙᴀʟᴀɴᴄᴇ."""
     # Get database instance (assuming it's available in context)
     db: AsyncIOMotorDatabase = user_collection.database
     user_balance_collection = db.get_collection('user_balance')
@@ -116,7 +116,7 @@ async def show_coin_top() -> str:
     ])
     coin_data = await cursor.to_list(length=10)
     
-    message = "💰 <b>TOP 10 RICHEST USERS</b>\n\n"
+    message = "💰 <b>ᴛᴏᴘ 10 ʀɪᴄʜᴇsᴛ ᴜsᴇʀs</b>\n\n"
     
     for i, coin_user in enumerate(coin_data, start=1):
         user_id = coin_user['user_id']
@@ -146,7 +146,7 @@ async def show_coin_top() -> str:
 
 
 async def show_group_top() -> str:
-    """Show top 10 groups by character guesses."""
+    """sʜᴏᴡ ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs."""
     cursor = top_global_groups_collection.aggregate([
         {"$project": {"group_name": 1, "count": 1}},
         {"$sort": {"count": -1}},
@@ -154,7 +154,7 @@ async def show_group_top() -> str:
     ])
     leaderboard_data = await cursor.to_list(length=10)
     
-    message = "👥 <b>TOP 10 GROUPS BY CHARACTER GUESSES</b>\n\n"
+    message = "👥 <b>ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs.</b>\n\n"
     
     for i, group in enumerate(leaderboard_data, start=1):
         group_name = html.escape(group.get('group_name', 'Unknown'))
@@ -170,7 +170,7 @@ async def show_group_top() -> str:
 
 
 async def show_group_user_top(chat_id: Optional[int] = None) -> str:
-    """Show top 10 users in current group or global total grabs."""
+    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ɪɴ ᴄᴜʀʀᴇɴᴛ ɢʀᴏᴜᴘ ᴏʀ ɢʟᴏʙᴀʟ ᴛᴏᴛᴀʟ ɢʀᴀʙs."""
     if chat_id:
         # Show top users in current group
         cursor = group_user_totals_collection.aggregate([
@@ -181,7 +181,7 @@ async def show_group_user_top(chat_id: Optional[int] = None) -> str:
         ])
         leaderboard_data = await cursor.to_list(length=10)
         
-        message = "⏳ <b>TOP 10 USERS IN THIS GROUP</b>\n\n"
+        message = "⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ</b>\n\n"
     else:
         # Fallback: Show global user totals (from user_collection)
         cursor = user_collection.aggregate([
@@ -195,7 +195,7 @@ async def show_group_user_top(chat_id: Optional[int] = None) -> str:
         ])
         leaderboard_data = await cursor.to_list(length=10)
         
-        message = "⏳ <b>TOP 10 USERS (GLOBAL GRABS)</b>\n\n"
+        message = "⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs (ɢʟᴏʙᴀʟ ɢʀᴀʙs)</b>\n\n"
     
     for i, user in enumerate(leaderboard_data, start=1):
         username = user.get('username', '')
@@ -226,12 +226,12 @@ async def leaderboard_callback(update: Update, context: CallbackContext) -> None
     # Main menu keyboard (for back button)
     main_keyboard = [
         [
-            InlineKeyboardButton("🏆 Char Top", callback_data="leaderboard_char"),
-            InlineKeyboardButton("💰 Coin Top", callback_data="leaderboard_coin")
+            InlineKeyboardButton("💠 ᴛᴏᴘ ᴄᴏʟʟᴇᴄᴛᴏʀs", callback_data="leaderboard_char"),
+            InlineKeyboardButton("💸 ᴛᴏᴘ ʙᴀʟᴀɴᴄᴇ", callback_data="leaderboard_coin")
         ],
         [
-            InlineKeyboardButton("👥 Group Top", callback_data="leaderboard_group"),
-            InlineKeyboardButton("⏳ Group User Top", callback_data="leaderboard_group_user")
+            InlineKeyboardButton("⚡ ɢʀᴏᴜᴘ ᴛᴏᴘ", callback_data="leaderboard_group"),
+            InlineKeyboardButton("🍃 ᴛᴏᴘ ᴜsᴇʀs", callback_data="leaderboard_group_user")
         ]
     ]
     

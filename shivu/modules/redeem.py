@@ -409,8 +409,8 @@ async def debug_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Count documents
         total_chars = await collection.count_documents({})
         
-        # Get some sample IDs
-        sample_chars = await collection.find({}, {"id": 1, "name": 1}).limit(5).to_list(length=5)
+        # Get some sample characters with ALL fields
+        sample_chars = await collection.find({}).limit(3).to_list(length=3)
         
         # Build debug info
         debug_info = (
@@ -421,11 +421,13 @@ async def debug_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         
         if sample_chars:
-            debug_info += "<b>Sample Characters:</b>\n"
-            for char in sample_chars:
-                char_id = char.get('id', 'N/A')
-                char_name = char.get('name', 'N/A')
-                debug_info += f"• ID {char_id}: {escape(char_name)}\n"
+            debug_info += "<b>Sample Characters (with field names):</b>\n"
+            for i, char in enumerate(sample_chars, 1):
+                debug_info += f"\n<b>Character {i}:</b>\n"
+                # Show all fields
+                for key, value in char.items():
+                    if key != '_id':  # Skip MongoDB internal ID
+                        debug_info += f"  • {key}: {str(value)[:50]}\n"
         else:
             debug_info += "⚠️ No characters found in collection!\n"
         

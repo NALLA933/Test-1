@@ -2,6 +2,7 @@ import html
 import random
 from typing import Optional
 from datetime import datetime
+import pytz  # For IST timezone
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
@@ -40,6 +41,102 @@ def to_small_caps(text: str) -> str:
             result.append(char)
 
     return ''.join(result)
+
+
+# ============================================================================
+# IST TIMEZONE HELPER FUNCTIONS
+# ============================================================================
+
+def get_ist_date() -> str:
+    """Get today's date in IST timezone (Asia/Kolkata)."""
+    ist_tz = pytz.timezone('Asia/Kolkata')
+    ist_now = datetime.now(ist_tz)
+    return ist_now.strftime("%Y-%m-%d")
+
+
+def get_ist_datetime() -> datetime:
+    """Get current datetime in IST timezone."""
+    ist_tz = pytz.timezone('Asia/Kolkata')
+    return datetime.now(ist_tz)
+
+
+# ============================================================================
+# DAILY COLLECTIONS (IST-based)
+# ============================================================================
+
+# Get database instance from existing collection
+db: AsyncIOMotorDatabase = user_collection.database
+
+# Create new collections for daily tracking (IST-based)
+daily_user_guesses_collection = db.get_collection('daily_user_guesses')
+daily_group_guesses_collection = db.get_collection('daily_group_guesses')
+
+
+# ============================================================================
+# ATOMIC UPDATE FUNCTIONS (to be called after correct guess)
+# ============================================================================
+
+async def update_daily_user_guess(user_id: int, username: str = "", first_name: str = "") -> None:
+    """
+    Increment daily guess count for a user.
+    Call this AFTER a correct guess succeeds in existing logic.
+    """
+    try:
+        today = get_ist_date()
+        await daily_user_guesses_collection.update_one(
+            {
+                "date": today,
+                "user_id": user_id
+            },
+            {
+                "$inc": {"count": 1},
+                "$set": {
+                    "username": username,
+                    "first_name": first_name,
+                    "last_updated": get_ist_datetime()
+                },
+                "$setOnInsert": {
+                    "date": today,
+                    "user_id": user_id,
+                    "count": 0
+                }
+            },
+            upsert=True
+        )
+    except Exception:
+        # Silently fail to not break existing flow
+        pass
+
+
+async def update_daily_group_guess(group_id: int, group_name: str = "") -> None:
+    """
+    Increment daily guess count for a group.
+    Call this AFTER a correct guess succeeds in existing logic.
+    """
+    try:
+        today = get_ist_date()
+        await daily_group_guesses_collection.update_one(
+            {
+                "date": today,
+                "group_id": group_id
+            },
+            {
+                "$inc": {"count": 1},
+                "$set": {
+                    "group_name": group_name,
+                    "last_updated": get_ist_datetime()
+                },
+                "$setOnInsert": {
+                    "date": today,
+                    "group_id": group_id,
+                    "count": 0
+                }
+            },
+            upsert=True
+        )
+    except Exception:
+        # Silently fail to not break existing flow
+        pass
 
 
 async def leaderboard_entry(update: Update, context: CallbackContext) -> None:
@@ -148,72 +245,69 @@ async def show_coin_top() -> str:
 
 
 async def show_group_top() -> str:
-    """sʜᴏᴡ ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs."""
-    cursor = top_global_groups_collection.aggregate([
-        {"$project": {"group_name": 1, "count": 1}},
+    """sʜᴏᴡ ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs (TODAY - IST)."""
+    today = get_ist_date()
+    
+    # Query daily group guesses for today
+    cursor = daily_group_guesses_collection.aggregate([
+        {"$match": {"date": today}},
         {"$sort": {"count": -1}},
         {"$limit": 10}
     ])
-    leaderboard_data = await cursor.to_list(length=10)
-
-    message = "👥 <b>ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs.</b>\n\n"
-
-    for i, group in enumerate(leaderboard_data, start=1):
+    
+    daily_data = await cursor.to_list(length=10)
+    
+    if not daily_data:
+        return "👥 <b>ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n\nɴᴏ ɢᴜᴇssᴇs ᴛᴏᴅᴀʏ ʏᴇᴛ!"
+    
+    message = "👥 <b>ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n\n"
+    
+    for i, group in enumerate(daily_data, start=1):
         group_name = html.escape(group.get('group_name', 'Unknown'))
         display_name = to_small_caps(group_name)
-
+        
         if len(display_name) > 20:
             display_name = display_name[:20] + '...'
-
-        count = group['count']
+        
+        count = group.get('count', 0)
         message += f'{i}. <b>{display_name}</b> ➾ <b>{count}</b>\n'
-
+    
     return message
 
 
 async def show_group_user_top(chat_id: Optional[int] = None) -> str:
-    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ɪɴ ᴄᴜʀʀᴇɴᴛ ɢʀᴏᴜᴘ ᴏʀ ɢʟᴏʙᴀʟ ᴛᴏᴛᴀʟ ɢʀᴀʙs."""
-    if chat_id:
-        # Show top users in current group
-        cursor = group_user_totals_collection.aggregate([
-            {"$match": {"group_id": chat_id}},
-            {"$project": {"username": 1, "first_name": 1, "character_count": "$count"}},
-            {"$sort": {"character_count": -1}},
-            {"$limit": 10}
-        ])
-        leaderboard_data = await cursor.to_list(length=10)
-
-        message = "⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ</b>\n\n"
-    else:
-        # Fallback: Show global user totals (from user_collection)
-        cursor = user_collection.aggregate([
-            {"$project": {
-                "username": 1,
-                "first_name": 1,
-                "character_count": {"$size": "$characters"}
-            }},
-            {"$sort": {"character_count": -1}},
-            {"$limit": 10}
-        ])
-        leaderboard_data = await cursor.to_list(length=10)
-
-        message = "⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs (ɢʟᴏʙᴀʟ ɢʀᴀʙs)</b>\n\n"
-
-    for i, user in enumerate(leaderboard_data, start=1):
+    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏʀʀᴇᴄᴛ ɢᴜᴇssᴇs (TODAY - IST)."""
+    today = get_ist_date()
+    
+    # Query daily user guesses for today
+    cursor = daily_user_guesses_collection.aggregate([
+        {"$match": {"date": today}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10}
+    ])
+    
+    daily_data = await cursor.to_list(length=10)
+    
+    if not daily_data:
+        return "⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏʀʀᴇᴄᴛ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n\nɴᴏ ɢᴜᴇssᴇs ᴛᴏᴅᴀʏ ʏᴇᴛ!"
+    
+    message = "⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏʀʀᴇᴄᴛ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n\n"
+    
+    for i, user in enumerate(daily_data, start=1):
         username = user.get('username', '')
         first_name = html.escape(user.get('first_name', 'Unknown'))
         display_name = to_small_caps(first_name)
-
+        
         if len(display_name) > 15:
             display_name = display_name[:15] + '...'
-
-        character_count = user.get('character_count', user.get('count', 0))
-
+        
+        count = user.get('count', 0)
+        
         if username:
-            message += f'{i}. <a href="https://t.me/{username}"><b>{display_name}</b></a> ➾ <b>{character_count}</b>\n'
+            message += f'{i}. <a href="https://t.me/{username}"><b>{display_name}</b></a> ➾ <b>{count}</b>\n'
         else:
-            message += f'{i}. <b>{display_name}</b> ➾ <b>{character_count}</b>\n'
-
+            message += f'{i}. <b>{display_name}</b> ➾ <b>{count}</b>\n'
+    
     return message
 
 
@@ -242,7 +336,7 @@ async def leaderboard_callback(update: Update, context: CallbackContext) -> None
 
     if data == "leaderboard_main":
         # Return to main menu
-        caption = "📊 <b>ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ ᴍᴇɴᴜ</b>\n\nᴄʜᴏᴏꜱᴇ ᴀ ʀᴀɴᴋɪɴɢ ᴛᴏ ᴠɪᴇᴡ:"
+        caption = "📊 <b>Leaderboard Menu</b>\n\nChoose a ranking to view:"
         reply_markup = InlineKeyboardMarkup(main_keyboard)
         await query.edit_message_caption(caption=caption, parse_mode='HTML', reply_markup=reply_markup)
 
@@ -262,267 +356,18 @@ async def leaderboard_callback(update: Update, context: CallbackContext) -> None
         await query.edit_message_caption(caption=message, parse_mode='HTML', reply_markup=reply_markup)
 
     elif data == "leaderboard_group_user":
-        # Determine if in group or private chat
-        chat_type = query.message.chat.type
-        if chat_type in ['group', 'supergroup']:
-            message = await show_group_user_top(chat_id)
-        else:
-            message = await show_group_user_top(None)  # Use global fallback
+        # Note: The daily user leaderboard is now GLOBAL (not per group)
+        # Always show global daily user guesses regardless of chat type
+        message = await show_group_user_top()
         reply_markup = InlineKeyboardMarkup(back_keyboard)
         await query.edit_message_caption(caption=message, parse_mode='HTML', reply_markup=reply_markup)
 
 
-# ============================================================================
-# DAILY LEADERBOARD TRACKING SYSTEM (ADDITIVE ONLY - NO EXISTING LOGIC CHANGED)
-# ============================================================================
-
-# Get database instance from existing collection
-db: AsyncIOMotorDatabase = user_collection.database
-
-# Create new collections for daily tracking
-daily_user_grabs_collection = db.get_collection('daily_user_grabs')
-daily_group_guesses_collection = db.get_collection('daily_group_guesses')
-
-
-def get_today_date() -> str:
-    """Get today's date in UTC YYYY-MM-DD format."""
-    return datetime.utcnow().strftime("%Y-%m-%d")
-
-
-async def update_daily_user_grab(user_id: int, username: str = "", first_name: str = "", increment: int = 1) -> None:
-    """
-    Update daily grab count for a user.
-    Call this AFTER successful grab in existing grab logic.
-    """
-    try:
-        today = get_today_date()
-        await daily_user_grabs_collection.update_one(
-            {
-                "date": today,
-                "user_id": user_id
-            },
-            {
-                "$inc": {"count": increment},
-                "$set": {
-                    "username": username,
-                    "first_name": first_name,
-                    "last_updated": datetime.utcnow()
-                },
-                "$setOnInsert": {
-                    "date": today,
-                    "user_id": user_id
-                }
-            },
-            upsert=True
-        )
-    except Exception:
-        pass  # Silently fail to not break existing flow
-
-
-async def update_daily_group_guess(group_id: int, group_name: str = "", increment: int = 1) -> None:
-    """
-    Update daily guess count for a group.
-    Call this AFTER successful guess in existing guess logic.
-    """
-    try:
-        today = get_today_date()
-        await daily_group_guesses_collection.update_one(
-            {
-                "date": today,
-                "group_id": group_id
-            },
-            {
-                "$inc": {"count": increment},
-                "$set": {
-                    "group_name": group_name,
-                    "last_updated": datetime.utcnow()
-                },
-                "$setOnInsert": {
-                    "date": today,
-                    "group_id": group_id
-                }
-            },
-            upsert=True
-        )
-    except Exception:
-        pass  # Silently fail to not break existing flow
-
-
-async def show_daily_user_top(limit: int = 10) -> str:
-    """Show top users by grabs today."""
-    today = get_today_date()
-    
-    cursor = daily_user_grabs_collection.aggregate([
-        {"$match": {"date": today}},
-        {"$sort": {"count": -1}},
-        {"$limit": limit},
-        {"$project": {
-            "user_id": 1,
-            "username": 1,
-            "first_name": 1,
-            "count": 1
-        }}
-    ])
-    
-    daily_data = await cursor.to_list(length=limit)
-    
-    if not daily_data:
-        return "📅 <b>ᴅᴀɪʟʏ ᴛᴏᴘ ᴜsᴇʀs</b>\n\nɴᴏ ᴅᴀᴛᴀ ғᴏʀ ᴛᴏᴅᴀʏ ʏᴇᴛ!"
-    
-    message = f"📅 <b>ᴅᴀɪʟʏ ᴛᴏᴘ {len(daily_data)} ᴜsᴇʀs (ᴛᴏᴅᴀʏ)</b>\n\n"
-    
-    for i, user in enumerate(daily_data, start=1):
-        username = user.get('username', '')
-        first_name = html.escape(user.get('first_name', 'Unknown'))
-        display_name = to_small_caps(first_name)
-        
-        if len(display_name) > 15:
-            display_name = display_name[:15] + '...'
-        
-        count = user.get('count', 0)
-        
-        if username:
-            message += f'{i}. <a href="https://t.me/{username}"><b>{display_name}</b></a> ➾ <b>{count}</b>\n'
-        else:
-            message += f'{i}. <b>{display_name}</b> ➾ <b>{count}</b>\n'
-    
-    return message
-
-
-async def show_daily_group_top(limit: int = 10) -> str:
-    """Show top groups by guesses today."""
-    today = get_today_date()
-    
-    cursor = daily_group_guesses_collection.aggregate([
-        {"$match": {"date": today}},
-        {"$sort": {"count": -1}},
-        {"$limit": limit},
-        {"$project": {
-            "group_id": 1,
-            "group_name": 1,
-            "count": 1
-        }}
-    ])
-    
-    daily_data = await cursor.to_list(length=limit)
-    
-    if not daily_data:
-        return "📅 <b>ᴅᴀɪʟʏ ᴛᴏᴘ ɢʀᴏᴜᴘs</b>\n\nɴᴏ ᴅᴀᴛᴀ ғᴏʀ ᴛᴏᴅᴀʏ ʏᴇᴛ!"
-    
-    message = f"📅 <b>ᴅᴀɪʟʏ ᴛᴏᴘ {len(daily_data)} ɢʀᴏᴜᴘs (ᴛᴏᴅᴀʏ)</b>\n\n"
-    
-    for i, group in enumerate(daily_data, start=1):
-        group_name = html.escape(group.get('group_name', 'Unknown'))
-        display_name = to_small_caps(group_name)
-        
-        if len(display_name) > 20:
-            display_name = display_name[:20] + '...'
-        
-        count = group.get('count', 0)
-        message += f'{i}. <b>{display_name}</b> ➾ <b>{count}</b>\n'
-    
-    return message
-
-
-# OPTIONAL: Extended callback handler with daily support (non-breaking)
-# This extends the existing handler to support daily callbacks
-async def leaderboard_callback_with_daily(update: Update, context: CallbackContext) -> None:
-    """Extended callback handler with daily leaderboard support."""
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data
-    chat_id = query.message.chat_id
-    
-    # Handle new daily callbacks without affecting existing ones
-    if data == "leaderboard_daily_user":
-        message = await show_daily_user_top()
-        back_keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="leaderboard_main")]]
-        reply_markup = InlineKeyboardMarkup(back_keyboard)
-        await query.edit_message_caption(caption=message, parse_mode='HTML', reply_markup=reply_markup)
-        return
-    
-    elif data == "leaderboard_daily_group":
-        message = await show_daily_group_top()
-        back_keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="leaderboard_main")]]
-        reply_markup = InlineKeyboardMarkup(back_keyboard)
-        await query.edit_message_caption(caption=message, parse_mode='HTML', reply_markup=reply_markup)
-        return
-    
-    # If not a daily callback, fall back to original handler
-    await leaderboard_callback(update, context)
-
-
-# OPTIONAL: Extended leaderboard entry with daily buttons (non-breaking)
-# Uncomment if you want to add daily buttons without removing existing ones
-async def leaderboard_entry_with_daily(update: Update, context: CallbackContext) -> None:
-    """Main leaderboard entry point with daily buttons (optional)."""
-    keyboard = [
-        [
-            InlineKeyboardButton("💠 ᴛᴏᴘ ᴄᴏʟʟᴇᴄᴛᴏʀs", callback_data="leaderboard_char"),
-            InlineKeyboardButton("💸 ᴛᴏᴘ ʙᴀʟᴀɴᴄᴇ", callback_data="leaderboard_coin")
-        ],
-        [
-            InlineKeyboardButton("⚡ ɢʀᴏᴜᴘ ᴛᴏᴘ", callback_data="leaderboard_group"),
-            InlineKeyboardButton("🍃 ᴛᴏᴘ ᴜsᴇʀs", callback_data="leaderboard_group_user")
-        ],
-        [  # Daily buttons row (optional addition)
-            InlineKeyboardButton("📅 ᴅᴀɪʟʏ ᴜsᴇʀs", callback_data="leaderboard_daily_user"),
-            InlineKeyboardButton("📅 ᴅᴀɪʟʏ ɢʀᴏᴜᴘs", callback_data="leaderboard_daily_group")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    video_url = random.choice(VIDEO_URL)
-    caption = "📊 <b>ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ ᴍᴇɴᴜ</b>\n\nᴄʜᴏᴏꜱᴇ ᴀ ʀᴀɴᴋɪɴɢ ᴛᴏ ᴠɪᴇᴡ:"
-
-    await update.message.reply_video(
-        video=video_url,
-        caption=caption,
-        parse_mode='HTML',
-        reply_markup=reply_markup
-    )
-
-
-# Create indexes for performance (run on startup)
-async def create_daily_indexes():
-    """Create indexes for daily collections."""
-    try:
-        await daily_user_grabs_collection.create_index([("date", 1), ("user_id", 1)], unique=True)
-        await daily_user_grabs_collection.create_index([("date", 1), ("count", -1)])
-        await daily_group_guesses_collection.create_index([("date", 1), ("group_id", 1)], unique=True)
-        await daily_group_guesses_collection.create_index([("date", 1), ("count", -1)])
-        print("✅ Daily leaderboard indexes created successfully")
-    except Exception as e:
-        print(f"⚠️ Daily index creation warning: {e}")
-
-
-# Schedule index creation on application startup
-async def on_startup(app):
-    """Initialize daily indexes on startup."""
-    await create_daily_indexes()
-
-
-# Hook into application startup (if supported by your framework)
-try:
-    # If your application supports startup hooks
-    if hasattr(application, 'add_startup_handler'):
-        application.add_startup_handler(on_startup)
-except:
-    pass
-
-
-# Add handlers (ORIGINAL - UNCHANGED)
+# Add handlers
 application.add_handler(CommandHandler('leaderboard', leaderboard_entry, block=False))
 application.add_handler(CallbackQueryHandler(leaderboard_callback, pattern=r'^leaderboard_.*$', block=False))
 
-# Optional: Add daily callback handler (comment out if not using daily UI)
-# application.add_handler(CallbackQueryHandler(leaderboard_callback_with_daily, pattern=r'^leaderboard_.*$', block=False))
-
-# Optional: Add daily version of leaderboard command (comment out if not using)
-# application.add_handler(CommandHandler('dailyleaderboard', leaderboard_entry_with_daily, block=False))
-
-# Keep old commands for backward compatibility with redirect
+# Optional: Keep old commands for backward compatibility with redirect
 async def old_command_redirect(update: Update, context: CallbackContext, command: str) -> None:
     """Redirect old commands to the new leaderboard system."""
     await leaderboard_entry(update, context)

@@ -1,4 +1,4 @@
-from pyrogram import filters, enums
+from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 import time
@@ -62,19 +62,11 @@ def check_cooldown(user_id, cooldown_dict, cooldown_time):
     return True, 0
 
 def format_character_info(character):
-    """Format character information for display with premium styling"""
+    """Format character information for display"""
     name = character.get('name', 'Unknown')
-    rarity = character.get('rarity', '⭐')
+    rarity = character.get('rarity', 'Unknown')
     anime = character.get('anime', 'Unknown')
-    char_id = character.get('id', 'N/A')
-    
-    # Premium compact format
-    return (
-        f"<b>{name}</b>\n"
-        f"<code>├ ID:</code> <code>{char_id}</code>\n"
-        f"<code>├ ⭐ Rarity:</code> <code>{rarity}</code>\n"
-        f"<code>└ 📺 Anime:</code> <code>{anime}</code>"
-    )
+    return f"**{name}**\n⭐ Rarity: {rarity}\n📺 Anime: {anime}"
 
 
 @shivuu.on_message(filters.command("trade"))
@@ -87,14 +79,7 @@ async def trade(client, message):
     
     # Check if replying to a message
     if not message.reply_to_message:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⚠️ TRADE ERROR</b>  ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Reply to a user's message</code>\n"
-            "<code>   to initiate trade!</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("❌ You need to reply to a user's message to trade a character!")
         return
     
     receiver_id = message.reply_to_message.from_user.id
@@ -102,38 +87,21 @@ async def trade(client, message):
     
     # Check if trading with self
     if sender_id == receiver_id:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⚠️ TRADE ERROR</b>  ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Self-trading not allowed!</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("❌ You can't trade a character with yourself!")
         return
     
     # Check cooldown
     can_trade, remaining = check_cooldown(sender_id, last_trade_time, TRADE_COOLDOWN)
     if not can_trade:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⏳ COOLDOWN</b>    ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            f"<code>⏱️ Wait {remaining}s before trading</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text(f"⏳ Please wait {remaining} seconds before trading again!")
         return
     
     # Validate command format
     if len(message.command) != 3:
         await message.reply_text(
-            "╭━━━━━━━━━━━━━━━━╮\n"
-            "┃  <b>📋 TRADE FORMAT</b>  ┃\n"
-            "╰━━━━━━━━━━━━━━━━╯\n\n"
-            "<code>Usage:</code>\n"
-            "<code>/trade [Your ID] [Their ID]</code>\n\n"
-            "<code>Example:</code>\n"
-            "<code>/trade char123 char456</code>",
-            parse_mode=enums.ParseMode.HTML
+            "❌ **Invalid Format!**\n\n"
+            "**Usage:** `/trade [Your Character ID] [Other User Character ID]`\n"
+            "**Example:** `/trade char123 char456`"
         )
         return
     
@@ -149,23 +117,11 @@ async def trade(client, message):
             
             # Check if users exist
             if not sender:
-                await message.reply_text(
-                    "╭━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ NO DATA</b>    ┃\n"
-                    "╰━━━━━━━━━━━━━╯\n\n"
-                    "<code>❌ No characters found!</code>",
-                    parse_mode=enums.ParseMode.HTML
-                )
+                await message.reply_text("❌ You don't have any characters yet!")
                 return
             
             if not receiver:
-                await message.reply_text(
-                    "╭━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ NO DATA</b>    ┃\n"
-                    "╰━━━━━━━━━━━━━╯\n\n"
-                    "<code>❌ User has no characters!</code>",
-                    parse_mode=enums.ParseMode.HTML
-                )
+                await message.reply_text("❌ The other user doesn't have any characters yet!")
                 return
             
             # Find characters
@@ -181,37 +137,20 @@ async def trade(client, message):
             # Validate characters exist
             if not sender_character:
                 await message.reply_text(
-                    "╭━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ NOT FOUND</b>    ┃\n"
-                    "╰━━━━━━━━━━━━━━━╯\n\n"
-                    f"<code>❌ Character ID: {sender_character_id}</code>\n"
-                    f"<code>   not in your collection</code>\n\n"
-                    "<code>💡 Use /collection to view</code>",
-                    parse_mode=enums.ParseMode.HTML
+                    f"❌ You don't have character with ID: `{sender_character_id}`\n\n"
+                    "Use `/collection` to view your characters!"
                 )
                 return
             
             if not receiver_character:
                 await message.reply_text(
-                    "╭━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ NOT FOUND</b>    ┃\n"
-                    "╰━━━━━━━━━━━━━━━╯\n\n"
-                    f"<code>❌ Character ID: {receiver_character_id}</code>\n"
-                    f"<code>   not in user's collection</code>",
-                    parse_mode=enums.ParseMode.HTML
+                    f"❌ The other user doesn't have character with ID: `{receiver_character_id}`!"
                 )
                 return
             
             # Check if already in a pending trade
             if (sender_id, receiver_id) in pending_trades or (receiver_id, sender_id) in pending_trades:
-                await message.reply_text(
-                    "╭━━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ PENDING TRADE</b> ┃\n"
-                    "╰━━━━━━━━━━━━━━━━╯\n\n"
-                    "<code>❌ Trade already pending</code>\n"
-                    "<code>   with this user</code>",
-                    parse_mode=enums.ParseMode.HTML
-                )
+                await message.reply_text("❌ You already have a pending trade with this user!")
                 return
             
             # Store pending trade
@@ -222,46 +161,30 @@ async def trade(client, message):
                 'receiver_character': receiver_character
             }
             
-            # Create compact keyboard
+            # Create keyboard
             keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("✅ Accept", callback_data=f"confirm_trade"),
-                    InlineKeyboardButton("❌ Decline", callback_data=f"cancel_trade")
-                ]
+                [InlineKeyboardButton("✅ Confirm Trade", callback_data=f"confirm_trade")],
+                [InlineKeyboardButton("❌ Cancel Trade", callback_data=f"cancel_trade")]
             ])
             
-            # Send trade proposal with premium styling
+            # Send trade proposal
             trade_msg = (
-                "╭━━━━━━━━━━━━━━━━━╮\n"
-                "┃  <b>🔄 TRADE PROPOSAL</b>  ┃\n"
-                "╰━━━━━━━━━━━━━━━━━╯\n\n"
-                f"<b>🎯 Sender:</b> {message.from_user.first_name}\n\n"
-                "<b>┌─ 📤 OFFERING ─────┐</b>\n"
-                f"{format_character_info(sender_character)}\n"
-                "<b>└───────────────────┘</b>\n\n"
-                "<b>┌─ 📥 REQUESTING ───┐</b>\n"
-                f"{format_character_info(receiver_character)}\n"
-                "<b>└───────────────────┘</b>\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                f"<b>👤 {receiver_mention}</b>\n"
-                "<code>⚡ Accept this trade?</code>"
+                f"📊 **Trade Proposal**\n\n"
+                f"**{message.from_user.first_name}** wants to trade:\n\n"
+                f"**They Give:**\n{format_character_info(sender_character)}\n\n"
+                f"**They Get:**\n{format_character_info(receiver_character)}\n\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"{receiver_mention}, do you accept this trade?"
             )
             
-            await message.reply_text(trade_msg, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
+            await message.reply_text(trade_msg, reply_markup=keyboard)
             
             # Update cooldown
             last_trade_time[sender_id] = time.time()
             
     except Exception as e:
         logger.error(f"Error in trade command: {e}")
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⚠️ ERROR</b>      ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Failed to process trade</code>\n"
-            "<code>💡 Please try again</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("❌ An error occurred while processing the trade. Please try again!")
 
 
 @shivuu.on_callback_query(filters.create(lambda _, __, query: query.data in ["confirm_trade", "cancel_trade"]))
@@ -281,7 +204,7 @@ async def on_trade_callback(client, callback_query):
     
     # Check if trade exists
     if not trade_key:
-        await callback_query.answer("❌ Trade expired or not for you!", show_alert=True)
+        await callback_query.answer("❌ This trade is not for you or has expired!", show_alert=True)
         return
     
     sender_id = trade_key[0]
@@ -289,13 +212,7 @@ async def on_trade_callback(client, callback_query):
     # Check if trade expired
     if time.time() - trade_data['timestamp'] > PENDING_EXPIRY:
         del pending_trades[trade_key]
-        await callback_query.message.edit_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⏱️ EXPIRED</b>    ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Trade request expired</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await callback_query.message.edit_text("❌ This trade has expired!")
         return
     
     if callback_query.data == "confirm_trade":
@@ -320,11 +237,7 @@ async def on_trade_callback(client, callback_query):
                 
                 if not sender_character or not receiver_character:
                     await callback_query.message.edit_text(
-                        "╭━━━━━━━━━━━━━╮\n"
-                        "┃  <b>⚠️ FAILED</b>     ┃\n"
-                        "╰━━━━━━━━━━━━━╯\n\n"
-                        "<code>❌ Character no longer exists</code>",
-                        parse_mode=enums.ParseMode.HTML
+                        "❌ Trade failed! One of the characters no longer exists in the collections."
                     )
                     del pending_trades[trade_key]
                     return
@@ -350,21 +263,16 @@ async def on_trade_callback(client, callback_query):
                 # Remove from pending
                 del pending_trades[trade_key]
                 
-                # Success message with premium styling
+                # Success message
                 success_msg = (
-                    "╭━━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>✅ SUCCESS!</b>      ┃\n"
-                    "╰━━━━━━━━━━━━━━━━╯\n\n"
-                    "<b>🎉 Trade Completed!</b>\n\n"
-                    f"<code>👤 {callback_query.from_user.first_name}</code>\n"
-                    "<code>   successfully traded</code>\n"
-                    "<code>   characters!</code>\n\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<code>✨ Enjoy your new characters!</code>"
+                    f"✅ **Trade Successful!**\n\n"
+                    f"**{callback_query.from_user.first_name}** and their trade partner "
+                    f"have successfully exchanged characters!\n\n"
+                    f"🎉 Enjoy your new characters!"
                 )
                 
-                await callback_query.message.edit_text(success_msg, parse_mode=enums.ParseMode.HTML)
-                await callback_query.answer("✅ Trade completed!", show_alert=True)
+                await callback_query.message.edit_text(success_msg)
+                await callback_query.answer("✅ Trade completed successfully!", show_alert=True)
                 
                 logger.info(f"Trade completed: {sender_id} <-> {receiver_id}")
                 
@@ -379,11 +287,8 @@ async def on_trade_callback(client, callback_query):
         del pending_trades[trade_key]
         
         await callback_query.message.edit_text(
-            "╭━━━━━━━━━━━━━━━╮\n"
-            "┃  <b>❌ CANCELLED</b>    ┃\n"
-            "╰━━━━━━━━━━━━━━━╯\n\n"
-            "<code>🚫 Trade declined by receiver</code>",
-            parse_mode=enums.ParseMode.HTML
+            "❌ **Trade Cancelled**\n\n"
+            "The trade has been cancelled by the receiver."
         )
         await callback_query.answer("Trade cancelled!", show_alert=False)
         
@@ -400,14 +305,7 @@ async def gift(client, message):
     
     # Check if replying to a message
     if not message.reply_to_message:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⚠️ GIFT ERROR</b>   ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Reply to a user's message</code>\n"
-            "<code>   to send a gift!</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("❌ You need to reply to a user's message to gift a character!")
         return
     
     receiver_id = message.reply_to_message.from_user.id
@@ -417,38 +315,21 @@ async def gift(client, message):
     
     # Check if gifting to self
     if sender_id == receiver_id:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⚠️ GIFT ERROR</b>   ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Self-gifting not allowed!</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("❌ You can't gift a character to yourself!")
         return
     
     # Check cooldown
     can_gift, remaining = check_cooldown(sender_id, last_gift_time, GIFT_COOLDOWN)
     if not can_gift:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⏳ COOLDOWN</b>    ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            f"<code>⏱️ Wait {remaining}s before gifting</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text(f"⏳ Please wait {remaining} seconds before gifting again!")
         return
     
     # Validate command format
     if len(message.command) != 2:
         await message.reply_text(
-            "╭━━━━━━━━━━━━━━━╮\n"
-            "┃  <b>📋 GIFT FORMAT</b>  ┃\n"
-            "╰━━━━━━━━━━━━━━━╯\n\n"
-            "<code>Usage:</code>\n"
-            "<code>/gift [Character ID]</code>\n\n"
-            "<code>Example:</code>\n"
-            "<code>/gift char123</code>",
-            parse_mode=enums.ParseMode.HTML
+            "❌ **Invalid Format!**\n\n"
+            "**Usage:** `/gift [Character ID]`\n"
+            "**Example:** `/gift char123`"
         )
         return
     
@@ -461,13 +342,7 @@ async def gift(client, message):
             sender = await user_collection.find_one({'id': sender_id})
             
             if not sender:
-                await message.reply_text(
-                    "╭━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ NO DATA</b>    ┃\n"
-                    "╰━━━━━━━━━━━━━╯\n\n"
-                    "<code>❌ No characters found!</code>",
-                    parse_mode=enums.ParseMode.HTML
-                )
+                await message.reply_text("❌ You don't have any characters yet!")
                 return
             
             # Find character
@@ -478,26 +353,14 @@ async def gift(client, message):
             
             if not character:
                 await message.reply_text(
-                    "╭━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ NOT FOUND</b>    ┃\n"
-                    "╰━━━━━━━━━━━━━━━╯\n\n"
-                    f"<code>❌ Character ID: {character_id}</code>\n"
-                    f"<code>   not in your collection</code>\n\n"
-                    "<code>💡 Use /collection to view</code>",
-                    parse_mode=enums.ParseMode.HTML
+                    f"❌ You don't have character with ID: `{character_id}`\n\n"
+                    "Use `/collection` to view your characters!"
                 )
                 return
             
             # Check if already in a pending gift
             if (sender_id, receiver_id) in pending_gifts:
-                await message.reply_text(
-                    "╭━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>⚠️ PENDING GIFT</b> ┃\n"
-                    "╰━━━━━━━━━━━━━━━╯\n\n"
-                    "<code>❌ Gift already pending</code>\n"
-                    "<code>   for this user</code>",
-                    parse_mode=enums.ParseMode.HTML
-                )
+                await message.reply_text("❌ You already have a pending gift for this user!")
                 return
             
             # Store pending gift
@@ -508,42 +371,28 @@ async def gift(client, message):
                 'timestamp': time.time()
             }
             
-            # Create compact keyboard
+            # Create keyboard
             keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("✅ Confirm", callback_data="confirm_gift"),
-                    InlineKeyboardButton("❌ Cancel", callback_data="cancel_gift")
-                ]
+                [InlineKeyboardButton("✅ Confirm Gift", callback_data="confirm_gift")],
+                [InlineKeyboardButton("❌ Cancel Gift", callback_data="cancel_gift")]
             ])
             
-            # Send gift confirmation with premium styling
+            # Send gift confirmation
             gift_msg = (
-                "╭━━━━━━━━━━━━━━━━╮\n"
-                "┃  <b>🎁 GIFT CONFIRM</b>   ┃\n"
-                "╰━━━━━━━━━━━━━━━━╯\n\n"
-                "<b>┌─ 📦 CHARACTER ────┐</b>\n"
-                f"{format_character_info(character)}\n"
-                "<b>└───────────────────┘</b>\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                f"<b>🎯 Recipient:</b> {receiver_mention}\n\n"
-                "<code>⚡ Confirm this gift?</code>"
+                f"🎁 **Gift Confirmation**\n\n"
+                f"**Character to Gift:**\n{format_character_info(character)}\n\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Are you sure you want to gift this to {receiver_mention}?"
             )
             
-            await message.reply_text(gift_msg, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
+            await message.reply_text(gift_msg, reply_markup=keyboard)
             
             # Update cooldown
             last_gift_time[sender_id] = time.time()
             
     except Exception as e:
         logger.error(f"Error in gift command: {e}")
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⚠️ ERROR</b>      ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Failed to process gift</code>\n"
-            "<code>💡 Please try again</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("❌ An error occurred while processing the gift. Please try again!")
 
 
 @shivuu.on_callback_query(filters.create(lambda _, __, query: query.data in ["confirm_gift", "cancel_gift"]))
@@ -563,7 +412,7 @@ async def on_gift_callback(client, callback_query):
     
     # Check if gift exists
     if not gift_key:
-        await callback_query.answer("❌ Gift expired or not found!", show_alert=True)
+        await callback_query.answer("❌ This gift is not for you or has expired!", show_alert=True)
         return
     
     receiver_id = gift_key[1]
@@ -571,13 +420,7 @@ async def on_gift_callback(client, callback_query):
     # Check if gift expired
     if time.time() - gift_data['timestamp'] > PENDING_EXPIRY:
         del pending_gifts[gift_key]
-        await callback_query.message.edit_text(
-            "╭━━━━━━━━━━━━━╮\n"
-            "┃  <b>⏱️ EXPIRED</b>    ┃\n"
-            "╰━━━━━━━━━━━━━╯\n\n"
-            "<code>❌ Gift request expired</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await callback_query.message.edit_text("❌ This gift request has expired!")
         return
     
     if callback_query.data == "confirm_gift":
@@ -597,11 +440,7 @@ async def on_gift_callback(client, callback_query):
                 
                 if not sender_character:
                     await callback_query.message.edit_text(
-                        "╭━━━━━━━━━━━━━╮\n"
-                        "┃  <b>⚠️ FAILED</b>     ┃\n"
-                        "╰━━━━━━━━━━━━━╯\n\n"
-                        "<code>❌ Character no longer exists</code>",
-                        parse_mode=enums.ParseMode.HTML
+                        "❌ Gift failed! The character no longer exists in your collection."
                     )
                     del pending_gifts[gift_key]
                     return
@@ -634,20 +473,15 @@ async def on_gift_callback(client, callback_query):
                 # Remove from pending
                 del pending_gifts[gift_key]
                 
-                # Success message with premium styling
-                char_name = character.get('name', 'Unknown')
+                # Success message
                 success_msg = (
-                    "╭━━━━━━━━━━━━━━━━╮\n"
-                    "┃  <b>✅ SUCCESS!</b>      ┃\n"
-                    "╰━━━━━━━━━━━━━━━━╯\n\n"
-                    "<b>🎁 Gift Sent!</b>\n\n"
-                    f"<code>📦 Character: {char_name}</code>\n"
-                    f"<code>👤 Recipient: {gift_data['receiver_first_name']}</code>\n\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<code>✨ What a generous gift!</code>"
+                    f"🎁 **Gift Sent Successfully!**\n\n"
+                    f"You have gifted **{character.get('name', 'Unknown')}** to "
+                    f"[{gift_data['receiver_first_name']}](tg://user?id={receiver_id})!\n\n"
+                    f"🎉 What a generous gesture!"
                 )
                 
-                await callback_query.message.edit_text(success_msg, parse_mode=enums.ParseMode.HTML)
+                await callback_query.message.edit_text(success_msg)
                 await callback_query.answer("✅ Gift sent successfully!", show_alert=True)
                 
                 logger.info(f"Gift completed: {sender_id} -> {receiver_id}")
@@ -663,18 +497,15 @@ async def on_gift_callback(client, callback_query):
         del pending_gifts[gift_key]
         
         await callback_query.message.edit_text(
-            "╭━━━━━━━━━━━━━━━╮\n"
-            "┃  <b>❌ CANCELLED</b>    ┃\n"
-            "╰━━━━━━━━━━━━━━━╯\n\n"
-            "<code>🚫 Gift cancelled by sender</code>",
-            parse_mode=enums.ParseMode.HTML
+            "❌ **Gift Cancelled**\n\n"
+            "The gift has been cancelled."
         )
         await callback_query.answer("Gift cancelled!", show_alert=False)
         
         logger.info(f"Gift cancelled: {sender_id} -> {receiver_id}")
 
 
-# Command to check pending trades/gifts
+# Optional: Command to check pending trades/gifts
 @shivuu.on_message(filters.command("pending"))
 async def check_pending(client, message):
     """Check user's pending trades and gifts"""
@@ -688,49 +519,33 @@ async def check_pending(client, message):
     
     for (sender_id, receiver_id), data in pending_trades.items():
         if sender_id == user_id:
-            user_trades.append("<code>├ Trade as sender (awaiting)</code>")
+            user_trades.append(f"• Trade as sender (waiting for receiver)")
         elif receiver_id == user_id:
-            user_trades.append("<code>├ Trade as receiver (action needed)</code>")
+            user_trades.append(f"• Trade as receiver (pending your confirmation)")
     
     for (sender_id, receiver_id), data in pending_gifts.items():
         if sender_id == user_id:
-            user_gifts.append("<code>├ Gift (awaiting confirmation)</code>")
+            user_gifts.append(f"• Gift (pending your confirmation)")
     
     if not user_trades and not user_gifts:
-        await message.reply_text(
-            "╭━━━━━━━━━━━━━━━╮\n"
-            "┃  <b>✅ ALL CLEAR</b>    ┃\n"
-            "╰━━━━━━━━━━━━━━━╯\n\n"
-            "<code>📋 No pending operations!</code>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("✅ You have no pending trades or gifts!")
         return
     
-    msg = (
-        "╭━━━━━━━━━━━━━━━━━╮\n"
-        "┃  <b>📋 PENDING OPS</b>     ┃\n"
-        "╰━━━━━━━━━━━━━━━━━╯\n\n"
-    )
+    msg = "📋 **Your Pending Operations:**\n\n"
     
     if user_trades:
-        msg += "<b>🔄 Trades:</b>\n" + "\n".join(user_trades) + "\n<code>└─────────────────</code>\n\n"
+        msg += "**Trades:**\n" + "\n".join(user_trades) + "\n\n"
     
     if user_gifts:
-        msg += "<b>🎁 Gifts:</b>\n" + "\n".join(user_gifts) + "\n<code>└─────────────────</code>"
+        msg += "**Gifts:**\n" + "\n".join(user_gifts)
     
-    await message.reply_text(msg, parse_mode=enums.ParseMode.HTML)
+    await message.reply_text(msg)
 
 
-# Admin command to clear all pending operations
+# Optional: Admin command to clear all pending operations
 @shivuu.on_message(filters.command("clearpending") & filters.user("ADMIN_USER_ID"))  # Replace with actual admin ID
 async def clear_pending(client, message):
     """Clear all pending trades and gifts (Admin only)"""
     pending_trades.clear()
     pending_gifts.clear()
-    await message.reply_text(
-        "╭━━━━━━━━━━━━━━━━╮\n"
-        "┃  <b>✅ CLEARED</b>       ┃\n"
-        "╰━━━━━━━━━━━━━━━━╯\n\n"
-        "<code>🗑️ All pending operations cleared!</code>",
-        parse_mode=enums.ParseMode.HTML
-    )
+    await message.reply_text("✅ All pending trades and gifts have been cleared!")

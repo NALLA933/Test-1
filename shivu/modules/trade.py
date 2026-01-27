@@ -76,8 +76,15 @@ async def auto_cleanup_task():
         except Exception as e:
             logger.error(f"Error in auto cleanup task: {e}")
 
-# Start background cleanup task
-asyncio.create_task(auto_cleanup_task())
+# Background task reference
+cleanup_task = None
+
+async def start_cleanup_task():
+    """Initialize the background cleanup task"""
+    global cleanup_task
+    if cleanup_task is None:
+        cleanup_task = asyncio.create_task(auto_cleanup_task())
+        logger.info("Background cleanup task started")
 
 def check_cooldown(user_id, cooldown_dict, cooldown_time):
     """Check if user is on cooldown"""
@@ -126,6 +133,9 @@ def format_premium_gift_card(character, sender_name):
 @shivuu.on_message(filters.command("trade"))
 async def trade(client, message):
     """Handle trade command"""
+    # Start cleanup task if not already running
+    await start_cleanup_task()
+    
     sender_id = message.from_user.id
     
     # Clean expired operations
@@ -358,6 +368,9 @@ async def on_trade_callback(client, callback_query):
 @shivuu.on_message(filters.command("gift"))
 async def gift(client, message):
     """Handle gift command with PREMIUM UI"""
+    # Start cleanup task if not already running
+    await start_cleanup_task()
+    
     sender_id = message.from_user.id
     sender_name = message.from_user.first_name
     

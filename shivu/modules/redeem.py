@@ -1,12 +1,3 @@
-"""
-Redeem System for Telegram Bot
-Supports coin and character redeem codes with usage limits
-
-Database: Character_catcher
-Main Collection: anime_characters_lol (character data source)
-User Collection: user_collection_lmaoooo (user character storage)
-"""
-
 import secrets
 import string
 from typing import Optional, Dict, Any
@@ -293,27 +284,14 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
             rarity = character.get("rarity", 1)
             img_url = character.get("img_url", "")
             
-            LOGGER.info(f"[REDEEM] Attempting to add character {character_id} ({character_name}) to user {user_id}")
-            
-            # Check user's current state BEFORE adding
-            user_before = await user_collection.find_one({"id": user_id})
-            if user_before:
-                chars_before = len(user_before.get("characters", []))
-                LOGGER.info(f"[REDEEM] User {user_id} currently has {chars_before} characters")
-            else:
-                LOGGER.info(f"[REDEEM] User {user_id} doesn't exist yet, will be created")
-            
             # Prepare character entry with ALL fields (including optional ones)
-            # This matches the standard character structure in your bot
             character_entry = {
-                "id": character.get("id"),  # Keep original format (could be string or int)
+                "id": character.get("id"),
                 "name": character.get("name"),
                 "anime": character.get("anime"),
                 "rarity": character.get("rarity"),
                 "img_url": character.get("img_url")
             }
-            
-            LOGGER.info(f"[REDEEM] Character entry prepared: {character_entry}")
             
             # Add optional fields if they exist in the character document
             optional_fields = ["id_al", "video_url"]
@@ -321,10 +299,9 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                 if field in character:
                     character_entry[field] = character.get(field)
             
-            # Add character to user's collection (always add, even if duplicate)
-            # Using $push to add to characters array every time
+            # Add character to user's collection
             try:
-                update_result = await user_collection.update_one(
+                await user_collection.update_one(
                     {"id": user_id},
                     {
                         "$push": {"characters": character_entry},
@@ -336,30 +313,11 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                     },
                     upsert=True
                 )
-                
-                LOGGER.info(f"[REDEEM] MongoDB update result - Matched: {update_result.matched_count}, Modified: {update_result.modified_count}, Upserted: {update_result.upserted_id}")
-                
             except Exception as db_error:
-                LOGGER.error(f"[REDEEM] DATABASE ERROR while adding character: {db_error}")
+                LOGGER.error(f"Database error while adding character {character_id} to user {user_id}: {db_error}")
                 return {
                     "success": False,
-                    "message": f"❌ ᴅᴀᴛᴀʙᴀsᴇ ᴇʀʀᴏʀ: {str(db_error)}",
-                    "show_alert": True
-                }
-            
-            LOGGER.info(f"[REDEEM] Character {character_id} ({character_name}) added to user {user_id}'s collection")
-            
-            # Debug: Verify the character was added
-            user_after = await user_collection.find_one({"id": user_id})
-            if user_after:
-                chars_after = len(user_after.get("characters", []))
-                LOGGER.info(f"[REDEEM] User {user_id} now has {chars_after} total characters in collection")
-                LOGGER.info(f"[REDEEM] Character addition SUCCESS - Before: {chars_before if user_before else 0}, After: {chars_after}")
-            else:
-                LOGGER.error(f"[REDEEM] CRITICAL ERROR: Failed to find user {user_id} after character addition!")
-                return {
-                    "success": False,
-                    "message": "❌ ᴄʀɪᴛɪᴄᴀʟ ᴇʀʀᴏʀ: ᴜsᴇʀ ɴᴏᴛ ғᴏᴜɴᴅ ᴀғᴛᴇʀ ᴜᴘᴅᴀᴛᴇ",
+                    "message": "❌ ᴅᴀᴛᴀʙᴀsᴇ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ.",
                     "show_alert": True
                 }
 

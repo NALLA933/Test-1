@@ -412,12 +412,28 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(to_small_caps("✘ Max users must be greater than 0."))
         return
     
-    # Verify character exists and get details
+    # Verify character exists and get details from main collection database
     character = await collection.find_one({"id": character_id})
     if not character:
-        await update.message.reply_text(
-            f"{to_small_caps(f'✘ Character with ID {character_id} does not exist in the database.')}"
+        # Get total characters count and ID range to help user
+        total_chars = await collection.count_documents({})
+        
+        # Get min and max character IDs
+        min_char = await collection.find_one({}, sort=[("id", 1)])
+        max_char = await collection.find_one({}, sort=[("id", -1)])
+        
+        min_id = min_char.get("id", 1) if min_char else 1
+        max_id = max_char.get("id", 1) if max_char else 1
+        
+        error_msg = (
+            f"<b>{to_small_caps('✘ Character Not Found')}</b>\n\n"
+            f"{to_small_caps(f'Character ID {character_id} does not exist in the database.')}\n\n"
+            f"<b>{to_small_caps('Database Info:')}</b>\n"
+            f"{to_small_caps(f'• Total Characters: {total_chars}')}\n"
+            f"{to_small_caps(f'• ID Range: {min_id} to {max_id}')}\n\n"
+            f"{to_small_caps('Tip: Try a character ID within the valid range!')}"
         )
+        await update.message.reply_text(error_msg, parse_mode="HTML")
         return
     
     # Create code

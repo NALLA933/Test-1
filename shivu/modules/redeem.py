@@ -1,12 +1,3 @@
-"""
-Redeem System for Telegram Bot
-Supports coin and character redeem codes with usage limits
-
-Database: Character_catcher
-Main Collection: anime_characters_lol (character data source)
-User Collection: user_collection_lmaoooo (user character storage)
-"""
-
 import secrets
 import string
 from typing import Optional, Dict, Any
@@ -145,7 +136,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
     - Handles duplicates gracefully
     """
     if redeem_codes_collection is None:
-        return {"success": False, "message": "System error: database not available"}
+        return {"success": False, "message": "❌ System error: database not available"}
     
     try:
         # Find the code
@@ -154,7 +145,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
         if not code_doc:
             return {
                 "success": False, 
-                "message": "⚠️ ɪɴᴠᴀʟɪᴅ ᴄᴏᴅᴇ.\nᴛʜɪs ᴄᴏᴅᴇ ᴅᴏᴇs ɴᴏᴛ ᴇxɪsᴛ.",
+                "message": "⚠️ ɪɴᴠᴀʟɪᴅ ᴄᴏᴅᴇ\nᴛʜɪs ᴄᴏᴅᴇ ᴅᴏᴇs ɴᴏᴛ ᴇxɪsᴛ.",
                 "show_alert": True
             }
         
@@ -162,7 +153,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
         if not code_doc.get("is_active", False):
             return {
                 "success": False,
-                "message": "⚠️ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.\nʙᴇᴛᴛᴇʀ ʟᴜᴄᴋ ɴᴇxᴛ ᴛɪᴍᴇ!",
+                "message": "❌ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.",
                 "show_alert": True
             }
         
@@ -187,7 +178,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
             )
             return {
                 "success": False,
-                "message": "⚠️ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.\nʙᴇᴛᴛᴇʀ ʟᴜᴄᴋ ɴᴇxᴛ ᴛɪᴍᴇ!",
+                "message": "❌ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.",
                 "show_alert": True
             }
         
@@ -225,7 +216,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
             
             return {
                 "success": True,
-                "message": f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n💰 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ <b>{amount:,}</b> ᴄᴏɪɴs!",
+                "message": f"✅ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n💰 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ <b>{amount:,}</b> ᴄᴏɪɴs!",
                 "data": {"type": "coin", "amount": amount}
             }
         
@@ -243,7 +234,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                 LOGGER.error(f"Character {character_id} not found in anime_characters_lol during redeem")
                 return {
                     "success": False,
-                    "message": "✘ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏ ʟᴏɴɢᴇʀ ᴇxɪsᴛs ɪɴ ᴅᴀᴛᴀʙᴀsᴇ.",
+                    "message": "❌ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏ ʟᴏɴɢᴇʀ ᴇxɪsᴛs ɪɴ ᴅᴀᴛᴀʙᴀsᴇ.",
                     "show_alert": True
                 }
             
@@ -292,27 +283,38 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
             
             character_name = character.get("name", "Unknown")
             anime_name = character.get("anime", "Unknown")
+            img_url = character.get("img_url")
             
-            # Build success message
+            # Build success message with character details
             if is_duplicate:
-                message = (
-                    f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n"
-                    f"🎉 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:\n"
-                    f"<b>{escape(character_name)}</b>\n"
-                    f"ғʀᴏᴍ <i>{escape(anime_name)}</i>\n\n"
-                    f"ℹ️ ʏᴏᴜ ᴀʟʀᴇᴀᴅʏ ʜᴀᴅ ᴛʜɪs ᴄʜᴀʀᴀᴄᴛᴇʀ.\nᴅᴜᴘʟɪᴄᴀᴛᴇ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ!"
+                caption = (
+                    f"✅ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n"
+                    f"🎉 <b>ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:</b>\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"👤 <b>ɴᴀᴍᴇ:</b> {escape(character_name)}\n"
+                    f"📺 <b>ᴀɴɪᴍᴇ:</b> {escape(anime_name)}\n"
+                    f"🆔 <b>ɪᴅ:</b> {character_id}\n"
+                    f"⭐ <b>ʀᴀʀɪᴛʏ:</b> {character.get('rarity', 1)}\n"
+                    f"━━━━━━━━━━━━━━━\n\n"
+                    f"ℹ️ ʏᴏᴜ ᴀʟʀᴇᴀᴅʏ ʜᴀᴅ ᴛʜɪs ᴄʜᴀʀᴀᴄᴛᴇʀ.\n"
+                    f"✨ ᴅᴜᴘʟɪᴄᴀᴛᴇ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ!"
                 )
             else:
-                message = (
-                    f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n"
-                    f"🎉 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:\n"
-                    f"<b>{escape(character_name)}</b>\n"
-                    f"ғʀᴏᴍ <i>{escape(anime_name)}</i>"
+                caption = (
+                    f"✅ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n"
+                    f"🎉 <b>ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:</b>\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"👤 <b>ɴᴀᴍᴇ:</b> {escape(character_name)}\n"
+                    f"📺 <b>ᴀɴɪᴍᴇ:</b> {escape(anime_name)}\n"
+                    f"🆔 <b>ɪᴅ:</b> {character_id}\n"
+                    f"⭐ <b>ʀᴀʀɪᴛʏ:</b> {character.get('rarity', 1)}\n"
+                    f"━━━━━━━━━━━━━━━"
                 )
             
             return {
                 "success": True,
-                "message": message,
+                "message": caption,
+                "img_url": img_url,
                 "data": {
                     "type": "character",
                     "character_id": character_id,
@@ -324,7 +326,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
         else:
             return {
                 "success": False,
-                "message": "✘ ᴜɴᴋɴᴏᴡɴ ᴄᴏᴅᴇ ᴛʏᴘᴇ.",
+                "message": "❌ ᴜɴᴋɴᴏᴡɴ ᴄᴏᴅᴇ ᴛʏᴘᴇ.",
                 "show_alert": True
             }
     
@@ -332,7 +334,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
         LOGGER.error(f"Failed to redeem code {code} for user {user_id}: {e}")
         return {
             "success": False,
-            "message": "✘ sʏsᴛᴇᴍ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.",
+            "message": "❌ sʏsᴛᴇᴍ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.",
             "show_alert": True
         }
 
@@ -347,16 +349,14 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     
     # Check permissions
     if user_id != OWNER_ID and user_id not in SUDO_USERS:
-        await update.message.reply_text(to_small_caps("✘ You are not authorized to use this command."))
+        await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
     
     # Validate arguments
     if len(context.args) < 2:
         usage_msg = (
-            f"<b>{to_small_caps('COIN CODE GENERATOR')}</b>\n\n"
-            f"{to_small_caps('Usage:')} <code>/gen &lt;amount&gt; &lt;max_users&gt;</code>\n\n"
-            f"{to_small_caps('Example:')} <code>/gen 100 10</code>\n"
-            f"{to_small_caps('This creates a code for 100 coins that can be redeemed by 10 users.')}"
+            f"<b>💰 {to_small_caps('COIN CODE GENERATOR')}</b>\n\n"
+            f"📝 {to_small_caps('Usage:')} <code>/gen &lt;amount&gt; &lt;max_users&gt;</code>"
         )
         await update.message.reply_text(usage_msg, parse_mode="HTML")
         return
@@ -366,16 +366,16 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         max_uses = int(context.args[1])
     except ValueError:
         await update.message.reply_text(
-            f"{to_small_caps('✘ Invalid arguments. Amount and max users must be positive integers.')}"
+            f"❌ {to_small_caps('Invalid arguments. Amount and max users must be positive integers.')}"
         )
         return
     
     if amount <= 0:
-        await update.message.reply_text(to_small_caps("✘ Amount must be greater than 0."))
+        await update.message.reply_text("❌ " + to_small_caps("Amount must be greater than 0."))
         return
     
     if max_uses <= 0:
-        await update.message.reply_text(to_small_caps("✘ Max users must be greater than 0."))
+        await update.message.reply_text("❌ " + to_small_caps("Max users must be greater than 0."))
         return
     
     # Create code
@@ -383,72 +383,17 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     
     if code:
         response = (
-            f"<b>{to_small_caps('✓ COIN CODE GENERATED')}</b>\n\n"
-            f"<b>{to_small_caps('Code:')}</b> <code>{code}</code>\n"
-            f"<b>{to_small_caps('Type:')}</b> {to_small_caps('Coins')}\n"
-            f"<b>{to_small_caps('Amount:')}</b> {amount:,} {to_small_caps('coins')}\n"
-            f"<b>{to_small_caps('Max Uses:')}</b> {max_uses}\n\n"
-            f"{to_small_caps('Users can redeem with:')} <code>/redeem {code}</code>"
+            f"<b>✅ {to_small_caps('COIN CODE GENERATED')}</b>\n\n"
+            f"🎟️ <b>{to_small_caps('Code:')}</b> <code>{code}</code>\n"
+            f"💎 <b>{to_small_caps('Type:')}</b> {to_small_caps('Coins')}\n"
+            f"💰 <b>{to_small_caps('Amount:')}</b> {amount:,} {to_small_caps('coins')}\n"
+            f"👥 <b>{to_small_caps('Max Uses:')}</b> {max_uses}"
         )
         await update.message.reply_text(response, parse_mode="HTML")
     else:
         await update.message.reply_text(
-            f"{to_small_caps('✘ Failed to generate code. Please try again.')}"
+            f"❌ {to_small_caps('Failed to generate code. Please try again.')}"
         )
-
-
-async def debug_db_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /debugdb - Check database connection and collection info (Admin only)
-    """
-    user_id = update.effective_user.id
-    
-    # Check permissions
-    if user_id != OWNER_ID and user_id not in SUDO_USERS:
-        await update.message.reply_text("✘ Not authorized")
-        return
-    
-    try:
-        # Check collection name
-        collection_name = collection.name
-        db_name = collection.database.name
-        
-        # Count documents
-        total_chars = await collection.count_documents({})
-        
-        # Get some sample characters with ALL fields
-        sample_chars = await collection.find({}).limit(3).to_list(length=3)
-        
-        # Build debug info
-        debug_info = (
-            f"<b>📊 DATABASE DEBUG INFO</b>\n\n"
-            f"<b>Database:</b> {db_name}\n"
-            f"<b>Collection:</b> {collection_name}\n"
-            f"<b>Total Characters:</b> {total_chars}\n\n"
-        )
-        
-        if sample_chars:
-            debug_info += "<b>Sample Characters (with field names):</b>\n"
-            for i, char in enumerate(sample_chars, 1):
-                debug_info += f"\n<b>Character {i}:</b>\n"
-                # Show all fields
-                for key, value in char.items():
-                    if key != '_id':  # Skip MongoDB internal ID
-                        debug_info += f"  • {key}: {str(value)[:50]}\n"
-        else:
-            debug_info += "⚠️ No characters found in collection!\n"
-        
-        # Check user_collection too
-        user_coll_name = user_collection.name
-        total_users = await user_collection.count_documents({})
-        debug_info += f"\n<b>User Collection:</b> {user_coll_name}\n"
-        debug_info += f"<b>Total Users:</b> {total_users}\n"
-        
-        await update.message.reply_text(debug_info, parse_mode="HTML")
-        
-    except Exception as e:
-        LOGGER.error(f"Debug command error: {e}")
-        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -461,16 +406,14 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Check permissions
     if user_id != OWNER_ID and user_id not in SUDO_USERS:
-        await update.message.reply_text(to_small_caps("✘ You are not authorized to use this command."))
+        await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
     
     # Validate arguments
     if len(context.args) < 2:
         usage_msg = (
-            f"<b>{to_small_caps('CHARACTER CODE GENERATOR')}</b>\n\n"
-            f"{to_small_caps('Usage:')} <code>/sgen &lt;character_id&gt; &lt;max_users&gt;</code>\n\n"
-            f"{to_small_caps('Example:')} <code>/sgen 25 10</code>\n"
-            f"{to_small_caps('This creates a code for character ID 25 that can be redeemed by 10 users.')}"
+            f"<b>🎴 {to_small_caps('CHARACTER CODE GENERATOR')}</b>\n\n"
+            f"📝 {to_small_caps('Usage:')} <code>/sgen &lt;character_id&gt; &lt;max_users&gt;</code>"
         )
         await update.message.reply_text(usage_msg, parse_mode="HTML")
         return
@@ -480,64 +423,32 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         max_uses = int(context.args[1])
     except ValueError:
         await update.message.reply_text(
-            f"{to_small_caps('✘ Invalid arguments. Character ID and max users must be positive integers.')}"
+            f"❌ {to_small_caps('Invalid arguments. Character ID and max users must be positive integers.')}"
         )
         return
     
     if character_id <= 0:
-        await update.message.reply_text(to_small_caps("✘ Character ID must be greater than 0."))
+        await update.message.reply_text("❌ " + to_small_caps("Character ID must be greater than 0."))
         return
     
     if max_uses <= 0:
-        await update.message.reply_text(to_small_caps("✘ Max users must be greater than 0."))
+        await update.message.reply_text("❌ " + to_small_caps("Max users must be greater than 0."))
         return
     
     # Fetch character from anime_characters_lol (main collection)
     # Try both integer and string format for ID
-    LOGGER.info(f"Searching for character with ID: {character_id} (type: {type(character_id).__name__})")
-    
     character = await collection.find_one({"id": character_id})
-    LOGGER.info(f"Integer search result: {character is not None}")
     
     # If not found with integer, try string
     if not character:
-        LOGGER.info(f"Trying string format: '{str(character_id)}'")
         character = await collection.find_one({"id": str(character_id)})
-        LOGGER.info(f"String search result: {character is not None}")
     
     if not character:
-        # Get helpful database info with actual available IDs
-        try:
-            # Get all character IDs
-            all_chars = await collection.find({}, {"id": 1, "name": 1}).sort("id", 1).to_list(length=None)
-            total_chars = len(all_chars)
-            
-            if total_chars > 0:
-                # Get available IDs
-                available_ids = [char['id'] for char in all_chars]
-                min_id = min(available_ids)
-                max_id = max(available_ids)
-                
-                # Show first 10 available IDs as examples
-                example_ids = ", ".join(str(id) for id in available_ids[:10])
-                if len(available_ids) > 10:
-                    example_ids += "..."
-                
-                error_msg = (
-                    f"<b>{to_small_caps('✘ Character Not Found')}</b>\n\n"
-                    f"{to_small_caps(f'Character ID {character_id} does not exist in database.')}\n\n"
-                    f"<b>{to_small_caps('Database Info:')}</b>\n"
-                    f"{to_small_caps(f'• Total Characters: {total_chars}')}\n"
-                    f"{to_small_caps(f'• ID Range: {min_id} - {max_id}')}\n"
-                    f"{to_small_caps(f'• Available IDs: {example_ids}')}\n\n"
-                    f"{to_small_caps('Tip: Try one of the available IDs listed above!')}"
-                )
-            else:
-                error_msg = f"{to_small_caps('✘ No characters found in database!')}"
-        except Exception as e:
-            LOGGER.error(f"Error fetching database stats: {e}")
-            error_msg = f"{to_small_caps(f'✘ Character ID {character_id} not found in database.')}"
-        
+        error_msg = (
+            f"❌ {to_small_caps('Character Not Found')}\n\n"
+            f"🔍 {to_small_caps(f'The character with ID {character_id} does not exist in the database.')}\n"
+            f"💡 {to_small_caps('Please verify the character ID and try again.')}"
+        )
         await update.message.reply_text(error_msg, parse_mode="HTML")
         return
     
@@ -550,22 +461,21 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         rarity = character.get("rarity", 1)
         
         response = (
-            f"<b>{to_small_caps('✓ CHARACTER CODE GENERATED')}</b>\n\n"
-            f"<b>{to_small_caps('Code:')}</b> <code>{code}</code>\n"
-            f"<b>{to_small_caps('Type:')}</b> {to_small_caps('Character')}\n"
-            f"<b>{to_small_caps('Character:')}</b> {escape(character_name)}\n"
-            f"<b>{to_small_caps('Anime:')}</b> {escape(anime_name)}\n"
-            f"<b>{to_small_caps('ID:')}</b> {character_id}\n"
-            f"<b>{to_small_caps('Rarity:')}</b> {rarity}\n"
-            f"<b>{to_small_caps('Max Uses:')}</b> {max_uses}\n\n"
-            f"{to_small_caps('Users can redeem with:')} <code>/redeem {code}</code>"
+            f"<b>✅ {to_small_caps('CHARACTER CODE GENERATED')}</b>\n\n"
+            f"🎟️ <b>{to_small_caps('Code:')}</b> <code>{code}</code>\n"
+            f"🎴 <b>{to_small_caps('Type:')}</b> {to_small_caps('Character')}\n"
+            f"👤 <b>{to_small_caps('Character:')}</b> {escape(character_name)}\n"
+            f"📺 <b>{to_small_caps('Anime:')}</b> {escape(anime_name)}\n"
+            f"🆔 <b>{to_small_caps('ID:')}</b> {character_id}\n"
+            f"⭐ <b>{to_small_caps('Rarity:')}</b> {rarity}\n"
+            f"👥 <b>{to_small_caps('Max Uses:')}</b> {max_uses}"
         )
         await update.message.reply_text(response, parse_mode="HTML")
         
         LOGGER.info(f"Generated character code {code} for ID {character_id} ({character_name}) by user {user_id}")
     else:
         await update.message.reply_text(
-            f"{to_small_caps('✘ Failed to generate code. Please try again.')}"
+            f"❌ {to_small_caps('Failed to generate code. Please try again.')}"
         )
 
 
@@ -579,10 +489,9 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Validate arguments
     if len(context.args) < 1:
         usage_msg = (
-            f"<b>{to_small_caps('REDEEM CODE')}</b>\n\n"
-            f"{to_small_caps('Usage:')} <code>/redeem &lt;CODE&gt;</code>\n\n"
-            f"{to_small_caps('Example:')} <code>/redeem ABC123XYZ789</code>\n"
-            f"{to_small_caps('Redeem codes can give you coins or characters!')}"
+            f"<b>🎁 {to_small_caps('REDEEM CODE')}</b>\n\n"
+            f"📝 {to_small_caps('Usage:')} <code>/redeem &lt;CODE&gt;</code>\n\n"
+            f"💡 {to_small_caps('Redeem codes can give you coins or characters!')}"
         )
         await update.message.reply_text(usage_msg, parse_mode="HTML")
         return
@@ -593,9 +502,23 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     result = await redeem_code(code, user_id)
     
     if result["success"]:
-        await update.message.reply_text(result["message"], parse_mode="HTML")
+        # Check if this is a character redemption with image
+        if result.get("img_url"):
+            try:
+                await update.message.reply_photo(
+                    photo=result["img_url"],
+                    caption=result["message"],
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                LOGGER.error(f"Failed to send image: {e}")
+                # Fallback to text message
+                await update.message.reply_text(result["message"], parse_mode="HTML")
+        else:
+            # Coin redemption or no image available
+            await update.message.reply_text(result["message"], parse_mode="HTML")
     else:
-        # Show alert/popup style message
+        # Show error message
         await update.message.reply_text(result["message"], parse_mode="HTML")
 
 
@@ -605,7 +528,6 @@ def register_handlers():
     application.add_handler(CommandHandler("gen", gen_command, block=False))
     application.add_handler(CommandHandler("sgen", sgen_command, block=False))
     application.add_handler(CommandHandler("redeem", redeem_command, block=False))
-    application.add_handler(CommandHandler("debugdb", debug_db_command, block=False))
     LOGGER.info("Redeem system handlers registered successfully")
 
 

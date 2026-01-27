@@ -1,5 +1,3 @@
-import datetime
-import pytz
 import importlib
 import time
 import random
@@ -10,7 +8,7 @@ from html import escape
 from typing import Dict, Any, Optional, List
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext
+from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
 
 from shivu import (
     collection,
@@ -129,7 +127,6 @@ async def _update_user_info(user_id: int, tg_user: Update.effective_user) -> Non
                 'first_name': tg_user.first_name,
                 'characters': [],
                 'balance': 0,  # Initialize balance
-                'daily_grab_count': 0,  # Initialize daily grab count
             }
             if update_fields:
                 base.update(update_fields)
@@ -149,14 +146,7 @@ async def _update_group_user_totals(user_id: int, chat_id: int, tg_user: Update.
                 update_fields['first_name'] = tg_user.first_name
             if update_fields:
                 await group_user_totals_collection.update_one({'user_id': user_id, 'group_id': chat_id}, {'$set': update_fields})
-            # MODIFIED: Added $inc for daily_group_count
-            await group_user_totals_collection.update_one(
-                {'user_id': user_id, 'group_id': chat_id}, 
-                {
-                    '$inc': {'count': 1, 'daily_group_count': 1},
-                    '$set': update_fields
-                } if update_fields else {'$inc': {'count': 1, 'daily_group_count': 1}}
-            )
+            await group_user_totals_collection.update_one({'user_id': user_id, 'group_id': chat_id}, {'$inc': {'count': 1}})
         else:
             await group_user_totals_collection.insert_one({
                 'user_id': user_id,
@@ -164,7 +154,6 @@ async def _update_group_user_totals(user_id: int, chat_id: int, tg_user: Update.
                 'username': getattr(tg_user, 'username', None),
                 'first_name': tg_user.first_name,
                 'count': 1,
-                'daily_group_count': 1,  # Initialize daily group count
             })
     except Exception as e:
         LOGGER.exception("Failed to update group_user_totals: %s", e)
@@ -188,27 +177,6 @@ async def _update_top_global_groups(chat_id: int, chat_title: Optional[str]) -> 
             })
     except Exception as e:
         LOGGER.exception("Failed to update top_global_groups: %s", e)
-
-async def reset_daily_counts(context: CallbackContext):
-    """Reset daily counts for all users and groups at midnight IST."""
-    try:
-        LOGGER.info("Resetting daily counts...")
-        
-        # Reset user daily_grab_count
-        result_users = await user_collection.update_many(
-            {}, 
-            {'$set': {'daily_grab_count': 0}}
-        )
-        
-        # Reset group_user_totals daily_group_count
-        result_groups = await group_user_totals_collection.update_many(
-            {}, 
-            {'$set': {'daily_group_count': 0}}
-        )
-        
-        LOGGER.info(f"Daily counts reset: {result_users.modified_count} users, {result_groups.modified_count} group records updated")
-    except Exception as e:
-        LOGGER.exception(f"Failed to reset daily counts: {e}")
 
 # Handlers
 async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -367,13 +335,10 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # update/create user doc and append character to their collection atomically
         try:
             await _update_user_info(user_id, update.effective_user)
-            # MODIFIED: Added $inc for daily_grab_count to the existing update query
+            # Use $push to allow duplicates in user's collection
             await user_collection.update_one(
                 {'id': user_id}, 
-                {
-                    '$push': {'characters': character_to_store},
-                    '$inc': {'daily_grab_count': 1}  # Added daily count increment
-                }
+                {'$push': {'characters': character_to_store}}
             )
         except Exception as e:
             LOGGER.exception(f"Failed updating user character collection: {e}")
@@ -392,7 +357,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             to_small_caps("✨ ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉  ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ ɪᴛ ʀɪɢʜᴛ! ᴀꜱ ᴀ ʀᴇᴡᴀʀᴅ, 100 ᴄᴏɪɴꜱ ʜᴀᴠᴇ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ.."),
             parse_mode='HTML'
         )
-        
+
         # Set reaction on the coin alert message
         try:
             await coin_alert_msg.set_reaction("🎉")
@@ -484,9 +449,9 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Handle /balance command to check user's coin balance."""
     if not update.effective_user:
         return
-    
+
     user_id = update.effective_user.id
-    
+
     try:
         # Get user's balance from database
         user_data = await user_collection.find_one({'id': user_id})
@@ -502,24 +467,10 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 def main() -> None:
     """Run the bot - register handlers and start polling."""
-    # Setup daily reset using JobQueue
-    try:
-        # Schedule daily reset at 12:00 AM IST
-        application.job_queue.run_daily(
-            reset_daily_counts,
-            time=datetime.time(hour=0, minute=0, second=0, tzinfo=pytz.timezone('Asia/Kolkata')),
-            days=(0, 1, 2, 3, 4, 5, 6),
-            name="reset_daily_counts"
-        )
-        LOGGER.info("Daily reset scheduled via JobQueue - will reset counts daily at 12:00 AM IST")
-    except Exception as e:
-        LOGGER.exception(f"Failed to schedule daily reset: {e}")
-    
     # Register commands
     # Keep block=False to allow concurrency where Application was created with appropriate executor
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(CommandHandler("fav", fav, block=False))
-    application.add_handler(CommandHandler("balance", balance_command, block=False))  # Add balance command
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
 
     # Start polling (drop pending updates by default)

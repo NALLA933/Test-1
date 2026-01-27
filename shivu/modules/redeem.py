@@ -11,19 +11,10 @@ from html import escape
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
-from shivu import application, user_collection, collection, LOGGER, OWNER_ID, SUDO_USERS
-from pymongo import MongoClient
-from motor.motor_asyncio import AsyncIOMotorClient
+from shivu import application, user_collection, collection, db, LOGGER, OWNER_ID, SUDO_USERS
 
-# MongoDB setup - assuming you have a database connection already
-# We'll use the same database as user_collection
-try:
-    # Get database from existing user_collection
-    database = user_collection.database
-    redeem_codes_collection = database['redeem_codes']
-except Exception as e:
-    LOGGER.error(f"Failed to initialize redeem_codes collection: {e}")
-    redeem_codes_collection = None
+# MongoDB setup - using the same db as other modules
+redeem_codes_collection = db.redeem_codes
 
 
 # ---------- Small Caps Utility (matching your existing style) ----------
@@ -62,7 +53,7 @@ def generate_unique_code(length: int = 12) -> str:
 # ---------- Database Operations ----------
 async def create_coin_code(amount: int, max_uses: int, created_by: int) -> Optional[str]:
     """Create a coin redeem code in the database."""
-    if not redeem_codes_collection:
+    if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
     
@@ -95,7 +86,7 @@ async def create_coin_code(amount: int, max_uses: int, created_by: int) -> Optio
 
 async def create_character_code(character_id: int, max_uses: int, created_by: int) -> Optional[str]:
     """Create a character redeem code in the database."""
-    if not redeem_codes_collection:
+    if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
     
@@ -137,7 +128,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
     Redeem a code for a user.
     Returns dict with 'success', 'message', and optional 'data' keys.
     """
-    if not redeem_codes_collection:
+    if redeem_codes_collection is None:
         return {"success": False, "message": "System error: database not available"}
     
     try:

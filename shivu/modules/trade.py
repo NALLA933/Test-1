@@ -1,4 +1,4 @@
-from pyrogram import filters
+from pyrogram import filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 import time
@@ -93,7 +93,7 @@ async def trade(client, message):
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Reply to a user's message</code>\n"
             "<code>   to initiate trade!</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -107,7 +107,7 @@ async def trade(client, message):
             "┃  <b>⚠️ TRADE ERROR</b>  ┃\n"
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Self-trading not allowed!</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -119,7 +119,7 @@ async def trade(client, message):
             "┃  <b>⏳ COOLDOWN</b>    ┃\n"
             "╰━━━━━━━━━━━━━╯\n\n"
             f"<code>⏱️ Wait {remaining}s before trading</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -133,7 +133,7 @@ async def trade(client, message):
             "<code>/trade [Your ID] [Their ID]</code>\n\n"
             "<code>Example:</code>\n"
             "<code>/trade char123 char456</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -154,7 +154,7 @@ async def trade(client, message):
                     "┃  <b>⚠️ NO DATA</b>    ┃\n"
                     "╰━━━━━━━━━━━━━╯\n\n"
                     "<code>❌ No characters found!</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -164,7 +164,7 @@ async def trade(client, message):
                     "┃  <b>⚠️ NO DATA</b>    ┃\n"
                     "╰━━━━━━━━━━━━━╯\n\n"
                     "<code>❌ User has no characters!</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -187,7 +187,7 @@ async def trade(client, message):
                     f"<code>❌ Character ID: {sender_character_id}</code>\n"
                     f"<code>   not in your collection</code>\n\n"
                     "<code>💡 Use /collection to view</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -198,7 +198,7 @@ async def trade(client, message):
                     "╰━━━━━━━━━━━━━━━╯\n\n"
                     f"<code>❌ Character ID: {receiver_character_id}</code>\n"
                     f"<code>   not in user's collection</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -210,7 +210,7 @@ async def trade(client, message):
                     "╰━━━━━━━━━━━━━━━━╯\n\n"
                     "<code>❌ Trade already pending</code>\n"
                     "<code>   with this user</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -247,7 +247,7 @@ async def trade(client, message):
                 "<code>⚡ Accept this trade?</code>"
             )
             
-            await message.reply_text(trade_msg, reply_markup=keyboard, parse_mode="html")
+            await message.reply_text(trade_msg, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
             
             # Update cooldown
             last_trade_time[sender_id] = time.time()
@@ -260,7 +260,7 @@ async def trade(client, message):
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Failed to process trade</code>\n"
             "<code>💡 Please try again</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
 
@@ -294,7 +294,7 @@ async def on_trade_callback(client, callback_query):
             "┃  <b>⏱️ EXPIRED</b>    ┃\n"
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Trade request expired</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -324,7 +324,7 @@ async def on_trade_callback(client, callback_query):
                         "┃  <b>⚠️ FAILED</b>     ┃\n"
                         "╰━━━━━━━━━━━━━╯\n\n"
                         "<code>❌ Character no longer exists</code>",
-                        parse_mode="html"
+                        parse_mode=enums.ParseMode.HTML
                     )
                     del pending_trades[trade_key]
                     return
@@ -363,7 +363,7 @@ async def on_trade_callback(client, callback_query):
                     "<code>✨ Enjoy your new characters!</code>"
                 )
                 
-                await callback_query.message.edit_text(success_msg, parse_mode="html")
+                await callback_query.message.edit_text(success_msg, parse_mode=enums.ParseMode.HTML)
                 await callback_query.answer("✅ Trade completed!", show_alert=True)
                 
                 logger.info(f"Trade completed: {sender_id} <-> {receiver_id}")
@@ -383,7 +383,7 @@ async def on_trade_callback(client, callback_query):
             "┃  <b>❌ CANCELLED</b>    ┃\n"
             "╰━━━━━━━━━━━━━━━╯\n\n"
             "<code>🚫 Trade declined by receiver</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         await callback_query.answer("Trade cancelled!", show_alert=False)
         
@@ -406,7 +406,7 @@ async def gift(client, message):
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Reply to a user's message</code>\n"
             "<code>   to send a gift!</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -422,7 +422,7 @@ async def gift(client, message):
             "┃  <b>⚠️ GIFT ERROR</b>   ┃\n"
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Self-gifting not allowed!</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -434,7 +434,7 @@ async def gift(client, message):
             "┃  <b>⏳ COOLDOWN</b>    ┃\n"
             "╰━━━━━━━━━━━━━╯\n\n"
             f"<code>⏱️ Wait {remaining}s before gifting</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -448,7 +448,7 @@ async def gift(client, message):
             "<code>/gift [Character ID]</code>\n\n"
             "<code>Example:</code>\n"
             "<code>/gift char123</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -466,7 +466,7 @@ async def gift(client, message):
                     "┃  <b>⚠️ NO DATA</b>    ┃\n"
                     "╰━━━━━━━━━━━━━╯\n\n"
                     "<code>❌ No characters found!</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -484,7 +484,7 @@ async def gift(client, message):
                     f"<code>❌ Character ID: {character_id}</code>\n"
                     f"<code>   not in your collection</code>\n\n"
                     "<code>💡 Use /collection to view</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -496,7 +496,7 @@ async def gift(client, message):
                     "╰━━━━━━━━━━━━━━━╯\n\n"
                     "<code>❌ Gift already pending</code>\n"
                     "<code>   for this user</code>",
-                    parse_mode="html"
+                    parse_mode=enums.ParseMode.HTML
                 )
                 return
             
@@ -529,7 +529,7 @@ async def gift(client, message):
                 "<code>⚡ Confirm this gift?</code>"
             )
             
-            await message.reply_text(gift_msg, reply_markup=keyboard, parse_mode="html")
+            await message.reply_text(gift_msg, reply_markup=keyboard, parse_mode=enums.ParseMode.HTML)
             
             # Update cooldown
             last_gift_time[sender_id] = time.time()
@@ -542,7 +542,7 @@ async def gift(client, message):
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Failed to process gift</code>\n"
             "<code>💡 Please try again</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
 
 
@@ -576,7 +576,7 @@ async def on_gift_callback(client, callback_query):
             "┃  <b>⏱️ EXPIRED</b>    ┃\n"
             "╰━━━━━━━━━━━━━╯\n\n"
             "<code>❌ Gift request expired</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -601,7 +601,7 @@ async def on_gift_callback(client, callback_query):
                         "┃  <b>⚠️ FAILED</b>     ┃\n"
                         "╰━━━━━━━━━━━━━╯\n\n"
                         "<code>❌ Character no longer exists</code>",
-                        parse_mode="html"
+                        parse_mode=enums.ParseMode.HTML
                     )
                     del pending_gifts[gift_key]
                     return
@@ -647,7 +647,7 @@ async def on_gift_callback(client, callback_query):
                     "<code>✨ What a generous gift!</code>"
                 )
                 
-                await callback_query.message.edit_text(success_msg, parse_mode="html")
+                await callback_query.message.edit_text(success_msg, parse_mode=enums.ParseMode.HTML)
                 await callback_query.answer("✅ Gift sent successfully!", show_alert=True)
                 
                 logger.info(f"Gift completed: {sender_id} -> {receiver_id}")
@@ -667,7 +667,7 @@ async def on_gift_callback(client, callback_query):
             "┃  <b>❌ CANCELLED</b>    ┃\n"
             "╰━━━━━━━━━━━━━━━╯\n\n"
             "<code>🚫 Gift cancelled by sender</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         await callback_query.answer("Gift cancelled!", show_alert=False)
         
@@ -702,7 +702,7 @@ async def check_pending(client, message):
             "┃  <b>✅ ALL CLEAR</b>    ┃\n"
             "╰━━━━━━━━━━━━━━━╯\n\n"
             "<code>📋 No pending operations!</code>",
-            parse_mode="html"
+            parse_mode=enums.ParseMode.HTML
         )
         return
     
@@ -718,7 +718,7 @@ async def check_pending(client, message):
     if user_gifts:
         msg += "<b>🎁 Gifts:</b>\n" + "\n".join(user_gifts) + "\n<code>└─────────────────</code>"
     
-    await message.reply_text(msg, parse_mode="html")
+    await message.reply_text(msg, parse_mode=enums.ParseMode.HTML)
 
 
 # Admin command to clear all pending operations
@@ -732,5 +732,5 @@ async def clear_pending(client, message):
         "┃  <b>✅ CLEARED</b>       ┃\n"
         "╰━━━━━━━━━━━━━━━━╯\n\n"
         "<code>🗑️ All pending operations cleared!</code>",
-        parse_mode="html"
+        parse_mode=enums.ParseMode.HTML
     )

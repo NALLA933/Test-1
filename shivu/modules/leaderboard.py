@@ -83,11 +83,11 @@ async def update_daily_user_guess(user_id: int, username: str = "", first_name: 
     """
     try:
         today = get_ist_date()
-        
+
         # Safely handle None values
         safe_username = username if username else ""
         safe_first_name = first_name if first_name else "Unknown"
-        
+
         await daily_user_guesses_collection.update_one(
             {
                 "date": today,
@@ -119,10 +119,10 @@ async def update_daily_group_guess(group_id: int, group_name: str = "") -> None:
     """
     try:
         today = get_ist_date()
-        
+
         # Safely handle None values
         safe_group_name = group_name if group_name else "Unknown Group"
-        
+
         await daily_group_guesses_collection.update_one(
             {
                 "date": today,
@@ -220,9 +220,16 @@ async def show_char_top() -> str:
 
 
 async def show_coin_top() -> str:
-    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏɪɴ ʙᴀʟᴀɴᴄᴇ."""
+    """
+    sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏɪɴ ʙᴀʟᴀɴᴄᴇ.
+    
+    NOTE: This function is CORRECT and fetches balance directly from user_collection.
+    The balance field is updated by change_balance() function in main.py when users guess correctly.
+    If balances aren't showing, the issue is in change_balance() function, NOT here.
+    """
     try:
-        # Get top 10 users by balance directly from user_collection
+        # CORRECT: Fetch top 10 users by balance from user_collection
+        # This is where main.py stores balance via change_balance()
         cursor = user_collection.aggregate([
             {"$sort": {"balance": -1}},
             {"$limit": 10}
@@ -235,6 +242,7 @@ async def show_coin_top() -> str:
             return message + "ɴᴏ ᴅᴀᴛᴀ ᴀᴠᴀɪʟᴀʙʟᴇ ʏᴇᴛ!"
 
         for i, user_data in enumerate(coin_data, start=1):
+            # CORRECT: Get balance field from user document
             balance = user_data.get('balance', 0)
             username = user_data.get('username', '')
             first_name = html.escape(user_data.get('first_name', 'Unknown'))

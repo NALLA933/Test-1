@@ -1,4 +1,3 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 import importlib
 import time
@@ -10,7 +9,7 @@ from html import escape
 from typing import Dict, Any, Optional, List
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext
 
 from shivu import (
     collection,
@@ -28,9 +27,6 @@ from shivu.modules import ALL_MODULES
 # Import all modules declared in ALL_MODULES (same as original behavior)
 for module_name in ALL_MODULES:
     importlib.import_module("shivu.modules." + module_name)
-
-# Initialize scheduler for daily reset
-scheduler = AsyncIOScheduler()
 
 # Rarity display mapping (presentation layer only - DB still stores integers)
 RARITY_MAP = {
@@ -192,7 +188,7 @@ async def _update_top_global_groups(chat_id: int, chat_title: Optional[str]) -> 
     except Exception as e:
         LOGGER.exception("Failed to update top_global_groups: %s", e)
 
-async def reset_daily_counts():
+async def reset_daily_counts(context: CallbackContext):
     """Reset daily counts for all users and groups at midnight IST."""
     try:
         LOGGER.info("Resetting daily counts...")
@@ -505,19 +501,19 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 def main() -> None:
     """Run the bot - register handlers and start polling."""
-    # Setup daily reset scheduler
+    # Setup daily reset using JobQueue
     try:
-        scheduler.add_job(
+        # Schedule daily reset at 12:00 AM IST
+        application.job_queue.run_daily(
             reset_daily_counts,
-            'cron',
-            hour=0,
-            minute=0,
+            time=time(0, 0, 0),
+            days=(0, 1, 2, 3, 4, 5, 6),
+            name="reset_daily_counts",
             timezone=pytz.timezone('Asia/Kolkata')
         )
-        scheduler.start()
-        LOGGER.info("Daily reset scheduler started - will reset counts daily at 12:00 AM IST")
+        LOGGER.info("Daily reset scheduled via JobQueue - will reset counts daily at 12:00 AM IST")
     except Exception as e:
-        LOGGER.exception(f"Failed to start scheduler: {e}")
+        LOGGER.exception(f"Failed to schedule daily reset: {e}")
     
     # Register commands
     # Keep block=False to allow concurrency where Application was created with appropriate executor

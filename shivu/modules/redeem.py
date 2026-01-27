@@ -1,6 +1,10 @@
 """
 Redeem System for Telegram Bot
 Supports coin and character redeem codes with usage limits
+
+Database: Character_catcher
+Main Collection: anime_characters_lol (character data source)
+User Collection: user_collection_lmaoooo (user character storage)
 """
 
 import secrets
@@ -85,16 +89,19 @@ async def create_coin_code(amount: int, max_uses: int, created_by: int) -> Optio
 
 
 async def create_character_code(character_id: int, max_uses: int, created_by: int) -> Optional[str]:
-    """Create a character redeem code in the database."""
+    """
+    Create a character redeem code in the database.
+    Validates character exists in anime_characters_lol collection.
+    """
     if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
     
     try:
-        # Verify character exists
+        # Verify character exists in main collection (anime_characters_lol)
         character = await collection.find_one({"id": character_id})
         if not character:
-            LOGGER.warning(f"Character ID {character_id} not found in collection")
+            LOGGER.warning(f"Character ID {character_id} not found in anime_characters_lol collection")
             return None
         
         # Generate unique code
@@ -127,6 +134,11 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
     """
     Redeem a code for a user.
     Returns dict with 'success', 'message', and optional 'data' keys.
+    
+    For character codes:
+    - Fetches full character from anime_characters_lol (id, name, anime, rarity, img_url)
+    - Adds to user_collection_lmaoooo.characters array
+    - Handles duplicates gracefully
     """
     if redeem_codes_collection is None:
         return {"success": False, "message": "System error: database not available"}
@@ -214,55 +226,39 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
             }
         
         elif code_type == "character":
-            # Add character to user's collection
+            # Get character ID from code
             character_id = code_doc.get("character_id")
             
-            # Get character details
+            # Fetch FULL character details from anime_characters_lol (main collection)
             character = await collection.find_one({"id": character_id})
+            
             if not character:
+                LOGGER.error(f"Character {character_id} not found in anime_characters_lol during redeem")
                 return {
                     "success": False,
                     "message": "✘ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏ ʟᴏɴɢᴇʀ ᴇxɪsᴛs ɪɴ ᴅᴀᴛᴀʙᴀsᴇ.",
                     "show_alert": True
                 }
             
-            # Check if user already has this character
-            user_doc = await user_collection.find_one({"id": user_id})
-            if user_doc:
-                user_characters = user_doc.get("characters", [])
-                # Check if character already exists (by ID)
-                has_character = any(char.get("id") == character_id for char in user_characters)
-                
-                if has_character:
-                    # User already has this character, still mark code as used but inform them
-                    await redeem_codes_collection.update_one(
-                        {"code": code.upper()},
-                        {"$push": {"used_by": user_id}}
-                    )
-                    
-                    # Check if we should deactivate
-                    if current_uses + 1 >= max_uses:
-                        await redeem_codes_collection.update_one(
-                            {"code": code.upper()},
-                            {"$set": {"is_active": False}}
-                        )
-                    
-                    character_name = character.get("name", "Unknown")
-                    return {
-                        "success": True,
-                        "message": f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ!\n\nʏᴏᴜ ᴀʟʀᴇᴀᴅʏ ʜᴀᴠᴇ <b>{escape(character_name)}</b> ɪɴ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ.\nᴅᴜᴘʟɪᴄᴀᴛᴇ ᴀᴅᴅᴇᴅ!",
-                        "data": {"type": "character", "character_id": character_id, "duplicate": True}
-                    }
-            
-            # Add character to user's collection
+            # Extract required fields (id, name, anime, rarity, img_url)
             character_entry = {
-                "id": character_id,
+                "id": character.get("id"),
                 "name": character.get("name"),
                 "anime": character.get("anime"),
                 "rarity": character.get("rarity"),
                 "img_url": character.get("img_url")
             }
             
+            # Check if user already has this character (duplicate detection)
+            user_doc = await user_collection.find_one({"id": user_id})
+            is_duplicate = False
+            
+            if user_doc:
+                user_characters = user_doc.get("characters", [])
+                # Check if character ID already exists
+                is_duplicate = any(char.get("id") == character_id for char in user_characters)
+            
+            # Add character to user's collection (even if duplicate)
             await user_collection.update_one(
                 {"id": user_id},
                 {
@@ -272,7 +268,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                 upsert=True
             )
             
-            # Update code document
+            # Mark code as used
             await redeem_codes_collection.update_one(
                 {"code": code.upper()},
                 {"$push": {"used_by": user_id}}
@@ -285,15 +281,37 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                     {"$set": {"is_active": False}}
                 )
             
-            LOGGER.info(f"User {user_id} redeemed character code {code} for character {character_id}")
+            LOGGER.info(f"User {user_id} redeemed character code {code} for character {character_id} (duplicate: {is_duplicate})")
             
             character_name = character.get("name", "Unknown")
             anime_name = character.get("anime", "Unknown")
             
+            # Build success message
+            if is_duplicate:
+                message = (
+                    f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n"
+                    f"🎉 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:\n"
+                    f"<b>{escape(character_name)}</b>\n"
+                    f"ғʀᴏᴍ <i>{escape(anime_name)}</i>\n\n"
+                    f"ℹ️ ʏᴏᴜ ᴀʟʀᴇᴀᴅʏ ʜᴀᴅ ᴛʜɪs ᴄʜᴀʀᴀᴄᴛᴇʀ.\nᴅᴜᴘʟɪᴄᴀᴛᴇ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ!"
+                )
+            else:
+                message = (
+                    f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n"
+                    f"🎉 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:\n"
+                    f"<b>{escape(character_name)}</b>\n"
+                    f"ғʀᴏᴍ <i>{escape(anime_name)}</i>"
+                )
+            
             return {
                 "success": True,
-                "message": f"✓ ᴄᴏᴅᴇ ʀᴇᴅᴇᴇᴍᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!\n\n🎉 ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ:\n<b>{escape(character_name)}</b>\nғʀᴏᴍ <i>{escape(anime_name)}</i>",
-                "data": {"type": "character", "character_id": character_id, "character_name": character_name}
+                "message": message,
+                "data": {
+                    "type": "character",
+                    "character_id": character_id,
+                    "character_name": character_name,
+                    "is_duplicate": is_duplicate
+                }
             }
         
         else:
@@ -376,6 +394,7 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """
     /sgen <character_id> <max_users>
     Generate a character redeem code. Admin only.
+    Fetches character data from anime_characters_lol (main collection).
     """
     user_id = update.effective_user.id
     
@@ -412,31 +431,40 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(to_small_caps("✘ Max users must be greater than 0."))
         return
     
-    # Verify character exists and get details from main collection database
+    # Fetch character from anime_characters_lol (main collection)
     character = await collection.find_one({"id": character_id})
+    
     if not character:
-        # Get total characters count and ID range to help user
-        total_chars = await collection.count_documents({})
+        # Get helpful database info
+        try:
+            total_chars = await collection.count_documents({})
+            
+            # Get ID range using aggregation
+            pipeline_min = [{"$group": {"_id": None, "min_id": {"$min": "$id"}}}]
+            pipeline_max = [{"$group": {"_id": None, "max_id": {"$max": "$id"}}}]
+            
+            min_result = await collection.aggregate(pipeline_min).to_list(1)
+            max_result = await collection.aggregate(pipeline_max).to_list(1)
+            
+            min_id = min_result[0]['min_id'] if min_result else 1
+            max_id = max_result[0]['max_id'] if max_result else 1
+            
+            error_msg = (
+                f"<b>{to_small_caps('✘ Character Not Found')}</b>\n\n"
+                f"{to_small_caps(f'Character ID {character_id} does not exist in anime_characters_lol.')}\n\n"
+                f"<b>{to_small_caps('Database Info:')}</b>\n"
+                f"{to_small_caps(f'• Total Characters: {total_chars}')}\n"
+                f"{to_small_caps(f'• Valid ID Range: {min_id} - {max_id}')}\n\n"
+                f"{to_small_caps('Tip: Use an ID within the valid range!')}"
+            )
+        except Exception as e:
+            LOGGER.error(f"Error fetching database stats: {e}")
+            error_msg = f"{to_small_caps(f'✘ Character ID {character_id} not found in database.')}"
         
-        # Get min and max character IDs
-        min_char = await collection.find_one({}, sort=[("id", 1)])
-        max_char = await collection.find_one({}, sort=[("id", -1)])
-        
-        min_id = min_char.get("id", 1) if min_char else 1
-        max_id = max_char.get("id", 1) if max_char else 1
-        
-        error_msg = (
-            f"<b>{to_small_caps('✘ Character Not Found')}</b>\n\n"
-            f"{to_small_caps(f'Character ID {character_id} does not exist in the database.')}\n\n"
-            f"<b>{to_small_caps('Database Info:')}</b>\n"
-            f"{to_small_caps(f'• Total Characters: {total_chars}')}\n"
-            f"{to_small_caps(f'• ID Range: {min_id} to {max_id}')}\n\n"
-            f"{to_small_caps('Tip: Try a character ID within the valid range!')}"
-        )
         await update.message.reply_text(error_msg, parse_mode="HTML")
         return
     
-    # Create code
+    # Create code (validated character exists)
     code = await create_character_code(character_id, max_uses, user_id)
     
     if code:
@@ -456,9 +484,11 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"{to_small_caps('Users can redeem with:')} <code>/redeem {code}</code>"
         )
         await update.message.reply_text(response, parse_mode="HTML")
+        
+        LOGGER.info(f"Generated character code {code} for ID {character_id} ({character_name}) by user {user_id}")
     else:
         await update.message.reply_text(
-            f"{to_small_caps('✘ Failed to generate code. Character may not exist.')}"
+            f"{to_small_caps('✘ Failed to generate code. Please try again.')}"
         )
 
 

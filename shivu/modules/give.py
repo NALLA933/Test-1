@@ -1,10 +1,3 @@
-"""
-Give Character System for Telegram Bot
-Admin can reply to a user's message and use /give command to add character to their collection
-
-Usage: Reply to user's message and type /give <character_id>
-"""
-
 from html import escape
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
@@ -79,7 +72,7 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         usage_msg = (
             f"<b>🎁 {to_small_caps('GIVE CHARACTER COMMAND')}</b>\n\n"
             f"📝 {to_small_caps('Usage:')}\n"
-            f"   {to_small_caps('Reply to a user\'s message and type:')}\n"
+            f"   {to_small_caps('Reply to a user message and type:')}\n"
             f"   <code>/give &lt;character_id&gt;</code>\n\n"
             f"💡 {to_small_caps('Example:')}\n"
             f"   {to_small_caps('Reply to user and type:')} <code>/give 123</code>"

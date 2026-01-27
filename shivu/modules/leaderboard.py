@@ -9,7 +9,7 @@ from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
 
 from shivu import (
     application, VIDEO_URL, user_collection, top_global_groups_collection,
-    group_user_totals_collection, db
+    group_user_totals_collection
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -64,9 +64,12 @@ def get_ist_datetime() -> datetime:
 # DAILY COLLECTIONS (IST-based)
 # ============================================================================
 
+# Use the same database instance as user_collection
+_daily_db = user_collection.database
+
 # Create new collections for daily tracking (IST-based)
-daily_user_guesses_collection = db.get_collection('daily_user_guesses')
-daily_group_guesses_collection = db.get_collection('daily_group_guesses')
+daily_user_guesses_collection = _daily_db.get_collection('daily_user_guesses')
+daily_group_guesses_collection = _daily_db.get_collection('daily_group_guesses')
 
 
 # ============================================================================

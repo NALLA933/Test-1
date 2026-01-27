@@ -9,7 +9,7 @@ from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
 
 from shivu import (
     application, VIDEO_URL, user_collection, top_global_groups_collection,
-    group_user_totals_collection, LOGGER
+    group_user_totals_collection, LOGGER, collection
 )
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -176,20 +176,35 @@ async def leaderboard_entry(update: Update, context: CallbackContext) -> None:
 
 
 async def show_char_top() -> str:
-    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴏᴜɴᴛ."""
+    """sʜᴏᴡ ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴏᴜɴᴛ (only valid characters)."""
     try:
-        cursor = user_collection.aggregate([
-            {
-                "$project": {
-                    "username": 1,
-                    "first_name": 1,
-                    "character_count": {"$size": "$characters"}
-                }
-            },
-            {"$sort": {"character_count": -1}},
-            {"$limit": 10}
-        ])
-        leaderboard_data = await cursor.to_list(length=10)
+        # Get all valid character IDs from main collection
+        valid_char_ids = set()
+        async for char in collection.find({}, {"id": 1}):
+            valid_char_ids.add(char['id'])
+        
+        # Get all users with their characters
+        all_users = []
+        async for user in user_collection.find({}, {"id": 1, "username": 1, "first_name": 1, "characters": 1}):
+            # Count only valid characters
+            valid_count = 0
+            user_characters = user.get('characters', [])
+            
+            for char in user_characters:
+                char_id = char.get('id')
+                if char_id and char_id in valid_char_ids:
+                    valid_count += 1
+            
+            if valid_count > 0:
+                all_users.append({
+                    'username': user.get('username', ''),
+                    'first_name': user.get('first_name', 'Unknown'),
+                    'character_count': valid_count
+                })
+        
+        # Sort by character count and get top 10
+        all_users.sort(key=lambda x: x['character_count'], reverse=True)
+        leaderboard_data = all_users[:10]
 
         message = "🏆 <b>ᴛᴏᴘ 10 ᴜsᴇʀs ᴡɪᴛʜ ᴍᴏsᴛ ᴄʜᴀʀᴀᴄᴛᴇʀs</b>\n\n"
 

@@ -1,4 +1,3 @@
-import redeem_system
 import importlib
 import time
 import random

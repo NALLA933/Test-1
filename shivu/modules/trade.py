@@ -190,13 +190,27 @@ async def trade(client, message):
                     await message.reply_text("❌ The other user doesn't have any characters yet!")
                     return
                 
+                # Ensure characters field exists and is a list for both users
+                sender_characters = sender.get('characters', [])
+                receiver_characters = receiver.get('characters', [])
+                
+                if not isinstance(sender_characters, list):
+                    await message.reply_text("❌ Your character data is corrupted. Please contact admin!")
+                    logger.error(f"User {sender_id} has non-list characters: {type(sender_characters)}")
+                    return
+                
+                if not isinstance(receiver_characters, list):
+                    await message.reply_text("❌ The other user's character data is corrupted!")
+                    logger.error(f"User {receiver_id} has non-list characters: {type(receiver_characters)}")
+                    return
+                
                 # Find characters
                 sender_character = next(
-                    (char for char in sender.get('characters', []) if char.get('id') == sender_character_id), 
+                    (char for char in sender_characters if char.get('id') == sender_character_id), 
                     None
                 )
                 receiver_character = next(
-                    (char for char in receiver.get('characters', []) if char.get('id') == receiver_character_id), 
+                    (char for char in receiver_characters if char.get('id') == receiver_character_id), 
                     None
                 )
                 
@@ -419,9 +433,16 @@ async def gift(client, message):
                 await message.reply_text("❌ You don't have any characters yet!")
                 return
             
+            # Ensure characters field exists and is a list
+            characters = sender.get('characters', [])
+            if not isinstance(characters, list):
+                await message.reply_text("❌ Your character data is corrupted. Please contact admin!")
+                logger.error(f"User {sender_id} has non-list characters: {type(characters)}")
+                return
+            
             # Find character
             character = next(
-                (char for char in sender.get('characters', []) if char.get('id') == character_id), 
+                (char for char in characters if char.get('id') == character_id), 
                 None
             )
             
@@ -627,7 +648,10 @@ async def check_pending(client, message):
 
 
 # Optional: Admin command to clear all pending operations
-@shivuu.on_message(filters.command("clearpending") & filters.user("ADMIN_USER_ID"))  # Replace with actual admin ID
+# Replace ADMIN_USER_IDS with actual admin user IDs in list format
+ADMIN_USER_IDS = [123456789, 987654321]  # Add your admin user IDs here
+
+@shivuu.on_message(filters.command("clearpending") & filters.user(ADMIN_USER_IDS))
 async def clear_pending(client, message):
     """Clear all pending trades and gifts (Admin only)"""
     pending_trades.clear()

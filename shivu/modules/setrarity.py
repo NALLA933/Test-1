@@ -431,6 +431,30 @@ async def can_character_spawn(character_id: str, rarity: int, chat_id: int) -> t
     
     return True, None
 
+async def get_disabled_rarities(chat_id: int) -> List[int]:
+    """
+    Get list of disabled rarities for a chat
+    Returns: List of disabled rarity numbers
+    """
+    try:
+        settings = await get_chat_rarity_settings(chat_id)
+        return settings.get('disabled_rarities', [])
+    except Exception as e:
+        LOGGER.exception(f"Error getting disabled rarities: {e}")
+        return []
+
+async def get_locked_character_ids() -> List[str]:
+    """
+    Get list of all locked character IDs
+    Returns: List of character IDs that are locked
+    """
+    try:
+        locked_chars = await locked_characters_collection.find({}).to_list(length=None)
+        return [char.get('character_id') for char in locked_chars if char.get('character_id')]
+    except Exception as e:
+        LOGGER.exception(f"Error getting locked character IDs: {e}")
+        return []
+
 def setup_handlers():
     """Setup command handlers - to be called from main.py"""
     application.add_handler(CommandHandler("set_on", set_on, block=False))

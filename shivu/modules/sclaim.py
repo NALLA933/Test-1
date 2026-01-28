@@ -15,10 +15,14 @@ claim_codes_collection = db.claim_codes
 
 # Configuration
 ALLOWED_GROUP_ID = -1003317636069
-SUPPORT_GROUP = "https://t.me/xjjdjdjdhe"
-SUPPORT_CHANNEL = "https://t.me/Senpai_Updates"
-SUPPORT_GROUP_ID = "@THE_DRAGON_SUPPORT"
-SUPPORT_CHANNEL_ID = "@xjjdjdjdhe"
+SUPPORT_GROUP = "https://t.me/xjjdjdjdhe"           # Support Group Link
+SUPPORT_CHANNEL = "https://t.me/Senpai_Updates"     # Update Channel Link
+SUPPORT_GROUP_ID = -1003317636069                   # Support Group ID
+SUPPORT_CHANNEL_ID = -1003870337314                 # Update Channel ID
+
+# Membership verification settings
+ENABLE_MEMBERSHIP_CHECK = True  # Set to False to disable membership verification
+# NOTE: If True, bot must be admin in both group and channel to verify membership
 
 # Allowed rarities for sclaim (2=Rare, 3=Legendary, 4=Special)
 ALLOWED_RARITIES = [2, 3, 4]
@@ -78,37 +82,49 @@ def generate_coin_code(length: int = 8) -> str:
 
 # ---------- Helper Functions ----------
 async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Check if user has joined support group and channel"""
+    """Check if user has joined support group and update channel"""
     user_id = update.effective_user.id
     
     try:
         # Check support group membership
-        group_member = await context.bot.get_chat_member(SUPPORT_GROUP_ID, user_id)
-        if group_member.status in ['left', 'kicked']:
-            return False
+        try:
+            group_member = await context.bot.get_chat_member(SUPPORT_GROUP_ID, user_id)
+            if group_member.status in ['left', 'kicked']:
+                return False
+        except Exception as e:
+            # If bot is not admin or other error, skip this check
+            LOGGER.warning(f"Cannot check support group membership (bot needs admin rights): {e}")
+            # Continue to channel check
         
-        # Check support channel membership
-        channel_member = await context.bot.get_chat_member(SUPPORT_CHANNEL_ID, user_id)
-        if channel_member.status in ['left', 'kicked']:
-            return False
+        # Check update channel membership
+        try:
+            channel_member = await context.bot.get_chat_member(SUPPORT_CHANNEL_ID, user_id)
+            if channel_member.status in ['left', 'kicked']:
+                return False
+        except Exception as e:
+            # If bot is not admin or other error, skip this check
+            LOGGER.warning(f"Cannot check update channel membership (bot needs admin rights): {e}")
+            # If we can't verify, we'll allow the user (or you can set to False for strict mode)
+            pass
         
         return True
     except Exception as e:
         LOGGER.error(f"Error checking membership: {e}")
-        return False
+        # Return True to allow command (or False for strict verification)
+        return True
 
 
 async def show_join_buttons(update: Update):
-    """Show join buttons for support group and channel"""
+    """Show join buttons for support group and update channel"""
     keyboard = [
-        [InlineKeyboardButton("📢 Support Channel", url=SUPPORT_CHANNEL)],
+        [InlineKeyboardButton("📢 Update Channel", url=SUPPORT_CHANNEL)],
         [InlineKeyboardButton("👥 Support Group", url=SUPPORT_GROUP)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
         f"<b>⚠️ {to_small_caps('JOIN REQUIRED')}</b>\n\n"
-        f"🔒 {to_small_caps('You need to join our Support Group and Channel first!')}\n\n"
+        f"🔒 {to_small_caps('You need to join our Update Channel and Support Group first!')}\n\n"
         f"📌 {to_small_caps('Please join both and try again:')}",
         reply_markup=reply_markup,
         parse_mode="HTML"
@@ -165,11 +181,12 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_join_buttons(update)
         return
     
-    # Check membership
-    is_member = await check_membership(update, context)
-    if not is_member:
-        await show_join_buttons(update)
-        return
+    # Check membership (if enabled)
+    if ENABLE_MEMBERSHIP_CHECK:
+        is_member = await check_membership(update, context)
+        if not is_member:
+            await show_join_buttons(update)
+            return
     
     # Check cooldown
     can_claim = await check_cooldown(user_id, "sclaim")
@@ -263,11 +280,12 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await show_join_buttons(update)
         return
     
-    # Check membership
-    is_member = await check_membership(update, context)
-    if not is_member:
-        await show_join_buttons(update)
-        return
+    # Check membership (if enabled)
+    if ENABLE_MEMBERSHIP_CHECK:
+        is_member = await check_membership(update, context)
+        if not is_member:
+            await show_join_buttons(update)
+            return
     
     # Check cooldown
     can_claim = await check_cooldown(user_id, "claim")

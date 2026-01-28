@@ -114,27 +114,29 @@ def format_character_details(character, total_count, top_grabbers):
     anime_sc = to_small_caps(anime)
     char_id_sc = to_small_caps(char_id)
     
-    # Build message
+    # Build message with new emojis (✨💮🏵️🍃🎐)
     msg = (
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 {to_small_caps('character info')}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"✨ {to_small_caps('name')}   : **{name_sc}**\n"
-        f"🎬 {to_small_caps('anime')}  : **{anime_sc}**\n"
-        f"🆔 {to_small_caps('id')}     : `{char_id_sc}`\n"
-        f"⭐ {to_small_caps('rarity')} : {rarity_display}\n"
+        f"🎐 {to_small_caps('anime')}  : **{anime_sc}**\n"
+        f"💮 {to_small_caps('id')}     : `{char_id_sc}`\n"
+        f"🏵️ {to_small_caps('rarity')} : {rarity_display}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"👥 {to_small_caps('total grabbed')} : **{total_count}**\n"
+        f"🍃 {to_small_caps('total grabbed')} : **{total_count}**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
     )
     
-    # Add top grabbers
+    # Add top grabbers with numbers instead of medals
     if top_grabbers:
         msg += f"🏆 {to_small_caps('top 10 grabbers')}:\n\n"
         for i, grabber in enumerate(top_grabbers, 1):
-            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            username = grabber['username'] if grabber['username'] else grabber['first_name']
-            msg += f"{medal} [{username}](tg://user?id={grabber['user_id']}) - **{grabber['count']}x**\n"
+            first_name = grabber['first_name']
+            user_id = grabber['user_id']
+            count = grabber['count']
+            # Use first_name with clickable link
+            msg += f"**{i}.** [{to_small_caps(first_name)}](tg://user?id={user_id}) - **{count}x**\n"
     else:
         msg += f"❌ {to_small_caps('no grabbers yet')}\n"
     
@@ -191,9 +193,9 @@ async def scheck_command(client, message):
         # Validate command format
         if len(message.command) != 2:
             await message.reply_text(
-                "❌ **Invalid Format!**\n\n"
-                "**Usage:** `/scheck [Character ID]`\n"
-                "**Example:** `/scheck 12`"
+                f"❌ **{to_small_caps('invalid format')}!**\n\n"
+                f"**{to_small_caps('usage')}:** `/scheck [{to_small_caps('character id')}]`\n"
+                f"**{to_small_caps('example')}:** `/scheck 12`"
             )
             return
         
@@ -204,8 +206,8 @@ async def scheck_command(client, message):
         
         if not character:
             await message.reply_text(
-                f"❌ **Character not found!**\n\n"
-                f"Character with ID `{character_id}` is not available in main database."
+                f"❌ **{to_small_caps('character not found')}!**\n\n"
+                f"{to_small_caps('character with id')} `{character_id}` {to_small_caps('is not available in main database')}."
             )
             return
         
@@ -241,7 +243,7 @@ async def scheck_command(client, message):
         
     except Exception as e:
         logger.error(f"Error in scheck command: {e}")
-        await message.reply_text("❌ An error occurred while processing your request. Please try again!")
+        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
 
 
 @shivuu.on_callback_query(filters.regex(r"^scheck_close:(\d+)$"))
@@ -251,11 +253,11 @@ async def scheck_close_callback(client, callback_query):
     
     # Only allow the user who initiated the command to close
     if callback_query.from_user.id != user_id:
-        await callback_query.answer("❌ This is not for you!", show_alert=True)
+        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
         return
     
     await callback_query.message.delete()
-    await callback_query.answer("Closed!", show_alert=False)
+    await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
 
 
 # ==================== SFIND COMMAND ====================
@@ -267,9 +269,9 @@ async def sfind_command(client, message):
         # Validate command format
         if len(message.command) < 2:
             await message.reply_text(
-                "❌ **Invalid Format!**\n\n"
-                "**Usage:** `/sfind [Character Name]`\n"
-                "**Example:** `/sfind Naruto`"
+                f"❌ **{to_small_caps('invalid format')}!**\n\n"
+                f"**{to_small_caps('usage')}:** `/sfind [{to_small_caps('character name')}]`\n"
+                f"**{to_small_caps('example')}:** `/sfind {to_small_caps('naruto')}`"
             )
             return
         
@@ -291,8 +293,8 @@ async def sfind_command(client, message):
         
         if not characters:
             await message.reply_text(
-                f"❌ **No characters found!**\n\n"
-                f"Character with name **{search_query}** is not available in main database."
+                f"❌ **{to_small_caps('no characters found')}!**\n\n"
+                f"{to_small_caps('character with name')} **{to_small_caps(search_query)}** {to_small_caps('is not available in main database')}."
             )
             return
         
@@ -333,7 +335,7 @@ async def sfind_command(client, message):
         
     except Exception as e:
         logger.error(f"Error in sfind command: {e}")
-        await message.reply_text("❌ An error occurred while processing your request. Please try again!")
+        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
 
 
 @shivuu.on_callback_query(filters.regex(r"^sfind_(prev|next|close):(\d+)$"))
@@ -345,7 +347,7 @@ async def sfind_navigation_callback(client, callback_query):
     
     # Only allow the user who initiated the command
     if callback_query.from_user.id != user_id:
-        await callback_query.answer("❌ This is not for you!", show_alert=True)
+        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
         return
     
     # Handle close
@@ -353,12 +355,12 @@ async def sfind_navigation_callback(client, callback_query):
         if user_id in sfind_sessions:
             del sfind_sessions[user_id]
         await callback_query.message.delete()
-        await callback_query.answer("Closed!", show_alert=False)
+        await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
         return
     
     # Check if session exists
     if user_id not in sfind_sessions:
-        await callback_query.answer("❌ Session expired! Please search again.", show_alert=True)
+        await callback_query.answer(f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", show_alert=True)
         return
     
     session = sfind_sessions[user_id]
@@ -372,13 +374,13 @@ async def sfind_navigation_callback(client, callback_query):
         if current_page > 0:
             session['page'] -= 1
         else:
-            await callback_query.answer("❌ This is the first page!", show_alert=True)
+            await callback_query.answer(f"❌ {to_small_caps('this is the first page')}!", show_alert=True)
             return
     elif action == "next":
         if current_page < total_pages - 1:
             session['page'] += 1
         else:
-            await callback_query.answer("❌ This is the last page!", show_alert=True)
+            await callback_query.answer(f"❌ {to_small_caps('this is the last page')}!", show_alert=True)
             return
     
     # Format new page
@@ -404,4 +406,4 @@ async def sfind_navigation_callback(client, callback_query):
         page_msg,
         reply_markup=keyboard
     )
-    await callback_query.answer(f"Page {new_page + 1}/{total_pages}", show_alert=False)
+    await callback_query.answer(f"{to_small_caps('page')} {new_page + 1}/{total_pages}", show_alert=False)

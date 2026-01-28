@@ -16,17 +16,22 @@ def to_small_caps(text: str) -> str:
         'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
         'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
         'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ',
-        'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ',
+        'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ',
         'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ',
         'z': 'ᴢ',
         'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ',
         'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ',
         'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ',
-        'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ',
+        'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ',
         'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ',
         'Z': 'ᴢ',
         ' ': ' ', '-': '-', '/': '/', '(': '(', ')': ')',
-        '[': '[', ']': ']', '{': '{', '}': '}',
+        '[': '[', ']': ']', '{': '{', '}': '}', ':': ':',
+        '.': '.', ',': ',', '!': '!', '?': '?', '\'': '\'',
+        '"': '"', '&': '&', '@': '@', '#': '#', '$': '$',
+        '%': '%', '^': '^', '*': '*', '+': '+', '=': '=',
+        '_': '_', '|': '|', '\\': '\\', '`': '`', '~': '~',
+        '<': '<', '>': '>', ';': ';',
         '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
         '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
     }
@@ -177,9 +182,9 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
 
     # Get user data with ONLY valid characters (with optional rarity filter)
     user, characters = await HaremManager.get_user_data_with_valid_characters(user_id, rarity_filter)
-    
+
     if not user:
-        message = 'You Have Not Guessed any Characters Yet..'
+        message = to_small_caps('You Have Not Guessed any Characters Yet..')
         if update.message:
             await update.message.reply_text(message)
         else:
@@ -194,10 +199,10 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
         # No characters after filtering
         if rarity_filter is not None:
             filter_name = RARITY_OPTIONS.get(str(rarity_filter), {}).get('name', 'this rarity')
-            message = f'You Have No Characters of {filter_name}!\n\nUse /smode to change filter or select "All Rarities".'
+            message = to_small_caps(f'You Have No Characters of {filter_name}!\n\nUse /smode to change filter or select "All Rarities".')
         else:
-            message = 'You Have Not Guessed any Characters Yet..'
-        
+            message = to_small_caps('You Have Not Guessed any Characters Yet..')
+
         if update.message:
             await update.message.reply_text(message)
         else:
@@ -228,13 +233,13 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
     # Header in Small Caps with filter info
     header_text = to_small_caps(f"{safe_name}'S HAREM - PAGE {page + 1}/{total_pages}")
     harem_message = f"<b>{header_text}</b>\n"
-    
+
     # Add filter info if active
     if rarity_filter is not None:
         filter_name = RARITY_OPTIONS.get(str(rarity_filter), {}).get('name', 'Unknown')
         filter_text = to_small_caps(f"Filter: {filter_name} ({len(characters)}/{total_characters_count})")
         harem_message += f"<b>🔍 {filter_text}</b>\n"
-    
+
     harem_message += "\n"
 
     # Group characters by anime for display
@@ -249,7 +254,7 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
 
         # Anime header with Small Caps
         harem_message += f"<b>𖤍 {anime_small_caps} {{{len(chars)}/{total_anime_chars}}}</b>\n"
-        harem_message += f"--------------------\n"
+        harem_message += f"{to_small_caps('--------------------')}\n"
 
         for char in chars:
             safe_char_name = escape(str(char['name']))
@@ -261,9 +266,9 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
             rarity_emoji = RARITY_EMOJIS.get(rarity_level, '⚪')
 
             # Character line with Small Caps
-            harem_message += f"✶ {char['id']} [ {rarity_emoji} ] {char_small_caps} x{count}\n"
+            harem_message += f"✶ {char['id']} [ {rarity_emoji} ] {char_small_caps} {to_small_caps(f'x{count}')}\n"
 
-        harem_message += f"--------------------\n\n"
+        harem_message += f"{to_small_caps('--------------------')}\n\n"
 
     # Build keyboard
     total_count = len(characters)
@@ -273,11 +278,11 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
             switch_inline_query_current_chat=f"collection.{user_id}"
         )
     ]]
-    
+
     # Add smode button
     keyboard.append([
         InlineKeyboardButton(
-            "🎐 " + to_small_caps("cancel"),
+            "🎐 " + to_small_caps("SMODE"),
             callback_data=f"open_smode:{user_id}"
         )
     ])
@@ -347,12 +352,12 @@ async def harem_callback(update: Update, context: CallbackContext) -> None:
         page = int(page)
         user_id = int(user_id)
     except (ValueError, TypeError):
-        await query.answer("Invalid request", show_alert=True)
+        await query.answer(to_small_caps("Invalid request"), show_alert=True)
         return
 
     # Check if user owns this harem
     if query.from_user.id != user_id:
-        await query.answer("It's Not Your Harem", show_alert=True)
+        await query.answer(to_small_caps("It's Not Your Harem"), show_alert=True)
         return
 
     # Process harem update

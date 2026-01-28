@@ -261,8 +261,14 @@ class MediaHandler:
     """Handles media extraction and validation"""
     
     @staticmethod
-    async def extract_from_reply(message: Message) -> Optional[MediaFile]:
-        """Extract media from replied message"""
+    async def extract_from_reply(message: Message, force_photo: bool = False) -> Optional[MediaFile]:
+        """
+        Extract media from replied message
+        
+        Args:
+            message: Telegram message to extract media from
+            force_photo: If True, convert document to photo by re-uploading
+        """
         media_type = MediaType.from_telegram_message(message)
         
         if not media_type:
@@ -279,6 +285,9 @@ class MediaHandler:
                 file_id = file_obj.file_id
                 filename = file_obj.file_name or f"document_{file_obj.file_unique_id}"
                 mime_type = file_obj.mime_type
+                
+                # ✨ FIX: If force_photo is True, we'll download and re-upload as photo
+                # This will be handled after download
             else:
                 return None
             
@@ -290,12 +299,22 @@ class MediaHandler:
             
             await file.download_to_drive(file_path)
             
+            # ✨ FIX: If document and force_photo, convert to PHOTO type
+            final_media_type = media_type
+            final_file_id = file_id
+            
+            if media_type == MediaType.DOCUMENT and force_photo:
+                # Mark as PHOTO type so it gets sent as photo
+                final_media_type = MediaType.PHOTO
+                # Use file_path instead of file_id for upload (will force as photo)
+                final_file_id = None  # Clear file_id to force fresh upload
+            
             return MediaFile(
                 file_path=file_path,
-                media_type=media_type,
+                media_type=final_media_type,
                 filename=filename,
                 mime_type=mime_type,
-                telegram_file_id=file_id
+                telegram_file_id=final_file_id
             )
             
         except Exception as e:
@@ -342,7 +361,7 @@ class TelegramUploader:
     async def upload_to_channel(
         character: Character,
         context: ContextTypes.DEFAULT_TYPE,
-        telegram_file_id: str,
+        telegram_file_id_or_path: str,
         is_update: bool = False
     ) -> Optional[int]:
         """
@@ -352,24 +371,48 @@ class TelegramUploader:
         - Removes document condition
         - Always uses send_photo regardless of original media type
         - Converts documents to photos automatically
+        - Accepts file_path if file_id is not available
         """
         try:
             caption = character.get_caption("Updated" if is_update else "Added")
             
             # ✨ MAIN CHANGE: Always send as PHOTO (not document)
-            message = await context.bot.send_photo(
-                chat_id=CHARA_CHANNEL_ID,
-                photo=telegram_file_id,
-                caption=caption,
-                parse_mode='HTML'
-            )
+            # If telegram_file_id_or_path is a file path (starts with /), upload file
+            if telegram_file_id_or_path and telegram_file_id_or_path.startswith('/'):
+                # Upload using file path
+                with open(telegram_file_id_or_path, 'rb') as photo_file:
+                    message = await context.bot.send_photo(
+                        chat_id=CHARA_CHANNEL_ID,
+                        photo=photo_file,
+                        caption=caption,
+                        parse_mode='HTML'
+                    )
+            else:
+                # Upload using file_id
+                message = await context.bot.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=telegram_file_id_or_path,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
             
             return message.message_id
             
         except BadRequest as e:
             error_msg = str(e).lower()
             if "not found" in error_msg or "message to edit not found" in error_msg:
-                return await TelegramUploader.upload_to_channel(character, context, telegram_file_id, is_update)
+                return await TelegramUploader.upload_to_channel(character, context, telegram_file_id_or_path, is_update)
+            # ✨ FIX: If "can't use file of type document as photo", try uploading from file path
+            if "can't use file of type document as photo" in error_msg or "wrong file identifier" in error_msg:
+                if character.media_file.file_path:
+                    with open(character.media_file.file_path, 'rb') as photo_file:
+                        message = await context.bot.send_photo(
+                            chat_id=CHARA_CHANNEL_ID,
+                            photo=photo_file,
+                            caption=caption,
+                            parse_mode='HTML'
+                        )
+                    return message.message_id
             raise
         except Exception as e:
             raise ValueError(f"Failed to upload to channel: {str(e)}")
@@ -386,14 +429,16 @@ class TelegramUploader:
         Changes:
         - Removes document condition in edit_message_media
         - Always uses InputMediaPhoto
+        - Handles document to photo conversion
         """
         try:
             if not old_message_id:
                 # No existing message, send new one
+                media_source = character.media_file.file_path or character.media_file.telegram_file_id or character.media_file.catbox_url
                 return await TelegramUploader.upload_to_channel(
                     character, 
                     context, 
-                    character.media_file.telegram_file_id or character.media_file.catbox_url, 
+                    media_source, 
                     True
                 )
             
@@ -402,8 +447,29 @@ class TelegramUploader:
             # Try to edit the media
             try:
                 # ✨ MAIN CHANGE: Always use InputMediaPhoto (not InputMediaDocument)
+                # Prefer catbox_url, then file_path, then file_id
+                media_source = character.media_file.catbox_url or character.media_file.file_path or character.media_file.telegram_file_id
+                
+                # ✨ FIX: If we have a file_path (document converted to photo), upload from file
+                if character.media_file.file_path and not character.media_file.catbox_url:
+                    # Delete old message and send new one with file
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=CHARA_CHANNEL_ID,
+                            message_id=old_message_id
+                        )
+                    except:
+                        pass
+                    
+                    return await TelegramUploader.upload_to_channel(
+                        character,
+                        context,
+                        character.media_file.file_path,
+                        True
+                    )
+                
                 media = InputMediaPhoto(
-                    media=character.media_file.catbox_url or character.media_file.telegram_file_id,
+                    media=media_source,
                     caption=caption,
                     parse_mode='HTML'
                 )
@@ -416,13 +482,34 @@ class TelegramUploader:
                 
             except BadRequest as e:
                 error_msg = str(e).lower()
+                
+                # ✨ FIX: Handle document to photo conversion error
+                if "can't use file of type document as photo" in error_msg or "wrong file identifier" in error_msg:
+                    # Delete old message and send new one
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=CHARA_CHANNEL_ID,
+                            message_id=old_message_id
+                        )
+                    except:
+                        pass
+                    
+                    media_source = character.media_file.file_path or character.media_file.catbox_url
+                    return await TelegramUploader.upload_to_channel(
+                        character,
+                        context,
+                        media_source,
+                        True
+                    )
+                
                 # If edit_message_media fails (message too old, not found, etc.), send new message
                 if "message not found" in error_msg or "message to edit not found" in error_msg or "message can't be edited" in error_msg:
                     # Send new message and return new message_id
+                    media_source = character.media_file.file_path or character.media_file.catbox_url or character.media_file.telegram_file_id
                     return await TelegramUploader.upload_to_channel(
                         character, 
                         context, 
-                        character.media_file.catbox_url or character.media_file.telegram_file_id, 
+                        media_source, 
                         True
                     )
                 raise
@@ -445,17 +532,45 @@ class CharacterFactory:
     async def create_from_command(
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
-        args: List[str]
+        message_text: str
     ) -> Optional[Character]:
-        """Create character from /upload command"""
-        if len(args) < 4:
+        """
+        Create character from /upload command
+        Format:
+        /upload
+        character_name
+        anime_name
+        rarity_number
+        """
+        # Split message by newlines
+        lines = message_text.strip().split('\n')
+        
+        # Need at least 4 lines: /upload, name, anime, rarity
+        if len(lines) < 4:
             return None
         
         try:
-            char_id = args[0]
-            rarity_num = int(args[1])
-            name = args[2]
-            anime = ' '.join(args[3:])
+            # lines[0] is /upload, skip it
+            name = lines[1].strip()
+            anime = lines[2].strip()
+            rarity_num = int(lines[3].strip())
+            
+            # Auto-generate character ID from database
+            # Get the highest ID and increment
+            last_char = await collection.find_one(
+                {},
+                sort=[('id', -1)]
+            )
+            
+            if last_char and last_char.get('id'):
+                try:
+                    last_id = int(last_char['id'])
+                    char_id = str(last_id + 1)
+                except (ValueError, TypeError):
+                    # If ID is not numeric, start from 1
+                    char_id = "1"
+            else:
+                char_id = "1"
             
             # Validate rarity
             rarity = RarityLevel.from_number(rarity_num)
@@ -534,15 +649,22 @@ class UploadHandler:
         return (
             "📤 <b>ᴜᴘʟᴏᴀᴅ ᴄᴏᴍᴍᴀɴᴅ ᴜꜱᴀɢᴇ</b>\n\n"
             "ʀᴇᴘʟʏ ᴛᴏ ᴀɴ ɪᴍᴀɢᴇ ᴡɪᴛʜ:\n"
-            "<code>/upload ID RARITY NAME ANIME</code>\n\n"
+            "<code>/upload\n"
+            "Character Name\n"
+            "Anime Name\n"
+            "Rarity Number</code>\n\n"
             "<b>ᴇxᴀᴍᴘʟᴇ:</b>\n"
-            "<code>/upload 69 5 Nezuko Demon Slayer</code>\n\n"
-            f"<b>ʀᴀʀɪᴛʏ ʟᴇᴠᴇʟꜱ:</b>\n{rarity_list}"
+            "<code>/upload\n"
+            "Nami\n"
+            "One Piece\n"
+            "3</code>\n\n"
+            f"<b>ʀᴀʀɪᴛʏ ʟᴇᴠᴇʟꜱ:</b>\n{rarity_list}\n\n"
+            "<b>ɴᴏᴛᴇ:</b> Character ID will be auto-generated"
         )
     
     @staticmethod
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /upload command with parallel processing"""
+        """Handle /upload command with new format"""
         if update.effective_user.id not in Config.SUDO_USERS:
             await update.message.reply_text('🔒 ᴀꜱᴋ ᴍʏ ᴏᴡɴᴇʀ...')
             return
@@ -551,7 +673,11 @@ class UploadHandler:
             await update.message.reply_text('❌ ʀᴇᴘʟʏ ᴛᴏ ᴀɴ ɪᴍᴀɢᴇ!')
             return
         
-        if not context.args or len(context.args) < 4:
+        # Get message text
+        message_text = update.message.text or update.message.caption or ""
+        lines = message_text.strip().split('\n')
+        
+        if len(lines) < 4:
             await update.message.reply_text(UploadHandler.format_upload_help(), parse_mode='HTML')
             return
         
@@ -559,7 +685,7 @@ class UploadHandler:
         
         try:
             # Create character object
-            character = await CharacterFactory.create_from_command(update, context, context.args)
+            character = await CharacterFactory.create_from_command(update, context, message_text)
             
             if not character:
                 await processing_msg.edit_text('❌ ɪɴᴠᴀʟɪᴅ ᴄᴏᴍᴍᴀɴᴅ ꜰᴏʀᴍᴀᴛ!')
@@ -744,7 +870,11 @@ class UpdateHandler:
                 processing_msg = await update.message.reply_text("🔄 **Processing new image...**")
                 
                 try:
-                    media_file = await MediaHandler.extract_from_reply(update.message.reply_to_message)
+                    # ✨ FIX: Force document to photo conversion
+                    media_file = await MediaHandler.extract_from_reply(
+                        update.message.reply_to_message, 
+                        force_photo=True
+                    )
                     
                     if not media_file or not media_file.is_valid_image:
                         await processing_msg.edit_text("❌ Invalid media! Only photos and image documents are allowed.")

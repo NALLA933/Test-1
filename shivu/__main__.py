@@ -208,15 +208,52 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
 
+    # 🔥 NEW: Get chat's disabled rarities FIRST
     try:
-        all_characters = await collection.find({}).to_list(length=None)
+        disabled_rarities = await setrarity.get_disabled_rarities(chat_id)
+    except Exception as e:
+        LOGGER.exception(f"Failed to get disabled rarities: {e}")
+        disabled_rarities = []
+    
+    # 🔥 NEW: Get locked character IDs
+    try:
+        locked_character_ids = await setrarity.get_locked_character_ids()
+    except Exception as e:
+        LOGGER.exception(f"Failed to get locked characters: {e}")
+        locked_character_ids = []
+
+    try:
+        # 🔥 OPTIMIZED: Fetch only characters with ENABLED rarities and NOT locked
+        query = {}
+        
+        # Exclude disabled rarities
+        if disabled_rarities:
+            query['rarity'] = {'$nin': disabled_rarities}
+        
+        # Exclude locked characters
+        if locked_character_ids:
+            if 'id' in query:
+                query['$and'] = [
+                    {'id': {'$nin': locked_character_ids}},
+                    query
+                ]
+            else:
+                query['id'] = {'$nin': locked_character_ids}
+        
+        all_characters = await collection.find(query).to_list(length=None)
+        
+        if disabled_rarities or locked_character_ids:
+            LOGGER.info(f"📊 Filtered characters: disabled_rarities={disabled_rarities}, locked_chars={len(locked_character_ids)}, available={len(all_characters)}")
     except Exception:
         LOGGER.exception("Failed to fetch characters from DB")
         all_characters = []
 
     if not all_characters:
         try:
-            await context.bot.send_message(chat_id=chat_id, text=to_small_caps("No characters available right now."))
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=to_small_caps("No characters available right now. All rarities may be disabled or characters locked.")
+            )
         except Exception:
             LOGGER.exception("Failed to notify about empty collection")
         return
@@ -226,41 +263,15 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if len(sent_characters[chat_id]) >= len(all_characters):
         sent_characters[chat_id] = []
 
+    # Select from unsent characters
     choices = [c for c in all_characters if c.get('id') not in sent_characters[chat_id]]
     if not choices:
         choices = all_characters
+        sent_characters[chat_id] = []  # Reset sent list
     
-    # 🔥 NEW: Try to find a spawnable character (max attempts to avoid infinite loop)
-    character = None
-    for attempt in range(MAX_SPAWN_ATTEMPTS):
-        temp_character = random.choice(choices)
-        
-        # Check if character can spawn (rarity enabled + not locked)
-        character_id = temp_character.get('id')
-        character_rarity = temp_character.get('rarity', 1)
-        
-        can_spawn, reason = await setrarity.can_character_spawn(
-            character_id=character_id,
-            rarity=character_rarity,
-            chat_id=chat_id
-        )
-        
-        if can_spawn:
-            character = temp_character
-            LOGGER.info(f"✅ Character {character_id} selected for spawn (attempt {attempt + 1})")
-            break
-        else:
-            LOGGER.info(f"⚠️ Attempt {attempt + 1}: Character {character_id} blocked - {reason}")
-            # Remove from choices to avoid picking same character again
-            choices = [c for c in choices if c.get('id') != character_id]
-            if not choices:
-                LOGGER.warning(f"No more valid choices available after {attempt + 1} attempts")
-                break
-    
-    # If no valid character found after all attempts, don't spawn
-    if not character:
-        LOGGER.warning(f"❌ Failed to find spawnable character in chat {chat_id} after {MAX_SPAWN_ATTEMPTS} attempts")
-        return
+    # Select random character (already filtered for enabled rarity + not locked)
+    character = random.choice(choices)
+    LOGGER.info(f"✅ Character selected: ID={character.get('id')}, Rarity={character.get('rarity', 1)}")
     
     sent_characters[chat_id].append(character.get('id'))
     last_characters[chat_id] = character

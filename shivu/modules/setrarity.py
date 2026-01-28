@@ -14,11 +14,17 @@ locked_characters_collection = db.locked_characters
 
 # Config se owner aur sudo data load karna
 try:
-    from config import OWNER_ID, SUDO_USERS
+    from config import Config
+    OWNER_ID = Config.OWNER_ID
+    SUDO_USERS = Config.SUDO_USERS
 except ImportError:
-    LOGGER.error("❌ Config import failed. Make sure config.py exists with OWNER_ID and SUDO_USERS")
-    OWNER_ID = None
-    SUDO_USERS = []
+    try:
+        # Fallback: try direct import
+        from config import OWNER_ID, SUDO_USERS
+    except ImportError:
+        LOGGER.error("❌ Config import failed. Make sure config.py exists with OWNER_ID and SUDO_USERS")
+        OWNER_ID = None
+        SUDO_USERS = []
 
 # Small caps conversion function (same as main.py)
 def to_small_caps(text: str) -> str:

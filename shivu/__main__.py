@@ -278,10 +278,8 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     first_correct_guesses.pop(chat_id, None)
 
     rarity_display = get_rarity_display(character)
-    # Create caption with second line in normal font (no small caps)
-    line1 = to_small_caps(f"✨ A new {escape(rarity_display)} character appeared!")
-    line2 = "✨ Guess the character name with /guess to add them to your harem."
-    caption = f"{line1}\n{line2}"
+# Single line caption in normal font (no small caps)
+caption = f"✨ A new {escape(rarity_display)} character appeared! Guess the character name with /guess to add them to your harem."
 
     try:
         await context.bot.send_photo(

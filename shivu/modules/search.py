@@ -173,8 +173,9 @@ def format_sfind_page(characters, page, total_pages, search_query):
         
         msg += (
             f"**{i}.** {to_small_caps(name)}\n"
-            f"   🆔 `{char_id}` | 🎬 {to_small_caps(anime)}\n"
-            f"   ⭐ {rarity_display}\n\n"
+            f"   {to_small_caps('anime')}: {to_small_caps(anime)}\n"
+            f"   {to_small_caps('id')}: `{char_id}`\n"
+            f"   {to_small_caps('rarity')}: {rarity_display}\n\n"
         )
     
     msg += f"━━━━━━━━━━━━━━━━━━"
@@ -218,9 +219,9 @@ async def scheck_command(client, message):
         # Get character image
         img_url = character.get('img_url')
         
-        # Create keyboard with cancel button
+        # Create keyboard with cancel button (small caps, no emoji)
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Close", callback_data=f"scheck_close:{message.from_user.id}")]
+            [InlineKeyboardButton(to_small_caps("Close"), callback_data=f"scheck_close:{message.from_user.id}")]
         ])
         
         # Send with image if available
@@ -309,16 +310,16 @@ async def sfind_command(client, message):
         # Format first page
         page_msg = format_sfind_page(characters, 0, total_pages, search_query)
         
-        # Create keyboard
+        # Create keyboard (small caps, no emojis)
         buttons = []
         if total_pages > 1:
             buttons.append([
-                InlineKeyboardButton("◀️ Previous", callback_data=f"sfind_prev:{user_id}"),
-                InlineKeyboardButton(f"1/{total_pages}", callback_data=f"sfind_page:{user_id}"),
-                InlineKeyboardButton("Next ▶️", callback_data=f"sfind_next:{user_id}")
+                InlineKeyboardButton(to_small_caps("Previous"), callback_data=f"sfind_prev:{user_id}"),
+                InlineKeyboardButton(f"{1}/{total_pages}", callback_data=f"sfind_page:{user_id}"),
+                InlineKeyboardButton(to_small_caps("Next"), callback_data=f"sfind_next:{user_id}")
             ])
         buttons.append([
-            InlineKeyboardButton("❌ Close", callback_data=f"sfind_close:{user_id}")
+            InlineKeyboardButton(to_small_caps("Close"), callback_data=f"sfind_close:{user_id}")
         ])
         
         keyboard = InlineKeyboardMarkup(buttons)
@@ -384,16 +385,16 @@ async def sfind_navigation_callback(client, callback_query):
     new_page = session['page']
     page_msg = format_sfind_page(characters, new_page, total_pages, search_query)
     
-    # Update keyboard
+    # Update keyboard (small caps, no emojis)
     buttons = []
     if total_pages > 1:
         buttons.append([
-            InlineKeyboardButton("◀️ Previous", callback_data=f"sfind_prev:{user_id}"),
+            InlineKeyboardButton(to_small_caps("Previous"), callback_data=f"sfind_prev:{user_id}"),
             InlineKeyboardButton(f"{new_page + 1}/{total_pages}", callback_data=f"sfind_page:{user_id}"),
-            InlineKeyboardButton("Next ▶️", callback_data=f"sfind_next:{user_id}")
+            InlineKeyboardButton(to_small_caps("Next"), callback_data=f"sfind_next:{user_id}")
         ])
     buttons.append([
-        InlineKeyboardButton("❌ Close", callback_data=f"sfind_close:{user_id}")
+        InlineKeyboardButton(to_small_caps("Close"), callback_data=f"sfind_close:{user_id}")
     ])
     
     keyboard = InlineKeyboardMarkup(buttons)

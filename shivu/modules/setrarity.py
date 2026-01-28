@@ -14,17 +14,28 @@ locked_characters_collection = db.locked_characters
 
 # Config se owner aur sudo data load karna
 try:
-    from config import Config
+    # Try importing Config class first (class-based config)
+    from shivu.config import Config
     OWNER_ID = Config.OWNER_ID
     SUDO_USERS = Config.SUDO_USERS
-except ImportError:
+    LOGGER.info(f"✅ Config loaded: OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
+except (ImportError, AttributeError) as e:
     try:
-        # Fallback: try direct import
-        from config import OWNER_ID, SUDO_USERS
-    except ImportError:
-        LOGGER.error("❌ Config import failed. Make sure config.py exists with OWNER_ID and SUDO_USERS")
-        OWNER_ID = None
-        SUDO_USERS = []
+        # Fallback: try direct import from shivu package
+        from shivu.config import OWNER_ID, SUDO_USERS
+        LOGGER.info(f"✅ Config loaded (direct): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
+    except (ImportError, AttributeError) as e2:
+        try:
+            # Fallback 2: try import from config module directly
+            from config import Config
+            OWNER_ID = Config.OWNER_ID
+            SUDO_USERS = Config.SUDO_USERS
+            LOGGER.info(f"✅ Config loaded (fallback): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
+        except (ImportError, AttributeError) as e3:
+            LOGGER.error(f"❌ Config import failed: {e3}")
+            LOGGER.error("Make sure config.py exists with OWNER_ID and SUDO_USERS")
+            OWNER_ID = None
+            SUDO_USERS = []
 
 # Small caps conversion function (same as main.py)
 def to_small_caps(text: str) -> str:
@@ -70,8 +81,15 @@ RARITY_MAP = {
 def is_authorized(user_id: int) -> bool:
     """Check if user is owner or sudo"""
     if OWNER_ID is None:
+        LOGGER.warning("⚠️ OWNER_ID is None - authorization will fail")
         return False
-    return user_id == OWNER_ID or user_id in SUDO_USERS
+    
+    is_owner = user_id == OWNER_ID
+    is_sudo = user_id in SUDO_USERS
+    
+    LOGGER.debug(f"Auth check: user={user_id}, owner={OWNER_ID}, is_owner={is_owner}, is_sudo={is_sudo}")
+    
+    return is_owner or is_sudo
 
 async def get_chat_rarity_settings(chat_id: int) -> Dict[str, Any]:
     """Get rarity settings for a specific chat"""

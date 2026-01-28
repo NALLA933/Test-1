@@ -1,8 +1,8 @@
 import asyncio
-import urllib.request
+import os
 from pymongo import ReturnDocument
 
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.ext import CommandHandler, CallbackContext
 
 from shivu import application, collection, db
@@ -56,21 +56,47 @@ Rarity Map (1-15):
 
 
 async def get_next_sequence_number(sequence_name):
-    """Get next sequence number for character ID"""
+    """
+    Get next available sequence number for character ID
+    Handles duplicate IDs by checking database and incrementing until unique ID found
+    """
     sequence_collection = db.sequences
-    sequence_document = await sequence_collection.find_one_and_update(
-        {'_id': sequence_name}, 
-        {'$inc': {'sequence_value': 1}}, 
-        return_document=ReturnDocument.AFTER
-    )
-    if not sequence_document:
-        await sequence_collection.insert_one({'_id': sequence_name, 'sequence_value': 0})
-        return 0
-    return sequence_document['sequence_value']
+    max_attempts = 200
+    
+    for attempt in range(max_attempts):
+        # Get or create sequence
+        sequence_document = await sequence_collection.find_one_and_update(
+            {'_id': sequence_name}, 
+            {'$inc': {'sequence_value': 1}}, 
+            return_document=ReturnDocument.AFTER
+        )
+        
+        if not sequence_document:
+            # Initialize sequence if not exists
+            await sequence_collection.insert_one({'_id': sequence_name, 'sequence_value': 1})
+            sequence_value = 1
+        else:
+            sequence_value = sequence_document['sequence_value']
+        
+        # Format ID with leading zeros
+        new_id = str(sequence_value).zfill(2)
+        
+        # Check if this ID already exists in collection
+        existing = await collection.find_one({'id': new_id})
+        
+        if not existing:
+            # Found unique ID
+            return sequence_value
+        
+        # ID exists, continue loop to try next number
+        print(f"⚠️ ID {new_id} already exists, trying next...")
+    
+    # If we exhausted all attempts
+    raise Exception(f"❌ Unable to generate unique character ID after {max_attempts} attempts. Database needs cleanup.")
 
 
 async def upload_to_catbox(file_path):
-    """Upload image to Catbox"""
+    """Upload image to Catbox with improved error handling"""
     try:
         import aiohttp
         import aiofiles
@@ -83,19 +109,24 @@ async def upload_to_catbox(file_path):
             form.add_field('reqtype', 'fileupload')
             form.add_field('fileToUpload', file_data, filename='image.jpg')
             
-            async with session.post('https://catbox.moe/user/api.php', data=form, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(
+                'https://catbox.moe/user/api.php', 
+                data=form, 
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
                 if resp.status == 200:
                     url = await resp.text()
                     if url.startswith('https://'):
+                        print(f"✅ Catbox upload successful: {url}")
                         return url.strip()
         return None
     except Exception as e:
-        print(f"Catbox upload error: {e}")
+        print(f"❌ Catbox upload error: {e}")
         return None
 
 
 async def upload_to_telegraph(file_path):
-    """Upload image to Telegraph"""
+    """Upload image to Telegraph with SSL fallback"""
     try:
         import aiohttp
         import aiofiles
@@ -103,18 +134,50 @@ async def upload_to_telegraph(file_path):
         async with aiofiles.open(file_path, 'rb') as f:
             file_data = await f.read()
         
-        async with aiohttp.ClientSession() as session:
-            form = aiohttp.FormData()
-            form.add_field('file', file_data, filename='image.jpg', content_type='image/jpeg')
+        # Try with normal SSL first
+        try:
+            async with aiohttp.ClientSession() as session:
+                form = aiohttp.FormData()
+                form.add_field('file', file_data, filename='image.jpg', content_type='image/jpeg')
+                
+                async with session.post(
+                    'https://telegra.ph/upload', 
+                    data=form, 
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, list) and len(data) > 0:
+                            url = f"https://telegra.ph{data[0]['src']}"
+                            print(f"✅ Telegraph upload successful: {url}")
+                            return url
+        except Exception as ssl_error:
+            print(f"⚠️ Telegraph SSL error: {ssl_error}, trying without SSL verification...")
             
-            async with session.post('https://telegra.ph/upload', data=form, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if isinstance(data, list) and len(data) > 0:
-                        return f"https://telegra.ph{data[0]['src']}"
+            # Fallback: Try without SSL verification
+            try:
+                connector = aiohttp.TCPConnector(ssl=False)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    form = aiohttp.FormData()
+                    form.add_field('file', file_data, filename='image.jpg', content_type='image/jpeg')
+                    
+                    async with session.post(
+                        'https://telegra.ph/upload', 
+                        data=form, 
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if isinstance(data, list) and len(data) > 0:
+                                url = f"https://telegra.ph{data[0]['src']}"
+                                print(f"✅ Telegraph upload successful (no SSL): {url}")
+                                return url
+            except Exception as e:
+                print(f"❌ Telegraph fallback also failed: {e}")
+        
         return None
     except Exception as e:
-        print(f"Telegraph upload error: {e}")
+        print(f"❌ Telegraph upload error: {e}")
         return None
 
 
@@ -134,14 +197,21 @@ async def upload_to_imgur(file_path):
             headers = {'Authorization': 'Client-ID 546c25a59c58ad7'}
             data = {'image': b64_image, 'type': 'base64'}
             
-            async with session.post('https://api.imgur.com/3/image', headers=headers, data=data, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(
+                'https://api.imgur.com/3/image', 
+                headers=headers, 
+                data=data, 
+                timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
                 if resp.status == 200:
                     json_data = await resp.json()
                     if json_data.get('success'):
-                        return json_data['data']['link']
+                        url = json_data['data']['link']
+                        print(f"✅ Imgur upload successful: {url}")
+                        return url
         return None
     except Exception as e:
-        print(f"Imgur upload error: {e}")
+        print(f"❌ Imgur upload error: {e}")
         return None
 
 
@@ -160,6 +230,8 @@ async def get_image_url_from_reply(message, context):
         file_path = f"/tmp/{photo.file_id}.jpg"
         await file.download_to_drive(file_path)
         
+        print("📤 Starting parallel uploads to Catbox, Telegraph, and Imgur...")
+        
         # Create tasks for all upload services
         tasks = [
             asyncio.create_task(upload_to_catbox(file_path)),
@@ -173,15 +245,16 @@ async def get_image_url_from_reply(message, context):
             result = await task
             if result:
                 img_url = result
+                print(f"🎉 First upload completed! Using: {img_url}")
                 # Cancel remaining tasks
                 for t in tasks:
                     if not t.done():
                         t.cancel()
+                        print("🚫 Cancelled remaining upload task")
                 break
         
         # Clean up temporary file
         try:
-            import os
             os.remove(file_path)
         except:
             pass
@@ -189,12 +262,12 @@ async def get_image_url_from_reply(message, context):
         return img_url
         
     except Exception as e:
-        print(f"Error getting image URL: {e}")
+        print(f"❌ Error getting image URL: {e}")
         return None
 
 
 def format_channel_caption(character_id, character_name, anime_name, rarity, user_first_name, user_id):
-    """Format caption for channel message"""
+    """Format caption for channel message in new style"""
     # Extract rarity emoji and name
     rarity_parts = rarity.split(' ', 1)
     rarity_emoji = rarity_parts[0] if len(rarity_parts) > 0 else ""
@@ -212,7 +285,7 @@ def format_channel_caption(character_id, character_name, anime_name, rarity, use
 async def upload(update: Update, context: CallbackContext) -> None:
     """Upload new character - Reply to image with character details"""
     if str(update.effective_user.id) not in sudo_users:
-        await update.message.reply_text('Ask My Owner...')
+        await update.message.reply_text('❌ Ask My Owner...')
         return
 
     try:
@@ -223,7 +296,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
 
         # Check if message is a reply to an image
         if not update.message.reply_to_message or not update.message.reply_to_message.photo:
-            await update.message.reply_text('Please reply to an image with the upload command.')
+            await update.message.reply_text('❌ Please reply to an image with the upload command.')
             return
 
         character_name = args[0].replace('-', ' ').title()
@@ -233,24 +306,30 @@ async def upload(update: Update, context: CallbackContext) -> None:
         try:
             rarity_num = int(args[2])
             if rarity_num not in RARITY_MAP:
-                await update.message.reply_text(f'Invalid rarity. Please use 1-15.')
+                await update.message.reply_text(f'❌ Invalid rarity. Please use 1-15.')
                 return
             rarity = RARITY_MAP[rarity_num]
         except (ValueError, KeyError):
-            await update.message.reply_text('Invalid rarity. Please use 1-15.')
+            await update.message.reply_text('❌ Invalid rarity. Please use 1-15.')
             return
 
-        # Get character ID
-        id = str(await get_next_sequence_number('character_id')).zfill(2)
-
         # Send processing message
-        processing_msg = await update.message.reply_text('⏳ Uploading image to cloud services...')
+        processing_msg = await update.message.reply_text('⏳ Processing...\n📤 Uploading image to cloud services...')
 
         # Get image URL from reply using multiple services
         img_url = await get_image_url_from_reply(update.message, context)
         
         if not img_url:
-            await processing_msg.edit_text('❌ Failed to upload image to cloud services. Please try again.')
+            await processing_msg.edit_text('❌ Failed to upload image to cloud services (all services failed).\n\n💡 Please try again or check your internet connection.')
+            return
+
+        await processing_msg.edit_text(f'✅ Image uploaded successfully!\n🔗 URL: {img_url}\n\n⏳ Generating unique character ID...')
+
+        # Get unique character ID (handles duplicates automatically)
+        try:
+            id = str(await get_next_sequence_number('character_id')).zfill(2)
+        except Exception as e:
+            await processing_msg.edit_text(f'❌ Failed to generate character ID: {str(e)}')
             return
 
         # Create character document
@@ -265,6 +344,8 @@ async def upload(update: Update, context: CallbackContext) -> None:
         try:
             # Use Telegram file_id for fast upload to channel
             photo_file_id = update.message.reply_to_message.photo[-1].file_id
+            
+            await processing_msg.edit_text(f'✅ Character ID: {id}\n⏳ Uploading to channel...')
             
             # Send to channel using file_id
             message = await context.bot.send_photo(
@@ -282,28 +363,49 @@ async def upload(update: Update, context: CallbackContext) -> None:
             )
             
             character['message_id'] = message.message_id
+            
+            # Insert into database
             await collection.insert_one(character)
             
-            await processing_msg.edit_text(f'✅ CHARACTER ADDED\n\n🆔 ID: {id}\n📦 Image URL: {img_url}')
+            await processing_msg.edit_text(
+                f'✅ <b>CHARACTER ADDED SUCCESSFULLY!</b>\n\n'
+                f'🆔 <b>ID:</b> {id}\n'
+                f'👤 <b>Name:</b> {character_name}\n'
+                f'📺 <b>Anime:</b> {anime}\n'
+                f'⭐ <b>Rarity:</b> {rarity}\n'
+                f'🔗 <b>Image URL:</b> {img_url}',
+                parse_mode='HTML'
+            )
             
         except Exception as e:
+            # If channel upload fails, still save to database
             await collection.insert_one(character)
-            await processing_msg.edit_text(f"✅ Character Added to Database\n❌ Channel upload failed: {str(e)}\n\nConsider checking channel permissions.")
+            await processing_msg.edit_text(
+                f'✅ Character Added to Database\n'
+                f'❌ Channel upload failed: {str(e)}\n\n'
+                f'🆔 ID: {id}\n'
+                f'💡 Check if bot has permission to post in channel.'
+            )
 
     except Exception as e:
-        await update.message.reply_text(f'❌ Character Upload Unsuccessful.\n\nError: {str(e)}\n\nIf you think this is a source error, forward to: {SUPPORT_CHAT}')
+        await update.message.reply_text(
+            f'❌ <b>Character Upload Failed</b>\n\n'
+            f'<b>Error:</b> {str(e)}\n\n'
+            f'💡 If this persists, contact: @{SUPPORT_CHAT}',
+            parse_mode='HTML'
+        )
 
 
 async def delete(update: Update, context: CallbackContext) -> None:
     """Delete character by ID"""
     if str(update.effective_user.id) not in sudo_users:
-        await update.message.reply_text('Ask my Owner to use this Command...')
+        await update.message.reply_text('❌ Ask my Owner to use this Command...')
         return
 
     try:
         args = context.args
         if len(args) != 1:
-            await update.message.reply_text('Incorrect format... Please use: /delete ID')
+            await update.message.reply_text('❌ Incorrect format...\n\n✅ Use: /delete ID')
             return
 
         character = await collection.find_one_and_delete({'id': args[0]})
@@ -311,11 +413,11 @@ async def delete(update: Update, context: CallbackContext) -> None:
         if character:
             try:
                 await context.bot.delete_message(chat_id=CHARA_CHANNEL_ID, message_id=character['message_id'])
-                await update.message.reply_text('✅ Character deleted successfully from database and channel.')
+                await update.message.reply_text(f'✅ Character ID {args[0]} deleted successfully from database and channel.')
             except:
-                await update.message.reply_text('✅ Character deleted from database.\n⚠️ Could not delete from channel (message may already be deleted).')
+                await update.message.reply_text(f'✅ Character ID {args[0]} deleted from database.\n⚠️ Could not delete from channel (message may already be deleted).')
         else:
-            await update.message.reply_text('❌ Character not found in database.')
+            await update.message.reply_text(f'❌ Character ID {args[0]} not found in database.')
             
     except Exception as e:
         await update.message.reply_text(f'❌ Error: {str(e)}')
@@ -324,25 +426,30 @@ async def delete(update: Update, context: CallbackContext) -> None:
 async def update(update: Update, context: CallbackContext) -> None:
     """Update character fields - supports reply to image for img_url updates"""
     if str(update.effective_user.id) not in sudo_users:
-        await update.message.reply_text('You do not have permission to use this command.')
+        await update.message.reply_text('❌ You do not have permission to use this command.')
         return
 
     try:
         args = context.args
         if len(args) != 3:
-            await update.message.reply_text('Incorrect format. Please use: /update id field new_value\n\nFor img_url: Reply to image with /update id img_url')
+            await update.message.reply_text(
+                '❌ Incorrect format.\n\n'
+                '✅ Use: /update <id> <field> <new_value>\n\n'
+                '📝 Fields: name, anime, rarity, img_url\n'
+                '💡 For img_url: Reply to image with /update <id> img_url <value>'
+            )
             return
 
         # Get character by ID
         character = await collection.find_one({'id': args[0]})
         if not character:
-            await update.message.reply_text('❌ Character not found.')
+            await update.message.reply_text(f'❌ Character ID {args[0]} not found.')
             return
 
         # Validate field
         valid_fields = ['img_url', 'name', 'anime', 'rarity']
         if args[1] not in valid_fields:
-            await update.message.reply_text(f'Invalid field. Please use one of: {", ".join(valid_fields)}')
+            await update.message.reply_text(f'❌ Invalid field.\n\n✅ Valid fields: {", ".join(valid_fields)}')
             return
 
         # Process new value based on field type
@@ -353,11 +460,11 @@ async def update(update: Update, context: CallbackContext) -> None:
             try:
                 rarity_num = int(args[2])
                 if rarity_num not in RARITY_MAP:
-                    await update.message.reply_text('Invalid rarity. Please use 1-15.')
+                    await update.message.reply_text('❌ Invalid rarity. Please use 1-15.')
                     return
                 new_value = RARITY_MAP[rarity_num]
             except (ValueError, KeyError):
-                await update.message.reply_text('Invalid rarity. Please use 1-15.')
+                await update.message.reply_text('❌ Invalid rarity. Please use 1-15.')
                 return
                 
         elif args[1] == 'img_url':
@@ -382,11 +489,7 @@ async def update(update: Update, context: CallbackContext) -> None:
         # Update channel message
         try:
             if args[1] == 'img_url':
-                # For image updates, use edit_message_media to update both image and caption
-                # This prevents character deletion and re-upload
-                from telegram import InputMediaPhoto
-                
-                # Prepare updated values
+                # For image updates, use edit_message_media
                 updated_name = character.get('name', 'Unknown')
                 updated_anime = character.get('anime', 'Unknown')
                 updated_rarity = character.get('rarity', '⚪ ᴄᴏᴍᴍᴏɴ')
@@ -432,10 +535,21 @@ async def update(update: Update, context: CallbackContext) -> None:
                     parse_mode='HTML'
                 )
 
-            await update.message.reply_text('✅ Update completed successfully!\n\nDatabase and channel both updated.')
+            await update.message.reply_text(
+                f'✅ <b>UPDATE SUCCESSFUL!</b>\n\n'
+                f'🆔 <b>ID:</b> {args[0]}\n'
+                f'📝 <b>Field:</b> {args[1]}\n'
+                f'🔄 <b>New Value:</b> {new_value}\n\n'
+                f'💾 Database and channel both updated.',
+                parse_mode='HTML'
+            )
             
         except Exception as e:
-            await update.message.reply_text(f'✅ Database updated successfully.\n⚠️ Channel update failed: {str(e)}\n\nThe character may not exist in channel or bot lacks permissions.')
+            await update.message.reply_text(
+                f'✅ Database updated successfully.\n'
+                f'⚠️ Channel update failed: {str(e)}\n\n'
+                f'💡 The character may not exist in channel or bot lacks permissions.'
+            )
 
     except Exception as e:
         await update.message.reply_text(f'❌ Update failed: {str(e)}')

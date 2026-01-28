@@ -35,9 +35,9 @@ async def setup_database_indexes():
         # Index on uploader_id for user queries
         await collection.create_index([("uploader_id", ASCENDING)], background=True)
         
-        print("✅ Database indexes created successfully")
+        print("✅ database indexes created successfully")
     except Exception as e:
-        print(f"⚠️ Failed to create indexes: {e}")
+        print(f"⚠️ failed to create indexes: {e}")
 
 
 # ===================== ENUMS =====================
@@ -77,22 +77,17 @@ class RarityLevel(Enum):
     KAWAII = (14, "🍭 ᴋᴀᴡᴀɪɪ")
     HYBRID = (15, "🧬 ʜʏʙʀɪᴅ")
 
-    def __init__(self, level: int, symbol: str, display: str):
-        self._level = level
-        self._symbol = symbol
-        self._display = display
-
     @property
     def level(self) -> int:
-        return self._level
+        return self.value[0]
 
     @property
     def symbol(self) -> str:
-        return self._symbol
+        return self.value[1]
 
     @property
     def display_name(self) -> str:
-        return self._display
+        return self.value[2]
 
     @classmethod
     def from_number(cls, num: int) -> Optional['RarityLevel']:
@@ -281,7 +276,7 @@ def retry_async(max_retries: int = BotConfig.MAX_RETRIES):
                     continue
                 except Exception as e:
                     raise e
-            raise last_exception or Exception("Max retries exceeded")
+            raise last_exception or Exception("max retries exceeded")
         return wrapper
     return decorator
 
@@ -366,7 +361,7 @@ class MediaHandler:
             )
             
         except Exception as e:
-            print(f"Media extraction error: {e}")
+            print(f"media extraction error: {e}")
             return None
     
     @staticmethod
@@ -377,7 +372,7 @@ class MediaHandler:
                 await file.download_to_drive(tmp_file.name)
                 return tmp_file.name
         except Exception as e:
-            print(f"Download error: {e}")
+            print(f"download error: {e}")
             return None
 
 
@@ -406,7 +401,7 @@ class CatboxUploader:
                 return None
                 
         except Exception as e:
-            print(f"Catbox upload error: {e}")
+            print(f"catbox upload error: {e}")
             return None
 
 
@@ -448,7 +443,7 @@ class TelegramUploader:
             return message.message_id
             
         except Exception as e:
-            print(f"Channel upload error: {e}")
+            print(f"channel upload error: {e}")
             return None
     
     @staticmethod
@@ -488,7 +483,7 @@ class TelegramUploader:
             return message_id
             
         except Exception as e:
-            print(f"Channel update error: {e}")
+            print(f"channel update error: {e}")
             return None
 
 

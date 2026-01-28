@@ -3,8 +3,8 @@ from telegram.ext import CommandHandler, ContextTypes
 import asyncio
 
 # Import from shivu - same as main.py
-from shivu import collection, db, application, LOGGER
-from shivu import OWNER_ID, SUDO_USERS  # Config se IDs import kar rahe hain
+from shivu import collection, db, application, OWNER_ID, SUDO_USERS LOGGER
+from shivu import   # Config se IDs import kar rahe hain
 
 # MongoDB collections
 rarity_collection = db['rarity_settings']

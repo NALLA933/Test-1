@@ -1,6 +1,6 @@
 import random
 from html import escape
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMemberUpdated
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ChatMemberHandler
 from pymongo.results import UpdateResult
 
@@ -104,6 +104,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reply_markup=keyboard,
             parse_mode='HTML'
         )
+
+
 
 
 async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

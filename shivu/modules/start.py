@@ -1,7 +1,12 @@
 import random
 from html import escape
+<<<<<<< HEAD
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMemberUpdated
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ChatMemberHandler
+=======
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
+>>>>>>> bc4818a (Restore start.py from commit b873afe)
 from pymongo.results import UpdateResult
 
 from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
@@ -39,7 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = user.id
     first_name = user.first_name
     username = user.username
-
+    
     try:
         result: UpdateResult = await collection.update_one(
             {"_id": user_id},
@@ -54,31 +59,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             },
             upsert=True
         )
-
+        
         if result.upserted_id is not None:
-            # Count total users
-            total_users = await collection.count_documents({})
-            
-            # Create username text
-            username_text = f"@{username}" if username else "ɴᴏ ᴜsᴇʀɴᴀᴍᴇ"
-            
             await context.bot.send_message(
                 chat_id=GROUP_ID,
-                text=f"#ʙᴏᴛsᴛᴀʀᴛ\n\n"
-                     f"ʙᴏᴛ sᴛᴀʀᴛᴇᴅ\n\n"
-                     f"ɴᴀᴍᴇ : <a href='tg://user?id={user_id}'>{escape(first_name or 'User')}</a>\n"
-                     f"ɪᴅ : <code>{user_id}</code>\n"
-                     f"ᴜsᴇʀɴᴀᴍᴇ : {username_text}\n\n"
-                     f"ᴛᴏᴛᴀʟ ᴜsᴇʀs : {total_users}",
+                text=f"✦ ɴᴇᴡ ᴘʀᴇsᴇɴᴄᴇ ᴅᴇᴛᴇᴄᴛᴇᴅ\n"
+                     f"─────────────────\n"
+                     f"{escape(first_name or 'User')}\n"
+                     f"ɪᴅ · {user_id}",
                 parse_mode='HTML'
             )
-
+    
     except Exception as e:
         print(f"Database error in /start: {e}")
-
+    
     video_url = random.choice(VIDEO_URL)
     keyboard = get_keyboard()
-
+    
     if update.effective_chat.type == "private":
         caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
@@ -91,7 +88,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reply_markup=keyboard,
             parse_mode='HTML'
         )
-
+    
     else:
         caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
@@ -192,10 +189,11 @@ async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
             print(f"Error tracking group remove: {e}")
 
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+sync def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
+    
     if query.data == 'help':
         help_text = f"""✦ {small_caps('guidance from senpai')} ✦
 
@@ -250,13 +248,13 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         help_keyboard = [[InlineKeyboardButton("✧ ʀᴇᴛᴜʀɴ", callback_data='back')]]
         reply_markup = InlineKeyboardMarkup(help_keyboard)
-
+        
         await query.edit_message_caption(
             caption=help_text,
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
-
+    
     elif query.data == 'back':
         caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
@@ -271,6 +269,5 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 application.add_handler(CallbackQueryHandler(button, pattern='^help$|^back$'))
-application.add_handler(ChatMemberHandler(track_group_status, ChatMemberHandler.MY_CHAT_MEMBER))
 start_handler = CommandHandler('start', start)
 application.add_handler(start_handler)

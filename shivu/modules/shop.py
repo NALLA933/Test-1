@@ -495,7 +495,7 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
         
         # Just show alert, don't change page
         await query.answer(
-            f"💸 {to_small_caps('Premium Shop')}\n✨ {to_small_caps('Coming Soon...')}",
+            f"💸 {to_small_caps('Premium Shop')}\n\n✨ {to_small_caps('Coming Soon...')}",
             show_alert=True
         )
         
@@ -709,11 +709,34 @@ async def process_purchase(update: Update, context: CallbackContext,
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            success_msg,
-            parse_mode='HTML',
-            reply_markup=reply_markup
-        )
+        # Check if message has photo or text
+        try:
+            if query.message.photo:
+                # Message has photo, edit caption
+                await query.edit_message_caption(
+                    caption=success_msg,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            else:
+                # Message is text only
+                await query.edit_message_text(
+                    success_msg,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+        except Exception as e:
+            # Fallback: delete and send new message
+            try:
+                await query.message.delete()
+                await query.message.reply_text(
+                    success_msg,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            except:
+                pass
+        
         await query.answer(to_small_caps("✅ Purchase successful!"), show_alert=True)
     else:
         # Refund on failure

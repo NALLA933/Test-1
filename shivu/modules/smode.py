@@ -144,20 +144,6 @@ def create_smode_keyboard(current_pref):
     return keyboard
 
 
-# ---------- Helper Function to Create Confirmation Keyboard ----------
-def create_confirmation_keyboard(user_id: int):
-    """Create keyboard with only Back to Menu button after selection."""
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔙 " + to_small_caps("Back to Menu"),
-                callback_data=f"smode_backmenu:{user_id}"
-            )
-        ]
-    ]
-    return keyboard
-
-
 # ---------- Command Handlers ----------
 async def smode_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -215,64 +201,6 @@ async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.message.delete()
         return
 
-    # Handle back to menu button
-    if data.startswith("smode_backmenu:"):
-        try:
-            _, callback_user_id = data.split(':')
-            callback_user_id = int(callback_user_id)
-            
-            # Verify it's the same user
-            if user_id != callback_user_id:
-                await query.answer("This is not your menu!", show_alert=True)
-                return
-                
-            await query.answer()
-            
-            # Get current preference
-            current_pref = await get_user_sort_preference(user_id)
-            
-            # Determine current selection text
-            if current_pref is None:
-                current_text = "🍃 " + to_small_caps("default")
-            else:
-                rarity_info = RARITY_OPTIONS.get(str(current_pref), {})
-                current_text = rarity_info.get("name", "Unknown")
-            
-            # Create message
-            message_text = (
-                f"<b>✨ {to_small_caps('SMODE')}</b>\n\n"
-                f"🎯 {to_small_caps('Current Model:')} <b>{current_text}</b>\n"
-            )
-            
-            # Create keyboard with all options
-            keyboard = create_smode_keyboard(current_pref)
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            # Update the message
-            try:
-                if query.message.photo:
-                    await query.edit_message_caption(
-                        caption=message_text,
-                        reply_markup=reply_markup,
-                        parse_mode="HTML"
-                    )
-                else:
-                    await query.edit_message_text(
-                        text=message_text,
-                        reply_markup=reply_markup,
-                        parse_mode="HTML"
-                    )
-            except Exception as e:
-                LOGGER.error(f"Failed to update smode message: {e}")
-                
-            return
-            
-        except (ValueError, IndexError):
-            await query.answer("Invalid request", show_alert=True)
-            return
-
-    await query.answer()
-
     # Extract rarity from callback data
     if data == "smode_all":
         rarity_filter = None
@@ -291,37 +219,51 @@ async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Save preference
     await set_user_sort_preference(user_id, rarity_filter)
 
-    # Create confirmation message
-    message_text = (
+    # Get updated current preference for refreshing the menu
+    current_pref = await get_user_sort_preference(user_id)
+
+    # Determine current selection text for menu
+    if current_pref is None:
+        current_text = " " + to_small_caps("All Rarities")
+    else:
+        rarity_info = RARITY_OPTIONS.get(str(current_pref), {})
+        current_text = rarity_info.get("name", "Unknown")
+
+    # Update the menu message to show new selection
+    caption = (
         f"<b>✨ {to_small_caps('SMODE')}</b>\n\n"
-        f"✅ {to_small_caps('Filter Applied!')}\n\n"
-        f"🎯 {to_small_caps('Selected:')} <b>{selected_text}</b>\n\n"
-        f"💡 {to_small_caps('Your harem will now show only')} <b>{selected_text}</b> {to_small_caps('characters.')}\n"
+        f"🎯 {to_small_caps('Current Model:')} <b>{current_text}</b>\n"
     )
 
-    # Create keyboard with only Back to Menu button
-    keyboard = create_confirmation_keyboard(user_id)
+    # Create keyboard with updated selection
+    keyboard = create_smode_keyboard(current_pref)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Update the message
+    # Update the message to refresh checkmarks
     try:
         if query.message.photo:
             await query.edit_message_caption(
-                caption=message_text,
+                caption=caption,
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
         else:
             await query.edit_message_text(
-                text=message_text,
+                text=caption,
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
     except Exception as e:
         LOGGER.error(f"Failed to update smode message: {e}")
 
-    # Show notification
-    await query.answer(f"✅ Filter set to: {selected_text}", show_alert=False)
+    # Show alert notification with success message
+    alert_message = (
+        f"✅ {to_small_caps('Filter Applied!')}\n\n"
+        f"🎯 {to_small_caps('Selected:')} {selected_text}\n\n"
+        f"💡 {to_small_caps('Your harem will now show only')} {selected_text} {to_small_caps('characters.')}"
+    )
+    
+    await query.answer(alert_message, show_alert=True)
 
 
 async def open_smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

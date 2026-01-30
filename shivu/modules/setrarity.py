@@ -462,4 +462,4 @@ def setup_handlers():
     application.add_handler(CommandHandler("lock", lock, block=False))
     application.add_handler(CommandHandler("unlock", unlock, block=False))
     application.add_handler(CommandHandler("locklist", locklist, block=False))
-    LOGGER.info("✅ Rarity management commands registered successfully!")
+    LOGGER.info("ʀᴀʀɪᴛʏ ᴄᴏᴍᴍᴀɴᴅs ʀᴇᴀᴅʏ!")

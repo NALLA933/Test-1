@@ -39,7 +39,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = user.id
     first_name = user.first_name
     username = user.username
-    
+
     try:
         result: UpdateResult = await collection.update_one(
             {"_id": user_id},
@@ -54,7 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             },
             upsert=True
         )
-        
+
         if result.upserted_id is not None:
             await context.bot.send_message(
                 chat_id=GROUP_ID,
@@ -64,13 +64,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                      f"ɪᴅ · {user_id}",
                 parse_mode='HTML'
             )
-    
+
     except Exception as e:
         print(f"Database error in /start: {e}")
-    
+
     video_url = random.choice(VIDEO_URL)
     keyboard = get_keyboard()
-    
+
     if update.effective_chat.type == "private":
         caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
@@ -83,7 +83,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reply_markup=keyboard,
             parse_mode='HTML'
         )
-    
+
     else:
         caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
@@ -101,68 +101,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    
+
     if query.data == 'help':
         help_text = f"""✦ {small_caps('guidance from senpai')} ✦
 
-✦ ── 『 ʜᴀʀᴇᴍ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 』 ── ✦
+─────────────────
 
-/guess  
-↳ ɢᴜᴇss ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ  
+ɪ ᴅᴏ ɴᴏᴛ ᴇxᴘʟᴀɪɴ.
+ɪ ᴇᴍʙᴏᴅʏ.
 
-/bal  
-↳ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ʙᴀʟᴀɴᴄᴇ  
+ʏᴏᴜ ᴡɪʟʟ ᴜɴᴅᴇʀsᴛᴀɴᴅ ᴍʏ ᴘᴜʀᴘᴏsᴇ
+ᴛʜʀᴏᴜɢʜ ᴘʀᴇsᴇɴᴄᴇ ᴀʟᴏɴᴇ.
 
-/fav  
-↳ ᴀᴅᴅ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ғᴀᴠᴏʀɪᴛᴇs  
+✧ ᴡʜᴀᴛ ᴛᴏ ᴋɴᴏᴡ ✧
 
-/collection  
-↳ ᴠɪᴇᴡ ʏᴏᴜʀ ʜᴀʀᴇᴍ ᴄᴏʟʟᴇᴄᴛɪᴏɴ  
+• ɪ ᴀᴍ ɴᴏᴛ ғᴏʀ ᴇᴠᴇʀʏᴏɴᴇ
+• ᴏɴʟʏ ᴛʜᴇ ʀᴇғɪɴᴇᴅ ᴡɪʟʟ ᴀᴘᴘʀᴇᴄɪᴀᴛᴇ
+• ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ
+• ᴡɪᴛɴᴇss ᴇʟᴇɢᴀɴᴄᴇ
 
-/leaderboard  
-↳ ᴄʜᴇᴄᴋ ᴛʜᴇ ᴛᴏᴘ ᴜsᴇʀ ʟɪsᴛ  
+─────────────────
 
-/gift  
-↳ ɢɪғᴛ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
-
-/trade  
-↳ ᴛʀᴀᴅᴇ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴡɪᴛʜ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
-
-/shop  
-↳ ᴏᴘᴇɴ ᴛʜᴇ sʜᴏᴘ  
-
-/smode  
-↳ ᴄʜᴀɴɢᴇ ʜᴀʀᴇᴍ ᴍᴏᴅᴇ  
-
-/s  
-↳ ᴠɪᴇᴡ ᴄʜᴀʀᴀᴄᴛᴇʀ ғʀᴏᴍ ᴡᴀɪғᴜ ɪᴅ  
-
-/find  
-↳ ғɪɴᴅ ʜᴏᴡ ᴍᴀɴʏ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴇxɪsᴛ ᴡɪᴛʜ ᴀ ɴᴀᴍᴇ  
-
-/redeem  
-↳ ʀᴇᴅᴇᴇᴍ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴀɴᴅ ᴄᴏɪɴs  
-
-/sclaim  
-↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴡᴀɪғᴜ  
-
-/claim  
-↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴄᴏᴜɴᴛ  
-
-/pay  
-↳ sᴇɴᴅ ᴄᴏɪɴs ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
-
-✦ ───────────────── ✦"""
+ǫᴜᴇsᴛɪᴏɴs ᴀʀᴇ ʙᴇɴᴇᴀᴛʜ ᴜs.
+ᴇxᴘᴇʀɪᴇɴᴄᴇ ɪs ᴀʟʟ."""
 
         help_keyboard = [[InlineKeyboardButton("✧ ʀᴇᴛᴜʀɴ", callback_data='back')]]
         reply_markup = InlineKeyboardMarkup(help_keyboard)
-        
+
         await query.edit_message_caption(
             caption=help_text,
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
-    
+
     elif query.data == 'back':
         caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 

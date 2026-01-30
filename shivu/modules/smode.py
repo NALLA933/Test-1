@@ -6,12 +6,7 @@ from shivu import application, user_collection, LOGGER, db
 # MongoDB collection for storing user sort preferences
 sort_preferences = db.sort_preferences
 
-# Image URL for smode menu
-# NOTE: If this catbox URL doesn't work in groups, replace with:
-# 1. Telegraph upload: https://telegra.ph/upload
-# 2. Direct imgur link
-# 3. Or any direct image URL ending in .jpg/.png
-SMODE_IMAGE_URL = "https://files.catbox.moe/g3rxr1.jpg"
+SMODE_IMAGE_URL = "https://telegra.ph/SMDBOTZ-01-30"
 
 
 # ---------- Small Caps Utility ----------

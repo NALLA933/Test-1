@@ -1,276 +1,101 @@
-import random
-from html import escape
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMemberUpdated
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ChatMemberHandler
-from pymongo.results import UpdateResult
-
-from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
-from shivu import pm_users as collection
+import os
+import sys
+from typing import List
 
 
-def small_caps(text: str) -> str:
-    mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-        'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-        'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ',
-        'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'S', 'T': 'ᴛ', 'U': 'ᴜ',
-        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'X', 'Y': 'ʏ', 'Z': 'ᴢ'
-    }
-    return ''.join(mapping.get(ch, ch) for ch in text)
+class Config:
+    """Base configuration class for the Telegram bot."""
 
+    # Logging
+    LOGGER: bool = True
 
-def get_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [
-        [InlineKeyboardButton("✦ ᴀᴅᴅ ᴍᴇ ʙᴀʙʏ", url=f'http://t.me/{BOT_USERNAME}?startgroup=new')],
-        [
-            InlineKeyboardButton("✧ sᴜᴘᴘᴏʀᴛ", url=f'https://t.me/{SUPPORT_CHAT}'),
-            InlineKeyboardButton("✧ ᴜᴘᴅᴀᴛᴇs", url=f'https://t.me/{UPDATE_CHAT}')
-        ],
-        [InlineKeyboardButton("✦ ɢᴜɪᴅᴀɴᴄᴇ", callback_data='help')]
+    # Bot Credentials (from BotFather)
+    TOKEN: str = os.getenv("BOT_TOKEN", "8551975632:AAH1vrphQvEf_O5w9IfecwUmHJ_QwQbgBwM")
+    BOT_USERNAME: str = os.getenv("BOT_USERNAME", "Senpai_Waifu_Grabbing_Bot")
+
+    # Telegram API Credentials (from my.telegram.org/apps)
+    API_ID: int = int(os.getenv("API_ID", "35660683"))
+    API_HASH: str = os.getenv("API_HASH", "7afb42cd73fb5f3501062ffa6a1f87f7")
+
+    # Owner and Sudo Users
+    OWNER_ID: int = int(os.getenv("OWNER_ID", "7818323042"))
+    SUDO_USERS: List[int] = [
+        int(user_id.strip())
+        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527").split(",")
+        if user_id.strip().isdigit()
     ]
-    return InlineKeyboardMarkup(keyboard)
+
+    # Group and Channel IDs
+    GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003129952280"))
+    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003150808065"))
+
+    # Database
+    MONGO_URL: str = os.getenv(
+        "MONGO_URL",
+        "mongodb+srv://ravi:ravi12345@cluster0.hndinhj.mongodb.net/?retryWrites=true&w=majority"
+    )
+
+    # Media
+    VIDEO_URL: List[str] = [
+        url.strip()
+        for url in os.getenv(
+            "VIDEO_URL",
+            "https://files.catbox.moe/iqeaeb.mp4,https://files.catbox.moe/fp7m2d.mp4,https://files.catbox.moe/cv8r9i.mp4,https://files.catbox.moe/kz2usa.mp4,https://files.catbox.moe/u3gfz5.mp4,https://files.catbox.moe/4w63xt.mp4,https://files.catbox.moe/3mv64w.mp4,https://files.catbox.moe/n2m9av.mp4,https://files.catbox.moe/lrjr1o.mp4,https://files.catbox.moe/xdmuzm.mp4,https://files.catbox.moe/lqsdnr.mp4,https://files.catbox.moe/3mv64w.mp4"
+        ).split(",")
+        if url.strip()
+    ]
+
+    # Community Links
+    SUPPORT_CHAT: str = os.getenv("SUPPORT_CHAT", "THE_DRAGON_SUPPORT")
+    UPDATE_CHAT: str = os.getenv("UPDATE_CHAT", "PICK_X_UPDATE")
+
+    @classmethod
+    def validate(cls) -> None:
+        """Validate critical configuration values."""
+        errors = []
+
+        if not cls.TOKEN:
+            errors.append("BOT_TOKEN is required")
+
+        if not cls.API_ID or cls.API_ID == 0:
+            errors.append("API_ID is required")
+
+        if not cls.API_HASH:
+            errors.append("API_HASH is required")
+
+        if not cls.OWNER_ID or cls.OWNER_ID == 0:
+            errors.append("OWNER_ID is required")
+
+        if not cls.MONGO_URL:
+            errors.append("MONGO_URL is required")
+
+        if not cls.GROUP_ID or cls.GROUP_ID == 0:
+            errors.append("GROUP_ID is required")
+
+        if not cls.CHARA_CHANNEL_ID or cls.CHARA_CHANNEL_ID == 0:
+            errors.append("CHARA_CHANNEL_ID is required")
+
+        if errors:
+            print("❌ Configuration Error(s):")
+            for error in errors:
+                print(f"   - {error}")
+            print("\n💡 Please set the required environment variables and try again.")
+            sys.exit(1)
+
+        # Add OWNER_ID to SUDO_USERS if not already present
+        if cls.OWNER_ID not in cls.SUDO_USERS:
+            cls.SUDO_USERS.append(cls.OWNER_ID)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    user_id = user.id
-    first_name = user.first_name
-    username = user.username
-
-    try:
-        result: UpdateResult = await collection.update_one(
-            {"_id": user_id},
-            {
-                "$set": {
-                    "first_name": first_name,
-                    "username": username
-                },
-                "$setOnInsert": {
-                    "started_at": update.message.date if update.message else None
-                }
-            },
-            upsert=True
-        )
-
-        if result.upserted_id is not None:
-            # Count total users
-            total_users = await collection.count_documents({})
-            
-            # Create username text
-            username_text = f"@{username}" if username else "ɴᴏ ᴜsᴇʀɴᴀᴍᴇ"
-            
-            await context.bot.send_message(
-                chat_id=GROUP_ID,
-                text=f"#ʙᴏᴛsᴛᴀʀᴛ\n\n"
-                     f"ʙᴏᴛ sᴛᴀʀᴛᴇᴅ\n\n"
-                     f"ɴᴀᴍᴇ : <a href='tg://user?id={user_id}'>{escape(first_name or 'User')}</a>\n"
-                     f"ɪᴅ : <code>{user_id}</code>\n"
-                     f"ᴜsᴇʀɴᴀᴍᴇ : {username_text}\n\n"
-                     f"ᴛᴏᴛᴀʟ ᴜsᴇʀs : {total_users}",
-                parse_mode='HTML'
-            )
-
-    except Exception as e:
-        print(f"Database error in /start: {e}")
-
-    video_url = random.choice(VIDEO_URL)
-    keyboard = get_keyboard()
-
-    if update.effective_chat.type == "private":
-        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
-
-ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
-
-        await context.bot.send_video(
-    chat_id=update.effective_chat.id,
-    video=video_url,
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
-
-    else:
-        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
-
-ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
-
-        await context.bot.send_video(
-    chat_id=update.effective_chat.id,
-    video=video_url,
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
+class Production(Config):
+    """Production environment configuration."""
+    LOGGER: bool = True
 
 
+class Development(Config):
+    """Development environment configuration."""
+    LOGGER: bool = True
 
 
-async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Track when bot is added or removed from groups"""
-    result = update.my_chat_member
-    if not result:
-        return
-    
-    chat = result.chat
-    new_status = result.new_chat_member
-    old_status = result.old_chat_member
-    
-    # Check if it's about the bot
-    if new_status.user.id != context.bot.id:
-        return
-    
-    # Bot was added to group
-    if old_status.status in ["left", "kicked"] and new_status.status in ["member", "administrator"]:
-        try:
-            # Get the user who added the bot
-            added_by = result.from_user
-            added_by_name = added_by.first_name or "Unknown"
-            added_by_link = f"<a href='tg://user?id={added_by.id}'>{escape(added_by_name)}</a>"
-            
-            # Get group invite link if available
-            try:
-                chat_info = await context.bot.get_chat(chat.id)
-                invite_link = chat_info.invite_link
-                if not invite_link:
-                    # Try to create invite link
-                    try:
-                        invite_link = await context.bot.create_chat_invite_link(chat.id)
-                        invite_link = invite_link.invite_link
-                    except:
-                        invite_link = None
-            except:
-                invite_link = None
-            
-            group_link_text = invite_link if invite_link else "ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ"
-            
-            await context.bot.send_message(
-                chat_id=GROUP_ID,
-                text=f"#ᴀᴅᴅɢʀᴏᴜᴘ\n\n"
-                     f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
-                     f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
-                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
-                     f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
-                     f"ᴀᴅᴅᴇᴅ ʙʏ : {added_by_link}",
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            print(f"Error tracking group add: {e}")
-    
-    # Bot was removed from group
-    elif old_status.status in ["member", "administrator"] and new_status.status in ["left", "kicked"]:
-        try:
-            # Get the user who removed the bot
-            removed_by = result.from_user
-            removed_by_name = removed_by.first_name or "Unknown"
-            removed_by_link = f"<a href='tg://user?id={removed_by.id}'>{escape(removed_by_name)}</a>"
-            
-            # Get group invite link if available
-            try:
-                chat_info = await context.bot.get_chat(chat.id)
-                invite_link = chat_info.invite_link
-            except:
-                invite_link = None
-            
-            group_link_text = invite_link if invite_link else "ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ"
-            
-            await context.bot.send_message(
-                chat_id=GROUP_ID,
-                text=f"#ʟᴇғᴛ\n\n"
-                     f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
-                     f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
-                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
-                     f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
-                     f"ʀᴇᴍᴏᴠᴇᴅ ʙʏ : {removed_by_link}",
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            print(f"Error tracking group remove: {e}")
-
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == 'help':
-        help_text = f"""✦ {small_caps('guidance from senpai')} ✦
-
-✦ ── 『 ʜᴀʀᴇᴍ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 』 ── ✦
-
-/guess  
-↳ ɢᴜᴇss ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ  
-
-/bal  
-↳ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ʙᴀʟᴀɴᴄᴇ  
-
-/fav  
-↳ ᴀᴅᴅ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ғᴀᴠᴏʀɪᴛᴇs  
-
-/collection  
-↳ ᴠɪᴇᴡ ʏᴏᴜʀ ʜᴀʀᴇᴍ ᴄᴏʟʟᴇᴄᴛɪᴏɴ  
-
-/leaderboard  
-↳ ᴄʜᴇᴄᴋ ᴛʜᴇ ᴛᴏᴘ ᴜsᴇʀ ʟɪsᴛ  
-
-/gift  
-↳ ɢɪғᴛ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
-
-/trade  
-↳ ᴛʀᴀᴅᴇ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴡɪᴛʜ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
-
-/shop  
-↳ ᴏᴘᴇɴ ᴛʜᴇ sʜᴏᴘ  
-
-/smode  
-↳ ᴄʜᴀɴɢᴇ ʜᴀʀᴇᴍ ᴍᴏᴅᴇ  
-
-/s  
-↳ ᴠɪᴇᴡ ᴄʜᴀʀᴀᴄᴛᴇʀ ғʀᴏᴍ ᴡᴀɪғᴜ ɪᴅ  
-
-/find  
-↳ ғɪɴᴅ ʜᴏᴡ ᴍᴀɴʏ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴇxɪsᴛ ᴡɪᴛʜ ᴀ ɴᴀᴍᴇ  
-
-/redeem  
-↳ ʀᴇᴅᴇᴇᴍ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴀɴᴅ ᴄᴏɪɴs  
-
-/sclaim  
-↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴡᴀɪғᴜ  
-
-/claim  
-↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴄᴏᴜɴᴛ  
-
-/pay  
-↳ sᴇɴᴅ ᴄᴏɪɴs ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
-
-✦ ───────────────── ✦"""
-
-        help_keyboard = [[InlineKeyboardButton("✧ ʀᴇᴛᴜʀɴ", callback_data='back')]]
-        reply_markup = InlineKeyboardMarkup(help_keyboard)
-
-        await query.edit_message_caption(
-            caption=help_text,
-            reply_markup=reply_markup,
-            parse_mode='HTML'
-        )
-
-    elif query.data == 'back':
-        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
-
-ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
-
-        keyboard = get_keyboard()
-        await query.edit_message_caption(
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
-
-
-application.add_handler(CallbackQueryHandler(button, pattern='^help$|^back$'))
-application.add_handler(ChatMemberHandler(track_group_status, ChatMemberHandler.MY_CHAT_MEMBER))
-start_handler = CommandHandler('start', start)
-application.add_handler(start_handler)
+# Auto-validate configuration on import
+Config.validate()

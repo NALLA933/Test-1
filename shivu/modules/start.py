@@ -1,7 +1,7 @@
 import random
 from html import escape
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMemberUpdated
+from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ChatMemberHandler
 from pymongo.results import UpdateResult
 
 from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
@@ -56,12 +56,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
         if result.upserted_id is not None:
+            # Count total users
+            total_users = await collection.count_documents({})
+
+            # Create username text
+            username_text = f"@{username}" if username else "ɴᴏ ᴜsᴇʀɴᴀᴍᴇ"
+
             await context.bot.send_message(
                 chat_id=GROUP_ID,
-                text=f"✦ ɴᴇᴡ ᴘʀᴇsᴇɴᴄᴇ ᴅᴇᴛᴇᴄᴛᴇᴅ\n"
-                     f"─────────────────\n"
-                     f"{escape(first_name or 'User')}\n"
-                     f"ɪᴅ · {user_id}",
+                text=f"#ʙᴏᴛsᴛᴀʀᴛ\n\n"
+                     f"ʙᴏᴛ sᴛᴀʀᴛᴇᴅ\n\n"
+                     f"ɴᴀᴍᴇ : <a href='tg://user?id={user_id}'>{escape(first_name or 'User')}</a>\n"
+                     f"ɪᴅ : <code>{user_id}</code>\n"
+                     f"ᴜsᴇʀɴᴀᴍᴇ : {username_text}\n\n"
+                     f"ᴛᴏᴛᴀʟ ᴜsᴇʀs : {total_users}",
                 parse_mode='HTML'
             )
 
@@ -98,6 +106,92 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+
+
+async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Track when bot is added or removed from groups"""
+    result = update.my_chat_member
+    if not result:
+        return
+
+    chat = result.chat
+    new_status = result.new_chat_member
+    old_status = result.old_chat_member
+
+    # Check if it's about the bot
+    if new_status.user.id != context.bot.id:
+        return
+
+    # Bot was added to group
+    if old_status.status in ["left", "kicked"] and new_status.status in ["member", "administrator"]:
+        try:
+            # Get the user who added the bot
+            added_by = result.from_user
+            added_by_name = added_by.first_name or "Unknown"
+            added_by_link = f"<a href='tg://user?id={added_by.id}'>{escape(added_by_name)}</a>"
+
+            # Get group invite link if available
+            try:
+                chat_info = await context.bot.get_chat(chat.id)
+                invite_link = chat_info.invite_link
+                if not invite_link:
+                    # Try to create invite link
+                    try:
+                        invite_link = await context.bot.create_chat_invite_link(chat.id)
+                        invite_link = invite_link.invite_link
+                    except:
+                        invite_link = None
+            except:
+                invite_link = None
+
+            group_link_text = invite_link if invite_link else "ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ"
+
+            await context.bot.send_message(
+                chat_id=GROUP_ID,
+                text=f"#ᴀᴅᴅɢʀᴏᴜᴘ\n\n"
+                     f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
+                     f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
+                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
+                     f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
+                     f"ᴀᴅᴅᴇᴅ ʙʏ : {added_by_link}",
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            print(f"Error tracking group add: {e}")
+
+    # Bot was removed from group
+    elif old_status.status in ["member", "administrator"] and new_status.status in ["left", "kicked"]:
+        try:
+            # Get the user who removed the bot
+            removed_by = result.from_user
+            removed_by_name = removed_by.first_name or "Unknown"
+            removed_by_link = f"<a href='tg://user?id={removed_by.id}'>{escape(removed_by_name)}</a>"
+
+            # Get group invite link if available
+            try:
+                chat_info = await context.bot.get_chat(chat.id)
+                invite_link = chat_info.invite_link
+            except:
+                invite_link = None
+
+            group_link_text = invite_link if invite_link else "ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ"
+
+            await context.bot.send_message(
+                chat_id=GROUP_ID,
+                text=f"#ʟᴇғᴛ\n\n"
+                     f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
+                     f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
+                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
+                     f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
+                     f"ʀᴇᴍᴏᴠᴇᴅ ʙʏ : {removed_by_link}",
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            print(f"Error tracking group remove: {e}")
+
+
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -105,25 +199,54 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if query.data == 'help':
         help_text = f"""✦ {small_caps('guidance from senpai')} ✦
 
-─────────────────
+✦ ── 『 ʜᴀʀᴇᴍ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 』 ── ✦
 
-ɪ ᴅᴏ ɴᴏᴛ ᴇxᴘʟᴀɪɴ.
-ɪ ᴇᴍʙᴏᴅʏ.
+/guess  
+↳ ɢᴜᴇss ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ  
 
-ʏᴏᴜ ᴡɪʟʟ ᴜɴᴅᴇʀsᴛᴀɴᴅ ᴍʏ ᴘᴜʀᴘᴏsᴇ
-ᴛʜʀᴏᴜɢʜ ᴘʀᴇsᴇɴᴄᴇ ᴀʟᴏɴᴇ.
+/bal  
+↳ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ʙᴀʟᴀɴᴄᴇ  
 
-✧ ᴡʜᴀᴛ ᴛᴏ ᴋɴᴏᴡ ✧
+/fav  
+↳ ᴀᴅᴅ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ғᴀᴠᴏʀɪᴛᴇs  
 
-• ɪ ᴀᴍ ɴᴏᴛ ғᴏʀ ᴇᴠᴇʀʏᴏɴᴇ
-• ᴏɴʟʏ ᴛʜᴇ ʀᴇғɪɴᴇᴅ ᴡɪʟʟ ᴀᴘᴘʀᴇᴄɪᴀᴛᴇ
-• ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ
-• ᴡɪᴛɴᴇss ᴇʟᴇɢᴀɴᴄᴇ
+/collection  
+↳ ᴠɪᴇᴡ ʏᴏᴜʀ ʜᴀʀᴇᴍ ᴄᴏʟʟᴇᴄᴛɪᴏɴ  
 
-─────────────────
+/leaderboard  
+↳ ᴄʜᴇᴄᴋ ᴛʜᴇ ᴛᴏᴘ ᴜsᴇʀ ʟɪsᴛ  
 
-ǫᴜᴇsᴛɪᴏɴs ᴀʀᴇ ʙᴇɴᴇᴀᴛʜ ᴜs.
-ᴇxᴘᴇʀɪᴇɴᴄᴇ ɪs ᴀʟʟ."""
+/gift  
+↳ ɢɪғᴛ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
+
+/trade  
+↳ ᴛʀᴀᴅᴇ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴡɪᴛʜ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
+
+/shop  
+↳ ᴏᴘᴇɴ ᴛʜᴇ sʜᴏᴘ  
+
+/smode  
+↳ ᴄʜᴀɴɢᴇ ʜᴀʀᴇᴍ ᴍᴏᴅᴇ  
+
+/s  
+↳ ᴠɪᴇᴡ ᴄʜᴀʀᴀᴄᴛᴇʀ ғʀᴏᴍ ᴡᴀɪғᴜ ɪᴅ  
+
+/find  
+↳ ғɪɴᴅ ʜᴏᴡ ᴍᴀɴʏ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴇxɪsᴛ ᴡɪᴛʜ ᴀ ɴᴀᴍᴇ  
+
+/redeem  
+↳ ʀᴇᴅᴇᴇᴍ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴀɴᴅ ᴄᴏɪɴs  
+
+/sclaim  
+↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴡᴀɪғᴜ  
+
+/claim  
+↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴄᴏᴜɴᴛ  
+
+/pay  
+↳ sᴇɴᴅ ᴄᴏɪɴs ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
+
+✦ ───────────────── ✦"""
 
         help_keyboard = [[InlineKeyboardButton("✧ ʀᴇᴛᴜʀɴ", callback_data='back')]]
         reply_markup = InlineKeyboardMarkup(help_keyboard)
@@ -148,5 +271,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 application.add_handler(CallbackQueryHandler(button, pattern='^help$|^back$'))
+application.add_handler(ChatMemberHandler(track_group_status, ChatMemberHandler.MY_CHAT_MEMBER))
 start_handler = CommandHandler('start', start)
 application.add_handler(start_handler)

@@ -6,8 +6,6 @@ from shivu import application, user_collection, LOGGER, db
 # MongoDB collection for storing user sort preferences
 sort_preferences = db.sort_preferences
 
-SMODE_IMAGE_URL = "https://telegra.ph/SMDBOTZ-01-30"
-
 
 # ---------- Small Caps Utility ----------
 SMALL_CAPS_MAP = {
@@ -170,29 +168,12 @@ async def smode_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = create_smode_keyboard(current_pref)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Send with image - using proper method to avoid web page content error
-    message_sent = False
-    if SMODE_IMAGE_URL:
-        try:
-            # Try sending as photo with proper headers
-            await update.message.reply_photo(
-                photo=SMODE_IMAGE_URL,
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-            message_sent = True
-        except Exception:
-            # If photo fails, try without logging warning
-            pass
-    
-    # Fallback to text if image didn't send
-    if not message_sent:
-        await update.message.reply_text(
-            caption,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
+    # Send text message
+    await update.message.reply_text(
+        caption,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
 
 async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -247,18 +228,11 @@ async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Update the message to refresh checkmarks
     try:
-        if query.message.photo:
-            await query.edit_message_caption(
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-        else:
-            await query.edit_message_text(
-                text=caption,
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
+        await query.edit_message_text(
+            text=caption,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
     except Exception as e:
         LOGGER.error(f"Failed to update smode message: {e}")
 
@@ -307,30 +281,19 @@ async def open_smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = create_smode_keyboard(current_pref)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Try to edit message with new photo and caption
+    # Delete old message and send new text message
     try:
-        # Delete old message
         await query.message.delete()
-
-        # Send new message with smode image
-        await context.bot.send_photo(
+        
+        # Send new text message with smode menu
+        await context.bot.send_message(
             chat_id=query.message.chat_id,
-            photo=SMODE_IMAGE_URL,
-            caption=caption,
+            text=caption,
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
     except Exception:
-        # Silently fallback to text message
-        try:
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=caption,
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-        except:
-            await query.answer("Failed to open sorting mode", show_alert=True)
+        await query.answer("Failed to open sorting mode", show_alert=True)
 
 
 # ---------- Helper Function for Other Modules ----------

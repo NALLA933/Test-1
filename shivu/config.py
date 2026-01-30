@@ -47,7 +47,7 @@ class Config:
 
     # Community Links
     SUPPORT_CHAT: str = os.getenv("SUPPORT_CHAT", "THE_DRAGON_SUPPORT")
-    UPDATE_CHAT: str = os.getenv("UPDATE_CHAT", "PICK_X_UPDATE")
+    UPDATE_CHAT: str = os.getenv("UPDATE_CHAT", "Senpai_Updates")
 
     @classmethod
     def validate(cls) -> None:

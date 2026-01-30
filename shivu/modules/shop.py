@@ -507,11 +507,34 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            message,
-            parse_mode='HTML',
-            reply_markup=reply_markup
-        )
+        # Check if message has photo (caption) or text
+        try:
+            if query.message.photo:
+                # Message has photo, edit caption
+                await query.edit_message_caption(
+                    caption=message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            else:
+                # Message is text only
+                await query.edit_message_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+        except Exception as e:
+            # Fallback: delete old message and send new one
+            try:
+                await query.message.delete()
+                await query.message.reply_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            except:
+                pass
+        
         await query.answer(to_small_caps("🔜 Coming Soon!"), show_alert=True)
         
     elif action == "shop_back":
@@ -523,9 +546,121 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
             await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
             return
         
+        # Delete current message and show shop fresh
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        # Get current shop index and display
         shop_data = await get_shop_data(user_id)
         current_index = shop_data.get('current_index', 0)
-        await display_shop_character(update, context, user_id, current_index)
+        
+        # Create a fake update object for display_shop_character
+        # Since we deleted the message, we need to send a new one
+        # We'll use the chat_id to send a new message
+        from telegram import Message
+        
+        characters = shop_data.get('characters', [])
+        if not characters or current_index >= len(characters):
+            current_index = 0
+        
+        char = characters[current_index]
+        
+        # Get owner count
+        owner_count = await get_character_owner_count(char['id'])
+        
+        # Check if user already owns this character
+        owned_chars = await get_user_owned_characters(user_id)
+        status = "Sold" if char['id'] in owned_chars else "Available"
+        
+        # Build message
+        rarity_emoji = RARITY_EMOJIS.get(char['rarity'], '⚪')
+        rarity_name = RARITY_NAMES.get(char['rarity'], 'ᴜɴᴋɴᴏᴡɴ')
+        
+        safe_name = escape(str(char['name']))
+        safe_anime = escape(str(char['anime']))
+        
+        message = f"<b>🏪 {to_small_caps(f'Character Shop ({current_index + 1}/{len(characters)})')}</b>\n\n"
+        message += f"🎭 {to_small_caps('Name')}: {to_small_caps(safe_name)}\n"
+        message += f"📺 {to_small_caps('Anime')}: {to_small_caps(safe_anime)}\n"
+        message += f"🆔 {to_small_caps('Id')}: {char['id']}\n"
+        message += f"✨ {to_small_caps('Rarity')}: {rarity_emoji} {rarity_name}\n"
+        message += f"💸 {to_small_caps('Price')}: {char['base_price']:,}\n"
+        message += f"🛒 {to_small_caps('Discount')}: {char['discount_percent']}%\n"
+        message += f"🏷️ {to_small_caps('Discount Price')}: {char['final_price']:,}\n"
+        message += f"🎴 {to_small_caps('Owner')}: {owner_count}\n"
+        message += f"📋 {to_small_caps('Stats')}: {to_small_caps(status)}\n"
+        
+        # Build keyboard
+        keyboard = []
+        
+        # Purchase button
+        if status == "Available":
+            keyboard.append([
+                InlineKeyboardButton(
+                    to_small_caps("💰 Purchase"),
+                    callback_data=f"shop_purchase:{user_id}:{current_index}"
+                )
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton(
+                    to_small_caps("❌ Already Owned"),
+                    callback_data="shop_noop"
+                )
+            ])
+        
+        # Navigation buttons
+        nav_row = []
+        if current_index > 0:
+            nav_row.append(InlineKeyboardButton("⬅️", callback_data=f"shop_nav:{user_id}:{current_index - 1}"))
+        
+        nav_row.append(InlineKeyboardButton(
+            f"🍃 {to_small_caps('Refresh')}",
+            callback_data=f"shop_refresh:{user_id}"
+        ))
+        
+        if current_index < len(characters) - 1:
+            nav_row.append(InlineKeyboardButton("➡️", callback_data=f"shop_nav:{user_id}:{current_index + 1}"))
+        
+        keyboard.append(nav_row)
+        
+        # Premium shop button
+        keyboard.append([
+            InlineKeyboardButton(
+                f"💸 {to_small_caps('Premium Shop')}",
+                callback_data=f"shop_premium:{user_id}"
+            )
+        ])
+        
+        # Cancel button
+        keyboard.append([
+            InlineKeyboardButton(
+                to_small_caps("❌ Close"),
+                callback_data=f"shop_close:{user_id}"
+            )
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send new message with photo
+        photo_url = char.get('img_url')
+        
+        if photo_url:
+            await query.message.reply_photo(
+                photo=photo_url,
+                caption=message,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+        else:
+            await query.message.reply_text(
+                message,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+        
         await query.answer()
         
     elif action == "shop_purchase":

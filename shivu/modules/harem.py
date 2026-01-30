@@ -283,7 +283,7 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
     # Add smode button
     keyboard.append([
         InlineKeyboardButton(
-            "🎐 " + to_small_caps("SMODE"),
+            "🔮 " + to_small_caps("ᴄᴀɴᴄᴇʟ"),
             callback_data=f"open_smode:{user_id}"
         )
     ])

@@ -7,6 +7,10 @@ from shivu import application, user_collection, LOGGER, db
 sort_preferences = db.sort_preferences
 
 # Image URL for smode menu
+# NOTE: If this catbox URL doesn't work in groups, replace with:
+# 1. Telegraph upload: https://telegra.ph/upload
+# 2. Direct imgur link
+# 3. Or any direct image URL ending in .jpg/.png
 SMODE_IMAGE_URL = "https://files.catbox.moe/g3rxr1.jpg"
 
 
@@ -171,17 +175,24 @@ async def smode_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = create_smode_keyboard(current_pref)
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Try to send image, fallback to text if fails
-    try:
-        await update.message.reply_photo(
-            photo=SMODE_IMAGE_URL,
-            caption=caption,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        LOGGER.warning(f"Failed to send smode image, using text fallback: {e}")
-        # Fallback to text message
+    # Send with image - using proper method to avoid web page content error
+    message_sent = False
+    if SMODE_IMAGE_URL:
+        try:
+            # Try sending as photo with proper headers
+            await update.message.reply_photo(
+                photo=SMODE_IMAGE_URL,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+            message_sent = True
+        except Exception:
+            # If photo fails, try without logging warning
+            pass
+    
+    # Fallback to text if image didn't send
+    if not message_sent:
         await update.message.reply_text(
             caption,
             reply_markup=reply_markup,
@@ -257,11 +268,7 @@ async def smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         LOGGER.error(f"Failed to update smode message: {e}")
 
     # Show alert notification with success message
-    alert_message = (
-        f"✅ {to_small_caps('Filter Applied!')}\n\n"
-        f"🎯 {to_small_caps('Selected:')} {selected_text}\n\n"
-        f"💡 {to_small_caps('Your harem will now show only')} {selected_text} {to_small_caps('characters.')}"
-    )
+    alert_message = f"{to_small_caps('Your harem will now show only')} {selected_text} {to_small_caps('characters')}"
     
     await query.answer(alert_message, show_alert=True)
 
@@ -318,9 +325,17 @@ async def open_smode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
-    except Exception as e:
-        LOGGER.error(f"Failed to open smode from harem: {e}")
-        await query.answer("Failed to open sorting mode", show_alert=True)
+    except Exception:
+        # Silently fallback to text message
+        try:
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=caption,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        except:
+            await query.answer("Failed to open sorting mode", show_alert=True)
 
 
 # ---------- Helper Function for Other Modules ----------

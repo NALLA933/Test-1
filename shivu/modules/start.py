@@ -105,36 +105,54 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if query.data == 'help':
         help_text = f"""✦ {small_caps('guidance from senpai')} ✦
 
-─────────────────
+✦ ── 『 ʜᴀʀᴇᴍ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 』 ── ✦
 
-✧ /guess
-↳ ɢᴜᴇss ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ
+/guess  
+↳ ɢᴜᴇss ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ  
 
-✧ /fav
-↳ ᴀᴅᴅ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ғᴀᴠᴏʀɪᴛᴇs
+/bal  
+↳ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴄᴜʀʀᴇɴᴛ ʙᴀʟᴀɴᴄᴇ  
 
-✧ /trade
-↳ ᴛʀᴀᴅᴇ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴡɪᴛʜ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ
+/fav  
+↳ ᴀᴅᴅ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ғᴀᴠᴏʀɪᴛᴇs  
 
-✧ /gift
-↳ ɢɪғᴛ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ
+/collection  
+↳ ᴠɪᴇᴡ ʏᴏᴜʀ ʜᴀʀᴇᴍ ᴄᴏʟʟᴇᴄᴛɪᴏɴ  
 
-✧ /collection
-↳ ʙᴏᴀsᴛ ʏᴏᴜʀ ʜᴀʀᴇᴍ ᴄᴏʟʟᴇᴄᴛɪᴏɴ
+/leaderboard  
+↳ ᴄʜᴇᴄᴋ ᴛʜᴇ ᴛᴏᴘ ᴜsᴇʀ ʟɪsᴛ  
 
-✧ /topgroups
-↳ ʟɪsᴛ ᴛʜᴇ ɢʀᴏᴜᴘs ᴡɪᴛʜ ʙɪɢɢᴇsᴛ ʜᴀʀᴇᴍ (ɢʟᴏʙᴀʟʟʏ)
+/gift  
+↳ ɢɪғᴛ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
 
-✧ /top
-↳ ʟɪsᴛ ᴛʜᴇ ᴜsᴇʀs ᴡɪᴛʜ ʙɪɢɢᴇsᴛ ʜᴀʀᴇᴍ (ɢʟᴏʙᴀʟʟʏ)
+/trade  
+↳ ᴛʀᴀᴅᴇ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴡɪᴛʜ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
 
-✧ /ctop
-↳ ʟɪsᴛ ᴛʜᴇ ᴜsᴇʀs ᴡɪᴛʜ ʙɪɢɢᴇsᴛ ʜᴀʀᴇᴍ (ᴄᴜʀʀᴇɴᴛ ᴄʜᴀᴛ)
+/shop  
+↳ ᴏᴘᴇɴ ᴛʜᴇ sʜᴏᴘ  
 
-✧ /changetime
-↳ ᴄʜᴀɴɢᴇ ᴛʜᴇ ғʀᴇǫᴜᴇɴᴄʏ ᴏғ ᴄʜᴀʀᴀᴄᴛᴇʀ sᴘᴀᴡɴ
+/smode  
+↳ ᴄʜᴀɴɢᴇ ʜᴀʀᴇᴍ ᴍᴏᴅᴇ  
 
-─────────────────"""
+/s  
+↳ ᴠɪᴇᴡ ᴄʜᴀʀᴀᴄᴛᴇʀ ғʀᴏᴍ ᴡᴀɪғᴜ ɪᴅ  
+
+/find  
+↳ ғɪɴᴅ ʜᴏᴡ ᴍᴀɴʏ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴇxɪsᴛ ᴡɪᴛʜ ᴀ ɴᴀᴍᴇ  
+
+/redeem  
+↳ ʀᴇᴅᴇᴇᴍ ᴄʜᴀʀᴀᴄᴛᴇʀs ᴀɴᴅ ᴄᴏɪɴs  
+
+/sclaim  
+↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴡᴀɪғᴜ  
+
+/claim  
+↳ ᴄʟᴀɪᴍ ʏᴏᴜʀ ᴅᴀɪʟʏ ᴄᴏᴜɴᴛ  
+
+/pay  
+↳ sᴇɴᴅ ᴄᴏɪɴs ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
+
+✦ ───────────────── ✦"""
 
         help_keyboard = [[InlineKeyboardButton("✧ ʀᴇᴛᴜʀɴ", callback_data='back')]]
         reply_markup = InlineKeyboardMarkup(help_keyboard)

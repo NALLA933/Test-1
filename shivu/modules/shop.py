@@ -495,7 +495,7 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
         
         # Just show alert, don't change page
         await query.answer(
-            f"💸 {to_small_caps('Premium Shop')}\n\n✨ {to_small_caps('Coming Soon...')}",
+            f"💸 {to_small_caps('Premium Shop')}\n✨ {to_small_caps('Coming Soon...')}",
             show_alert=True
         )
         

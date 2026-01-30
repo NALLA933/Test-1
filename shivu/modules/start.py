@@ -1,12 +1,7 @@
 import random
 from html import escape
-<<<<<<< HEAD
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMemberUpdated
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, ChatMemberHandler
-=======
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
->>>>>>> bc4818a (Restore start.py from commit b873afe)
 from pymongo.results import UpdateResult
 
 from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
@@ -103,94 +98,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
-
-
-async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Track when bot is added or removed from groups"""
-    result = update.my_chat_member
-    if not result:
-        return
-    
-    chat = result.chat
-    new_status = result.new_chat_member
-    old_status = result.old_chat_member
-    
-    # Check if it's about the bot
-    if new_status.user.id != context.bot.id:
-        return
-    
-    # Bot was added to group
-    if old_status.status in ["left", "kicked"] and new_status.status in ["member", "administrator"]:
-        try:
-            # Get the user who added the bot
-            added_by = result.from_user
-            added_by_name = added_by.first_name or "Unknown"
-            added_by_link = f"<a href='tg://user?id={added_by.id}'>{escape(added_by_name)}</a>"
-            
-            # Get group invite link if available
-            try:
-                chat_info = await context.bot.get_chat(chat.id)
-                invite_link = chat_info.invite_link
-                if not invite_link:
-                    # Try to create invite link
-                    try:
-                        invite_link = await context.bot.create_chat_invite_link(chat.id)
-                        invite_link = invite_link.invite_link
-                    except:
-                        invite_link = None
-            except:
-                invite_link = None
-            
-            group_link_text = invite_link if invite_link else "ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ"
-            
-            await context.bot.send_message(
-                chat_id=GROUP_ID,
-                text=f"#ᴀᴅᴅɢʀᴏᴜᴘ\n\n"
-                     f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
-                     f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
-                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
-                     f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
-                     f"ᴀᴅᴅᴇᴅ ʙʏ : {added_by_link}",
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            print(f"Error tracking group add: {e}")
-    
-    # Bot was removed from group
-    elif old_status.status in ["member", "administrator"] and new_status.status in ["left", "kicked"]:
-        try:
-            # Get the user who removed the bot
-            removed_by = result.from_user
-            removed_by_name = removed_by.first_name or "Unknown"
-            removed_by_link = f"<a href='tg://user?id={removed_by.id}'>{escape(removed_by_name)}</a>"
-            
-            # Get group invite link if available
-            try:
-                chat_info = await context.bot.get_chat(chat.id)
-                invite_link = chat_info.invite_link
-            except:
-                invite_link = None
-            
-            group_link_text = invite_link if invite_link else "ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ"
-            
-            await context.bot.send_message(
-                chat_id=GROUP_ID,
-                text=f"#ʟᴇғᴛ\n\n"
-                     f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
-                     f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
-                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
-                     f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
-                     f"ʀᴇᴍᴏᴠᴇᴅ ʙʏ : {removed_by_link}",
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            print(f"Error tracking group remove: {e}")
-
-
-
-sync def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     

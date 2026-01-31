@@ -590,33 +590,15 @@ class UploadHandler:
             update.message.reply_to_message.photo or update.message.reply_to_message.document
         ):
             help_text = (
-                "❌ ɪɴᴄᴏʀʀᴇᴄᴛ ꜰᴏʀᴍᴀᴛ!\n\n"
-                "📌 ʜᴏᴡ ᴛᴏ ᴜꜱᴇ /upload:\n"
-                "ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ\n\n"
-                "ꜱᴇɴᴅ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ /upload\n"
-                "ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴀᴍᴇ\n"
-                "ᴀɴɪᴍᴇ ɴᴀᴍᴇ\n"
-                "ʀᴀʀɪᴛʏ (1-15)\n\n"
-                "✨ ᴇxᴀᴍᴘʟᴇ:\n"
-                "`/upload ɴᴇᴢᴜᴋᴏ ᴋᴀᴍᴀᴅᴏ`\n"
-                "`ᴅᴇᴍᴏɴ ꜱʟᴀʏᴇʀ`\n"
-                "`4`\n\n"
-                "📊 ʀᴀʀɪᴛʏ ᴍᴀᴘ (1-15):\n"
-                "• 1 ⚪ ᴄᴏᴍᴍᴏɴ\n"
-                "• 2 🔵 ʀᴀʀᴇ\n"
-                "• 3 🟡 ʟᴇɢᴇɴᴅᴀʀʏ\n"
-                "• 4 💮 ꜱᴘᴇᴄɪᴀʟ\n"
-                "• 5 👹 ᴀɴᴄɪᴇɴᴛ\n"
-                "• 6 🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ\n"
-                "• 7 🔮 ᴇᴘɪᴄ\n"
-                "• 8 🪐 ᴄᴏꜱᴍɪᴄ\n"
-                "• 9 ⚰️ ɴɪɢʜᴛᴍᴀʀᴇ\n"
-                "• 10 🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ\n"
-                "• 11 💝 ᴠᴀʟᴇɴᴛɪɴᴇ\n"
-                "• 12 🌸 ꜱᴘʀɪɴɢ\n"
-                "• 13 🏖️ ᴛʀᴏᴘɪᴄᴀʟ\n"
-                "• 14 🍭 ᴋᴀᴡᴀɪɪ\n"
-                "• 15 🧬 ʜʏʙʀɪᴅ"
+                "📝 **ʜᴏᴡ ᴛᴏ ᴜᴘʟᴏᴀᴅ:**\n\n"
+                "1️⃣ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴡɪᴛʜ:\n"
+                "   `/upload ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴀᴍᴇ`\n"
+                "   `ᴀɴɪᴍᴇ ɴᴀᴍᴇ`\n"
+                "   `ʀᴀʀɪᴛʏ (1-15)`\n\n"
+                "**ᴇxᴀᴍᴘʟᴇ:**\n"
+                "`/upload Naruto Uzumaki`\n"
+                "`Naruto`\n"
+                "`5`"
             )
             await update.message.reply_text(help_text, parse_mode='Markdown')
             return
@@ -657,6 +639,19 @@ class UploadHandler:
                 await processing_msg.edit_text("❌ ɪɴᴠᴀʟɪᴅ ᴍᴇᴅɪᴀ! ᴏɴʟʏ ᴘʜᴏᴛᴏꜱ ᴀɴᴅ ɪᴍᴀɢᴇ ᴅᴏᴄᴜᴍᴇɴᴛꜱ ᴀʟʟᴏᴡᴇᴅ.")
                 return
 
+            # DO NOT MODIFY: Keep existing hash check logic as-is
+            existing = await collection.find_one({'file_hash': media_file.hash})
+            if existing:
+                await processing_msg.edit_text(
+                    f"⚠️ **ᴅᴜᴘʟɪᴄᴀᴛᴇ!**\n\n"
+                    f"ᴛʜɪꜱ ɪᴍᴀɢᴇ ᴀʟʀᴇᴀᴅʏ ᴇxɪꜱᴛꜱ:\n"
+                    f"**ɪᴅ:** `{existing['id']}`\n"
+                    f"**ɴᴀᴍᴇ:** {existing['name']}\n"
+                    f"**ᴀɴɪᴍᴇ:** {existing['anime']}"
+                )
+                media_file.cleanup()
+                return
+
             # Create character with HTML-escaped inputs
             character = await CharacterFactory.create_from_upload(
                 name=name,
@@ -695,7 +690,14 @@ class UploadHandler:
             media_file.cleanup()
 
             # Success message
-            await processing_msg.edit_text("✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!")
+            success_text = (
+                f"✅ **ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ!**\n\n"
+                f"**ɪᴅ:** `{character.character_id}`\n"
+                f"**ɴᴀᴍᴇ:** {character.name}\n"
+                f"**ᴀɴɪᴍᴇ:** {character.anime}\n"
+                f"**ʀᴀʀɪᴛʏ:** {RarityLevel.from_number(rarity).display_name}"
+            )
+            await processing_msg.edit_text(success_text)
 
             logger.info(f"Character {character.character_id} uploaded successfully by {update.effective_user.id}")
 

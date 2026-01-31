@@ -15,7 +15,7 @@ claim_codes_collection = db.claim_codes
 
 # Configuration
 ALLOWED_GROUP_ID = -1003317636069
-SUPPORT_GROUP = "https://t.me/xjjdjdjdhe"           # Support Group Link
+SUPPORT_GROUP = "https://t.me/THE_DRAGON_SUPPORT"           # Support Group Link
 SUPPORT_CHANNEL = "https://t.me/Senpai_Updates"     # Update Channel Link
 SUPPORT_GROUP_ID = -1003317636069                   # Support Group ID
 SUPPORT_CHANNEL_ID = -1003870337314                 # Update Channel ID

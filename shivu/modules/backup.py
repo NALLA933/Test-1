@@ -1,10 +1,3 @@
-"""
-Backup Module for Shivu Bot
-Location: shivu/modules/backup.py
-
-Automatic database backup system with hourly backups sent to Telegram
-"""
-
 import os
 import json
 import logging

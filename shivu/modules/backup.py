@@ -294,15 +294,15 @@ def setup_backup_system():
     application.add_handler(CommandHandler("backup", backup_command))
     application.add_handler(CommandHandler("restore", restore_command))
     
-    # Schedule auto backup job (runs every 12 hours)
+    # Schedule auto backup job (runs every 1 hour)
     job_queue = application.job_queue
     job_queue.run_repeating(
         auto_backup_job,
-        interval=43200,  # 12 hours in seconds
+        interval=3600,  # 1 hour in seconds
         first=10  # First run after 10 seconds of bot start
     )
     
-    LOGGER.info("Backup system initialized with auto-backup every 12 hours")
+    LOGGER.info("Backup system initialized with auto-backup every 1 hour")
 
 # Auto-initialize when imported
 setup_backup_system()

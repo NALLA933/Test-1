@@ -818,20 +818,36 @@ class UploadHandler:
 
             # Run both operations concurrently using gather with coroutines
             async def _parallel_upload():
-                tasks = [
-                    asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename)),
-                    asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename)),
-                    asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))
-                ]
-                pending = set(tasks)
-                while pending:
-                    done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                    for task in done:
-                        result = task.result()
+                catbox_task = asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename))
+                telegraph_task = asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename))
+                imgur_task = asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))
+                
+                done, pending = await asyncio.wait(
+                    [catbox_task, telegraph_task, imgur_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                catbox_result = catbox_task.result() if catbox_task.done() else None
+                if catbox_result:
+                    for t in pending:
+                        t.cancel()
+                    return catbox_result
+                
+                for task in done:
+                    result = task.result()
+                    if result:
+                        for t in pending:
+                            t.cancel()
+                        return result
+                
+                for task in pending:
+                    try:
+                        result = await task
                         if result:
-                            for t in pending:
-                                t.cancel()
                             return result
+                    except:
+                        continue
+                
                 return None
             
             catbox_url, message_id = await asyncio.gather(
@@ -1014,20 +1030,36 @@ class UpdateHandler:
 
                     # Run both operations concurrently
                     async def _parallel_upload():
-                        tasks = [
-                            asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename)),
-                            asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename)),
-                            asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))
-                        ]
-                        pending = set(tasks)
-                        while pending:
-                            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                            for task in done:
-                                result = task.result()
+                        catbox_task = asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename))
+                        telegraph_task = asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename))
+                        imgur_task = asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))
+                        
+                        done, pending = await asyncio.wait(
+                            [catbox_task, telegraph_task, imgur_task],
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
+                        
+                        catbox_result = catbox_task.result() if catbox_task.done() else None
+                        if catbox_result:
+                            for t in pending:
+                                t.cancel()
+                            return catbox_result
+                        
+                        for task in done:
+                            result = task.result()
+                            if result:
+                                for t in pending:
+                                    t.cancel()
+                                return result
+                        
+                        for task in pending:
+                            try:
+                                result = await task
                                 if result:
-                                    for t in pending:
-                                        t.cancel()
                                     return result
+                            except:
+                                continue
+                        
                         return None
                     
                     catbox_url, new_message_id = await asyncio.gather(

@@ -17,8 +17,8 @@ claim_codes_collection = db.claim_codes
 ALLOWED_GROUP_ID = -1003317636069
 SUPPORT_GROUP = "https://t.me/THE_DRAGON_SUPPORT"           # Support Group Link
 SUPPORT_CHANNEL = "https://t.me/Senpai_Updates"     # Update Channel Link
-SUPPORT_GROUP_ID = -1003317636069                   # Support Group ID
-SUPPORT_CHANNEL_ID = -1003870337314                 # Update Channel ID
+SUPPORT_GROUP_ID = -1003100468240                   # Support Group ID
+SUPPORT_CHANNEL_ID = -1003002819368                 # Update Channel ID
 
 # Membership verification settings
 ENABLE_MEMBERSHIP_CHECK = True  # Set to False to disable membership verification

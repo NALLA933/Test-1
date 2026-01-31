@@ -662,21 +662,25 @@ class UploadHandler:
                 uploader_name=update.effective_user.first_name
             )
 
+            # SEQUENTIAL FLOW: Download → Catbox → Telegram → DB
+            
+            # Step 1: Upload to Catbox/Telegraph
             await processing_msg.edit_text("☁️ **ᴜᴘʟᴏᴀᴅɪɴɢ ᴛᴏ ᴄʟᴏᴜᴅ...**")
-
-            # Upload to cloud (Catbox/Telegraph) and channel in parallel
-            catbox_url, message_id = await asyncio.gather(
-                MediaUploader.upload(media_file.file_path, media_file.filename),
-                TelegramUploader.upload_to_channel(character, context)
-            )
+            catbox_url = await MediaUploader.upload(media_file.file_path, media_file.filename)
 
             if not catbox_url:
                 await processing_msg.edit_text("❌ ꜰᴀɪʟᴇᴅ ᴛᴏ ᴜᴘʟᴏᴀᴅ ᴛᴏ ᴄʟᴏᴜᴅ ꜱᴛᴏʀᴀɢᴇ.")
                 media_file.cleanup()
                 return
 
-            # Update character with URLs and message ID
+            # Update character with Catbox URL before Telegram upload
             character.media_file.catbox_url = catbox_url
+            
+            # Step 2: Upload to Telegram channel (using Catbox URL)
+            await processing_msg.edit_text("📤 **ᴜᴘʟᴏᴀᴅɪɴɢ ᴛᴏ ᴄʜᴀɴɴᴇʟ...**")
+            message_id = await TelegramUploader.upload_to_channel(character, context)
+            
+            # Update character with message ID
             character.message_id = message_id
 
             # Save to database
@@ -838,22 +842,27 @@ class UpdateHandler:
                         uploader_name=html.escape(update.effective_user.first_name)
                     )
 
-                    await processing_msg.edit_text("🔄 **Uploading new image and updating channel...**")
-
-                    # Run both operations concurrently
-                    catbox_url, new_message_id = await asyncio.gather(
-                        MediaUploader.upload(media_file.file_path, media_file.filename),
-                        TelegramUploader.update_channel_message(
-                            char_for_upload, 
-                            context, 
-                            character.get('message_id')
-                        )
-                    )
+                    # SEQUENTIAL FLOW: Catbox Upload → Telegram Update
+                    
+                    # Step 1: Upload to Catbox/Telegraph first
+                    await processing_msg.edit_text("☁️ **Uploading to cloud...**")
+                    catbox_url = await MediaUploader.upload(media_file.file_path, media_file.filename)
 
                     if not catbox_url:
                         await processing_msg.edit_text("❌ Failed to upload to cloud storage.")
                         media_file.cleanup()
                         return
+                    
+                    # Update character with Catbox URL
+                    char_for_upload.media_file.catbox_url = catbox_url
+                    
+                    # Step 2: Update Telegram channel message (using Catbox URL)
+                    await processing_msg.edit_text("📤 **Updating channel...**")
+                    new_message_id = await TelegramUploader.update_channel_message(
+                        char_for_upload, 
+                        context, 
+                        character.get('message_id')
+                    )
 
                     update_data['img_url'] = catbox_url
                     update_data['file_hash'] = media_file.hash

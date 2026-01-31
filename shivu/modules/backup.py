@@ -6,6 +6,15 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler
 from bson import ObjectId
 
+# Custom JSON encoder to handle datetime and other types
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
+
 from shivu import (
     application,
     collection,
@@ -49,10 +58,21 @@ async def create_database_backup():
     for coll_name, coll in collections_to_backup.items():
         try:
             data = await coll.find({}).to_list(length=None)
-            # Convert ObjectId to string for JSON serialization
+            # Convert non-JSON serializable objects to strings
             for doc in data:
-                if '_id' in doc:
-                    doc['_id'] = str(doc['_id'])
+                for key, value in list(doc.items()):
+                    if isinstance(value, ObjectId):
+                        doc[key] = str(value)
+                    elif isinstance(value, datetime):
+                        doc[key] = value.isoformat()
+                    elif isinstance(value, dict):
+                        # Handle nested dictionaries
+                        for nested_key, nested_value in list(value.items()):
+                            if isinstance(nested_value, ObjectId):
+                                value[nested_key] = str(nested_value)
+                            elif isinstance(nested_value, datetime):
+                                value[nested_key] = nested_value.isoformat()
+            
             backup_data['collections'][coll_name] = data
             LOGGER.info(f"Backed up {len(data)} documents from {coll_name}")
         except Exception as e:

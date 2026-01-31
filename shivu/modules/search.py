@@ -10,33 +10,33 @@ logger = logging.getLogger(__name__)
 
 # Rarity mapping with small caps
 RARITY_MAP = {
-    1: "âšª á´„á´á´á´á´É´", 
-    2: "ðŸ”µ Ê€á´€Ê€á´‡", 
-    3: "ðŸŸ¡ ÊŸá´‡É¢á´‡É´á´…á´€Ê€Ê", 
-    4: "ðŸ’® êœ±á´˜á´‡á´„Éªá´€ÊŸ",
-    5: "ðŸ‘¹ á´€É´á´„Éªá´‡É´á´›", 
-    6: "ðŸŽ á´„á´‡ÊŸá´‡êœ±á´›Éªá´€ÊŸ", 
-    7: "ðŸ”® á´‡á´˜Éªá´„", 
-    8: "ðŸª á´„á´êœ±á´Éªá´„",
-    9: "âš°ï¸ É´ÉªÉ¢Êœá´›á´á´€Ê€á´‡", 
-    10: "ðŸŒ¬ï¸ êœ°Ê€á´êœ±á´›Ê™á´Ê€É´", 
-    11: "ðŸ’ á´ á´€ÊŸá´‡É´á´›ÉªÉ´á´‡",
-    12: "ðŸŒ¸ êœ±á´˜Ê€ÉªÉ´É¢", 
-    13: "ðŸ–ï¸ á´›Ê€á´á´˜Éªá´„á´€ÊŸ", 
-    14: "ðŸ­ á´‹á´€á´¡á´€ÉªÉª", 
-    15: "ðŸ§¬ ÊœÊÊ™Ê€Éªá´…"
+    1: "⚪ ᴄᴏᴍᴍᴏɴ", 
+    2: "🔵 ʀᴀʀᴇ", 
+    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ", 
+    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
+    5: "👹 ᴀɴᴄɪᴇɴᴛ", 
+    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ", 
+    7: "🔮 ᴇᴘɪᴄ", 
+    8: "🪐 ᴄᴏꜱᴍɪᴄ",
+    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ", 
+    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ", 
+    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
+    12: "🌸 ꜱᴘʀɪɴɢ", 
+    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ", 
+    14: "🍭 ᴋᴀᴡᴀɪɪ", 
+    15: "🧬 ʜʏʙʀɪᴅ"
 }
 
 # Small caps conversion map
 SMALL_CAPS_MAP = {
-    'a': 'á´€', 'b': 'Ê™', 'c': 'á´„', 'd': 'á´…', 'e': 'á´‡', 'f': 'êœ°', 'g': 'É¢', 'h': 'Êœ',
-    'i': 'Éª', 'j': 'á´Š', 'k': 'á´‹', 'l': 'ÊŸ', 'm': 'á´', 'n': 'É´', 'o': 'á´', 'p': 'á´˜',
-    'q': 'Ç«', 'r': 'Ê€', 's': 'êœ±', 't': 'á´›', 'u': 'á´œ', 'v': 'á´ ', 'w': 'á´¡', 'x': 'x',
-    'y': 'Ê', 'z': 'á´¢',
-    'A': 'á´€', 'B': 'Ê™', 'C': 'á´„', 'D': 'á´…', 'E': 'á´‡', 'F': 'êœ°', 'G': 'É¢', 'H': 'Êœ',
-    'I': 'Éª', 'J': 'á´Š', 'K': 'á´‹', 'L': 'ÊŸ', 'M': 'á´', 'N': 'É´', 'O': 'á´', 'P': 'á´˜',
-    'Q': 'Ç«', 'R': 'Ê€', 'S': 'êœ±', 'T': 'á´›', 'U': 'á´œ', 'V': 'á´ ', 'W': 'á´¡', 'X': 'x',
-    'Y': 'Ê', 'Z': 'á´¢'
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ',
+    'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ',
+    'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
+    'y': 'ʏ', 'z': 'ᴢ',
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ',
+    'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ',
+    'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
+    'Y': 'ʏ', 'Z': 'ᴢ'
 }
 
 def to_small_caps(text):
@@ -116,15 +116,15 @@ def format_character_details(character, total_count, top_grabbers):
 
     # Build message with new format
     msg = (
-        f"ðŸ“œ á´„Êœá´€Ê€á´€á´„á´›á´‡Ê€ ÉªÉ´êœ°á´\n"
-        f"ðŸ§© É´á´€á´á´‡   : {name_sc}\n"
-        f"ðŸ§¬ Ê€á´€Ê€Éªá´›Ê : {rarity_display}\n"
-        f"ðŸ“º á´€É´Éªá´á´‡  : {anime_sc}\n"
-        f"ðŸ†” Éªá´…     : {char_id_sc}\n\n"
+        f"📜 ᴄʜᴀʀᴀᴄᴛᴇʀ ɪɴꜰᴏ\n"
+        f"🧩 ɴᴀᴍᴇ   : {name_sc}\n"
+        f"🧬 ʀᴀʀɪᴛʏ : {rarity_display}\n"
+        f"📺 ᴀɴɪᴍᴇ  : {anime_sc}\n"
+        f"🆔 ɪᴅ     : {char_id_sc}\n\n"
     )
 
     # Add global owners
-    msg += f"ðŸŒ É¢ÊŸá´Ê™á´€ÊŸ á´á´¡É´á´‡Ê€s\n"
+    msg += f"🌍 ɢʟᴏʙᴀʟ ᴏᴡɴᴇʀs\n"
     
     if top_grabbers:
         for i, grabber in enumerate(top_grabbers, 1):
@@ -132,7 +132,7 @@ def format_character_details(character, total_count, top_grabbers):
             user_id = grabber['user_id']
             msg += f"{i}. [{to_small_caps(first_name)}](tg://user?id={user_id})\n"
     else:
-        msg += f"âŒ É´á´ á´œsá´‡Ê€s á´á´¡É´ á´›ÊœÉªs á´„Êœá´€Ê€á´€á´„á´›á´‡Ê€ Êá´‡á´›\n"
+        msg += f"❌ ɴᴏ ᴜsᴇʀs ᴏᴡɴ ᴛʜɪs ᴄʜᴀʀᴀᴄᴛᴇʀ ʏᴇᴛ\n"
 
     return msg
 
@@ -144,13 +144,13 @@ def format_sfind_page(characters, page, total_pages, search_query):
     page_chars = characters[start_idx:end_idx]
 
     msg = (
-        f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n"
-        f"ðŸ” {to_small_caps('search results')}\n"
-        f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n"
-        f"ðŸ”Ž {to_small_caps('query')}: **{to_small_caps(search_query)}**\n"
-        f"ðŸ“„ {to_small_caps('page')}: **{page + 1}/{total_pages}**\n"
-        f"ðŸ“Š {to_small_caps('total found')}: **{len(characters)}**\n"
-        f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 {to_small_caps('search results')}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔎 {to_small_caps('query')}: **{to_small_caps(search_query)}**\n"
+        f"📄 {to_small_caps('page')}: **{page + 1}/{total_pages}**\n"
+        f"📊 {to_small_caps('total found')}: **{len(characters)}**\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
     )
 
     for i, char in enumerate(page_chars, start=start_idx + 1):
@@ -172,7 +172,7 @@ def format_sfind_page(characters, page, total_pages, search_query):
             f"   {to_small_caps('rarity')}: {rarity_display}\n\n"
         )
 
-    msg += f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”"
+    msg += f"━━━━━━━━━━━━━━━━━━"
     return msg
 
 
@@ -185,7 +185,7 @@ async def scheck_command(client, message):
         # Validate command format
         if len(message.command) != 2:
             await message.reply_text(
-                f"âŒ **{to_small_caps('invalid format')}!**\n\n"
+                f"❌ **{to_small_caps('invalid format')}!**\n\n"
                 f"**{to_small_caps('usage')}:** `/scheck [{to_small_caps('character id')}]`\n"
                 f"**{to_small_caps('example')}:** `/scheck 12`"
             )
@@ -198,7 +198,7 @@ async def scheck_command(client, message):
 
         if not character:
             await message.reply_text(
-                f"âŒ **{to_small_caps('character not found')}!**\n\n"
+                f"❌ **{to_small_caps('character not found')}!**\n\n"
                 f"{to_small_caps('character with id')} `{character_id}` {to_small_caps('is not available in main database')}."
             )
             return
@@ -235,7 +235,7 @@ async def scheck_command(client, message):
 
     except Exception as e:
         logger.error(f"Error in scheck command: {e}")
-        await message.reply_text(f"âŒ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
+        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
 
 
 @shivuu.on_callback_query(filters.regex(r"^scheck_close:(\d+)$"))
@@ -245,7 +245,7 @@ async def scheck_close_callback(client, callback_query):
 
     # Only allow the user who initiated the command to close
     if callback_query.from_user.id != user_id:
-        await callback_query.answer(f"âŒ {to_small_caps('this is not for you')}!", show_alert=True)
+        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
         return
 
     await callback_query.message.delete()
@@ -261,7 +261,7 @@ async def sfind_command(client, message):
         # Validate command format
         if len(message.command) < 2:
             await message.reply_text(
-                f"âŒ **{to_small_caps('invalid format')}!**\n\n"
+                f"❌ **{to_small_caps('invalid format')}!**\n\n"
                 f"**{to_small_caps('usage')}:** `/sfind [{to_small_caps('character name')}]`\n"
                 f"**{to_small_caps('example')}:** `/sfind {to_small_caps('naruto')}`"
             )
@@ -285,7 +285,7 @@ async def sfind_command(client, message):
 
         if not characters:
             await message.reply_text(
-                f"âŒ **{to_small_caps('no characters found')}!**\n\n"
+                f"❌ **{to_small_caps('no characters found')}!**\n\n"
                 f"{to_small_caps('character with name')} **{to_small_caps(search_query)}** {to_small_caps('is not available in main database')}."
             )
             return
@@ -327,7 +327,7 @@ async def sfind_command(client, message):
 
     except Exception as e:
         logger.error(f"Error in sfind command: {e}")
-        await message.reply_text(f"âŒ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
+        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
 
 
 @shivuu.on_callback_query(filters.regex(r"^sfind_(prev|next|close):(\d+)$"))
@@ -339,7 +339,7 @@ async def sfind_navigation_callback(client, callback_query):
 
     # Only allow the user who initiated the command
     if callback_query.from_user.id != user_id:
-        await callback_query.answer(f"âŒ {to_small_caps('this is not for you')}!", show_alert=True)
+        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
         return
 
     # Handle close
@@ -352,7 +352,7 @@ async def sfind_navigation_callback(client, callback_query):
 
     # Check if session exists
     if user_id not in sfind_sessions:
-        await callback_query.answer(f"âŒ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", show_alert=True)
+        await callback_query.answer(f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", show_alert=True)
         return
 
     session = sfind_sessions[user_id]
@@ -366,13 +366,13 @@ async def sfind_navigation_callback(client, callback_query):
         if current_page > 0:
             session['page'] -= 1
         else:
-            await callback_query.answer(f"âŒ {to_small_caps('this is the first page')}!", show_alert=True)
+            await callback_query.answer(f"❌ {to_small_caps('this is the first page')}!", show_alert=True)
             return
     elif action == "next":
         if current_page < total_pages - 1:
             session['page'] += 1
         else:
-            await callback_query.answer(f"âŒ {to_small_caps('this is the last page')}!", show_alert=True)
+            await callback_query.answer(f"❌ {to_small_caps('this is the last page')}!", show_alert=True)
             return
 
     # Format new page

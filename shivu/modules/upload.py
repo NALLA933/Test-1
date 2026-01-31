@@ -817,8 +817,25 @@ class UploadHandler:
             await processing_msg.edit_text("🔄 **Uploading to Catbox and posting to channel...**")
 
             # Run both operations concurrently using gather with coroutines
+            async def _parallel_upload():
+                tasks = [
+                    asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename)),
+                    asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename)),
+                    asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))
+                ]
+                pending = set(tasks)
+                while pending:
+                    done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                    for task in done:
+                        result = task.result()
+                        if result:
+                            for t in pending:
+                                t.cancel()
+                            return result
+                return None
+            
             catbox_url, message_id = await asyncio.gather(
-                asyncio.create_task((async def(): tasks = [asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename)), asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename)), asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))]; pending = set(tasks); while pending: done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED); for task in done: result = task.result(); if result: [t.cancel() for t in pending]; return result; return None)()),
+                _parallel_upload(),
                 TelegramUploader.upload_to_channel(
                     character, 
                     context, 
@@ -996,8 +1013,25 @@ class UpdateHandler:
                     await processing_msg.edit_text("🔄 **Uploading new image and updating channel...**")
 
                     # Run both operations concurrently
+                    async def _parallel_upload():
+                        tasks = [
+                            asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename)),
+                            asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename)),
+                            asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))
+                        ]
+                        pending = set(tasks)
+                        while pending:
+                            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                            for task in done:
+                                result = task.result()
+                                if result:
+                                    for t in pending:
+                                        t.cancel()
+                                    return result
+                        return None
+                    
                     catbox_url, new_message_id = await asyncio.gather(
-                        asyncio.create_task((async def(): tasks = [asyncio.create_task(CatboxUploader.upload(media_file.file_path, media_file.filename)), asyncio.create_task(TelegraphUploader.upload(media_file.file_path, media_file.filename)), asyncio.create_task(ImgurUploader.upload(media_file.file_path, media_file.filename))]; pending = set(tasks); while pending: done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED); for task in done: result = task.result(); if result: [t.cancel() for t in pending]; return result; return None)()),
+                        _parallel_upload(),
                         TelegramUploader.update_channel_message(
                             char_for_upload, 
                             context, 

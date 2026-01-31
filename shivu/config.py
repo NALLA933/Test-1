@@ -27,7 +27,7 @@ class Config:
 
     # Group and Channel IDs
     GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003727098465"))
-    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003150808065"))
+    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003749495721"))
 
     # Database
     MONGO_URL: str = os.getenv(

@@ -10,33 +10,33 @@ logger = logging.getLogger(__name__)
 
 # Rarity mapping with small caps
 RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ", 
-    2: "🔵 ʀᴀʀᴇ", 
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ", 
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ", 
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ", 
-    7: "🔮 ᴇᴘɪᴄ", 
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ", 
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ", 
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ", 
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ", 
-    14: "🍭 ᴋᴀᴡᴀɪɪ", 
-    15: "🧬 ʜʏʙʀɪᴅ"
+    1: "âšª á´„á´á´á´á´É´", 
+    2: "ðŸ”µ Ê€á´€Ê€á´‡", 
+    3: "ðŸŸ¡ ÊŸá´‡É¢á´‡É´á´…á´€Ê€Ê", 
+    4: "ðŸ’® êœ±á´˜á´‡á´„Éªá´€ÊŸ",
+    5: "ðŸ‘¹ á´€É´á´„Éªá´‡É´á´›", 
+    6: "ðŸŽ á´„á´‡ÊŸá´‡êœ±á´›Éªá´€ÊŸ", 
+    7: "ðŸ”® á´‡á´˜Éªá´„", 
+    8: "ðŸª á´„á´êœ±á´Éªá´„",
+    9: "âš°ï¸ É´ÉªÉ¢Êœá´›á´á´€Ê€á´‡", 
+    10: "ðŸŒ¬ï¸ êœ°Ê€á´êœ±á´›Ê™á´Ê€É´", 
+    11: "ðŸ’ á´ á´€ÊŸá´‡É´á´›ÉªÉ´á´‡",
+    12: "ðŸŒ¸ êœ±á´˜Ê€ÉªÉ´É¢", 
+    13: "ðŸ–ï¸ á´›Ê€á´á´˜Éªá´„á´€ÊŸ", 
+    14: "ðŸ­ á´‹á´€á´¡á´€ÉªÉª", 
+    15: "ðŸ§¬ ÊœÊÊ™Ê€Éªá´…"
 }
 
 # Small caps conversion map
 SMALL_CAPS_MAP = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ',
-    'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ',
-    'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
-    'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ',
-    'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ',
-    'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
-    'Y': 'ʏ', 'Z': 'ᴢ'
+    'a': 'á´€', 'b': 'Ê™', 'c': 'á´„', 'd': 'á´…', 'e': 'á´‡', 'f': 'êœ°', 'g': 'É¢', 'h': 'Êœ',
+    'i': 'Éª', 'j': 'á´Š', 'k': 'á´‹', 'l': 'ÊŸ', 'm': 'á´', 'n': 'É´', 'o': 'á´', 'p': 'á´˜',
+    'q': 'Ç«', 'r': 'Ê€', 's': 'êœ±', 't': 'á´›', 'u': 'á´œ', 'v': 'á´ ', 'w': 'á´¡', 'x': 'x',
+    'y': 'Ê', 'z': 'á´¢',
+    'A': 'á´€', 'B': 'Ê™', 'C': 'á´„', 'D': 'á´…', 'E': 'á´‡', 'F': 'êœ°', 'G': 'É¢', 'H': 'Êœ',
+    'I': 'Éª', 'J': 'á´Š', 'K': 'á´‹', 'L': 'ÊŸ', 'M': 'á´', 'N': 'É´', 'O': 'á´', 'P': 'á´˜',
+    'Q': 'Ç«', 'R': 'Ê€', 'S': 'êœ±', 'T': 'á´›', 'U': 'á´œ', 'V': 'á´ ', 'W': 'á´¡', 'X': 'x',
+    'Y': 'Ê', 'Z': 'á´¢'
 }
 
 def to_small_caps(text):
@@ -69,16 +69,16 @@ async def get_top_grabbers(character_id, limit=10):
     """Get top 10 users who have the most of this character"""
     try:
         top_users = []
-        
+
         # Find all users who have this character
         async for user in user_collection.find({'characters.id': character_id}):
             user_id = user.get('id')
             username = user.get('username', 'Unknown')
             first_name = user.get('first_name', 'User')
-            
+
             # Count how many times this character appears
             char_count = sum(1 for char in user.get('characters', []) if char.get('id') == character_id)
-            
+
             if char_count > 0:
                 top_users.append({
                     'user_id': user_id,
@@ -86,11 +86,11 @@ async def get_top_grabbers(character_id, limit=10):
                     'first_name': first_name,
                     'count': char_count
                 })
-        
+
         # Sort by count and get top 10
         top_users.sort(key=lambda x: x['count'], reverse=True)
         return top_users[:limit]
-        
+
     except Exception as e:
         logger.error(f"Error getting top grabbers: {e}")
         return []
@@ -102,46 +102,38 @@ def format_character_details(character, total_count, top_grabbers):
     anime = character.get('anime', 'Unknown')
     char_id = character.get('id', 'Unknown')
     rarity = character.get('rarity', 'Unknown')
-    
+
     # Get rarity display
     if isinstance(rarity, int) and rarity in RARITY_MAP:
         rarity_display = RARITY_MAP[rarity]
     else:
         rarity_display = to_small_caps(str(rarity))
-    
+
     # Convert to small caps
     name_sc = to_small_caps(name)
     anime_sc = to_small_caps(anime)
     char_id_sc = to_small_caps(char_id)
-    
-    # Build message with new emojis (✨💮🏵️🍃🎐)
+
+    # Build message with new format
     msg = (
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📊 {to_small_caps('character info')}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"✨ {to_small_caps('name')}   : **{name_sc}**\n"
-        f"🎐 {to_small_caps('anime')}  : **{anime_sc}**\n"
-        f"💮 {to_small_caps('id')}     : `{char_id_sc}`\n"
-        f"🏵️ {to_small_caps('rarity')} : {rarity_display}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🍃 {to_small_caps('total grabbed')} : **{total_count}**\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"ðŸ“œ á´„Êœá´€Ê€á´€á´„á´›á´‡Ê€ ÉªÉ´êœ°á´\n"
+        f"ðŸ§© É´á´€á´á´‡   : {name_sc}\n"
+        f"ðŸ§¬ Ê€á´€Ê€Éªá´›Ê : {rarity_display}\n"
+        f"ðŸ“º á´€É´Éªá´á´‡  : {anime_sc}\n"
+        f"ðŸ†” Éªá´…     : {char_id_sc}\n\n"
     )
+
+    # Add global owners
+    msg += f"ðŸŒ É¢ÊŸá´Ê™á´€ÊŸ á´á´¡É´á´‡Ê€s\n"
     
-    # Add top grabbers with numbers instead of medals
     if top_grabbers:
-        msg += f"🏆 {to_small_caps('top 10 grabbers')}:\n\n"
         for i, grabber in enumerate(top_grabbers, 1):
             first_name = grabber['first_name']
             user_id = grabber['user_id']
-            count = grabber['count']
-            # Use first_name with clickable link
-            msg += f"**{i}.** [{to_small_caps(first_name)}](tg://user?id={user_id}) - **{count}x**\n"
+            msg += f"{i}. [{to_small_caps(first_name)}](tg://user?id={user_id})\n"
     else:
-        msg += f"❌ {to_small_caps('no grabbers yet')}\n"
-    
-    msg += f"━━━━━━━━━━━━━━━━━━"
-    
+        msg += f"âŒ É´á´ á´œsá´‡Ê€s á´á´¡É´ á´›ÊœÉªs á´„Êœá´€Ê€á´€á´„á´›á´‡Ê€ Êá´‡á´›\n"
+
     return msg
 
 
@@ -150,37 +142,37 @@ def format_sfind_page(characters, page, total_pages, search_query):
     start_idx = page * 10
     end_idx = min(start_idx + 10, len(characters))
     page_chars = characters[start_idx:end_idx]
-    
+
     msg = (
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 {to_small_caps('search results')}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔎 {to_small_caps('query')}: **{to_small_caps(search_query)}**\n"
-        f"📄 {to_small_caps('page')}: **{page + 1}/{total_pages}**\n"
-        f"📊 {to_small_caps('total found')}: **{len(characters)}**\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n"
+        f"ðŸ” {to_small_caps('search results')}\n"
+        f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n"
+        f"ðŸ”Ž {to_small_caps('query')}: **{to_small_caps(search_query)}**\n"
+        f"ðŸ“„ {to_small_caps('page')}: **{page + 1}/{total_pages}**\n"
+        f"ðŸ“Š {to_small_caps('total found')}: **{len(characters)}**\n"
+        f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
     )
-    
+
     for i, char in enumerate(page_chars, start=start_idx + 1):
         char_id = char.get('id', 'Unknown')
         name = char.get('name', 'Unknown')
         anime = char.get('anime', 'Unknown')
         rarity = char.get('rarity', 'Unknown')
-        
+
         # Get rarity display
         if isinstance(rarity, int) and rarity in RARITY_MAP:
             rarity_display = RARITY_MAP[rarity]
         else:
             rarity_display = to_small_caps(str(rarity))
-        
+
         msg += (
             f"**{i}.** {to_small_caps(name)}\n"
             f"   {to_small_caps('anime')}: {to_small_caps(anime)}\n"
             f"   {to_small_caps('id')}: `{char_id}`\n"
             f"   {to_small_caps('rarity')}: {rarity_display}\n\n"
         )
-    
-    msg += f"━━━━━━━━━━━━━━━━━━"
+
+    msg += f"â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”"
     return msg
 
 
@@ -193,39 +185,39 @@ async def scheck_command(client, message):
         # Validate command format
         if len(message.command) != 2:
             await message.reply_text(
-                f"❌ **{to_small_caps('invalid format')}!**\n\n"
+                f"âŒ **{to_small_caps('invalid format')}!**\n\n"
                 f"**{to_small_caps('usage')}:** `/scheck [{to_small_caps('character id')}]`\n"
                 f"**{to_small_caps('example')}:** `/scheck 12`"
             )
             return
-        
+
         character_id = message.command[1]
-        
+
         # Search for character in database
         character = await collection.find_one({'id': character_id})
-        
+
         if not character:
             await message.reply_text(
-                f"❌ **{to_small_caps('character not found')}!**\n\n"
+                f"âŒ **{to_small_caps('character not found')}!**\n\n"
                 f"{to_small_caps('character with id')} `{character_id}` {to_small_caps('is not available in main database')}."
             )
             return
-        
+
         # Get character stats
         total_count = await get_character_count(character_id)
         top_grabbers = await get_top_grabbers(character_id, limit=10)
-        
+
         # Format message
         details_msg = format_character_details(character, total_count, top_grabbers)
-        
+
         # Get character image
         img_url = character.get('img_url')
-        
+
         # Create keyboard with cancel button (small caps, no emoji)
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(to_small_caps("Close"), callback_data=f"scheck_close:{message.from_user.id}")]
         ])
-        
+
         # Send with image if available
         if img_url:
             await message.reply_photo(
@@ -238,24 +230,24 @@ async def scheck_command(client, message):
                 details_msg,
                 reply_markup=keyboard
             )
-        
+
         logger.info(f"Scheck: User {message.from_user.id} checked character {character_id}")
-        
+
     except Exception as e:
         logger.error(f"Error in scheck command: {e}")
-        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
+        await message.reply_text(f"âŒ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
 
 
 @shivuu.on_callback_query(filters.regex(r"^scheck_close:(\d+)$"))
 async def scheck_close_callback(client, callback_query):
     """Handle scheck close button"""
     user_id = int(callback_query.data.split(":")[1])
-    
+
     # Only allow the user who initiated the command to close
     if callback_query.from_user.id != user_id:
-        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
+        await callback_query.answer(f"âŒ {to_small_caps('this is not for you')}!", show_alert=True)
         return
-    
+
     await callback_query.message.delete()
     await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
 
@@ -269,19 +261,19 @@ async def sfind_command(client, message):
         # Validate command format
         if len(message.command) < 2:
             await message.reply_text(
-                f"❌ **{to_small_caps('invalid format')}!**\n\n"
+                f"âŒ **{to_small_caps('invalid format')}!**\n\n"
                 f"**{to_small_caps('usage')}:** `/sfind [{to_small_caps('character name')}]`\n"
                 f"**{to_small_caps('example')}:** `/sfind {to_small_caps('naruto')}`"
             )
             return
-        
+
         # Get search query (support multiple words)
         search_query = ' '.join(message.command[1:])
-        
+
         # Search in database (case-insensitive search for first_name, last_name, or name)
         characters = []
         search_regex = {'$regex': search_query, '$options': 'i'}
-        
+
         async for char in collection.find({
             '$or': [
                 {'name': search_regex},
@@ -290,14 +282,14 @@ async def sfind_command(client, message):
             ]
         }):
             characters.append(char)
-        
+
         if not characters:
             await message.reply_text(
-                f"❌ **{to_small_caps('no characters found')}!**\n\n"
+                f"âŒ **{to_small_caps('no characters found')}!**\n\n"
                 f"{to_small_caps('character with name')} **{to_small_caps(search_query)}** {to_small_caps('is not available in main database')}."
             )
             return
-        
+
         # Store session
         user_id = message.from_user.id
         sfind_sessions[user_id] = {
@@ -305,13 +297,13 @@ async def sfind_command(client, message):
             'page': 0,
             'search_query': search_query
         }
-        
+
         # Calculate total pages
         total_pages = (len(characters) + 9) // 10  # Ceiling division
-        
+
         # Format first page
         page_msg = format_sfind_page(characters, 0, total_pages, search_query)
-        
+
         # Create keyboard (small caps, no emojis)
         buttons = []
         if total_pages > 1:
@@ -323,19 +315,19 @@ async def sfind_command(client, message):
         buttons.append([
             InlineKeyboardButton(to_small_caps("Close"), callback_data=f"sfind_close:{user_id}")
         ])
-        
+
         keyboard = InlineKeyboardMarkup(buttons)
-        
+
         await message.reply_text(
             page_msg,
             reply_markup=keyboard
         )
-        
+
         logger.info(f"Sfind: User {user_id} searched for '{search_query}' - found {len(characters)} results")
-        
+
     except Exception as e:
         logger.error(f"Error in sfind command: {e}")
-        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
+        await message.reply_text(f"âŒ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
 
 
 @shivuu.on_callback_query(filters.regex(r"^sfind_(prev|next|close):(\d+)$"))
@@ -344,12 +336,12 @@ async def sfind_navigation_callback(client, callback_query):
     data_parts = callback_query.data.split(":")
     action = data_parts[0].split("_")[1]  # prev, next, or close
     user_id = int(data_parts[1])
-    
+
     # Only allow the user who initiated the command
     if callback_query.from_user.id != user_id:
-        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
+        await callback_query.answer(f"âŒ {to_small_caps('this is not for you')}!", show_alert=True)
         return
-    
+
     # Handle close
     if action == "close":
         if user_id in sfind_sessions:
@@ -357,36 +349,36 @@ async def sfind_navigation_callback(client, callback_query):
         await callback_query.message.delete()
         await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
         return
-    
+
     # Check if session exists
     if user_id not in sfind_sessions:
-        await callback_query.answer(f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", show_alert=True)
+        await callback_query.answer(f"âŒ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", show_alert=True)
         return
-    
+
     session = sfind_sessions[user_id]
     characters = session['characters']
     current_page = session['page']
     search_query = session['search_query']
     total_pages = (len(characters) + 9) // 10
-    
+
     # Handle navigation
     if action == "prev":
         if current_page > 0:
             session['page'] -= 1
         else:
-            await callback_query.answer(f"❌ {to_small_caps('this is the first page')}!", show_alert=True)
+            await callback_query.answer(f"âŒ {to_small_caps('this is the first page')}!", show_alert=True)
             return
     elif action == "next":
         if current_page < total_pages - 1:
             session['page'] += 1
         else:
-            await callback_query.answer(f"❌ {to_small_caps('this is the last page')}!", show_alert=True)
+            await callback_query.answer(f"âŒ {to_small_caps('this is the last page')}!", show_alert=True)
             return
-    
+
     # Format new page
     new_page = session['page']
     page_msg = format_sfind_page(characters, new_page, total_pages, search_query)
-    
+
     # Update keyboard (small caps, no emojis)
     buttons = []
     if total_pages > 1:
@@ -398,9 +390,9 @@ async def sfind_navigation_callback(client, callback_query):
     buttons.append([
         InlineKeyboardButton(to_small_caps("Close"), callback_data=f"sfind_close:{user_id}")
     ])
-    
+
     keyboard = InlineKeyboardMarkup(buttons)
-    
+
     # Update message
     await callback_query.message.edit_text(
         page_msg,

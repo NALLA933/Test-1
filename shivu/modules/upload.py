@@ -535,28 +535,32 @@ class TelegramUploader:
         try:
             caption = character.get_caption("Updated" if is_update else "Added")
 
-            # Determine which media to use based on type
-            media_to_use = telegram_file_id
-            
-            # If it's a document with image MIME type, we must use Catbox URL
-            if (character.media_file.media_type == MediaType.DOCUMENT and 
-                character.media_file.mime_type and 
-                character.media_file.mime_type.startswith('image/') and
-                character.media_file.catbox_url):
-                media_to_use = character.media_file.catbox_url
-
-            # Use appropriate method based on media type
-            if character.media_file.media_type == MediaType.PHOTO or (character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/')):
+            # Check if media type is DOCUMENT with image mime type
+            if character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/'):
+                # Upload to Catbox first, then use URL for send_photo
+                if not character.media_file.catbox_url:
+                    catbox_url = await CatboxUploader.upload(character.media_file.file_path, character.media_file.filename)
+                    if not catbox_url:
+                        raise ValueError("Failed to upload image document to Catbox")
+                    character.media_file.catbox_url = catbox_url
+                
                 message = await context.bot.send_photo(
                     chat_id=CHARA_CHANNEL_ID,
-                    photo=media_to_use,
+                    photo=character.media_file.catbox_url,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
+            elif character.media_file.media_type == MediaType.PHOTO:
+                message = await context.bot.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=telegram_file_id,
                     caption=caption,
                     parse_mode='HTML'
                 )
             else:  # DOCUMENT (non-image)
                 message = await context.bot.send_document(
                     chat_id=CHARA_CHANNEL_ID,
-                    document=media_to_use,
+                    document=telegram_file_id,
                     caption=caption,
                     parse_mode='HTML'
                 )

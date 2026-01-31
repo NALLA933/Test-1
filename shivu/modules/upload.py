@@ -587,7 +587,7 @@ class UploadHandler:
             # Clean up
             media_file.cleanup()
 
-            # CHANGE 1: Simple success message only
+            # Simple success message only (as requested)
             await processing_msg.edit_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!')
 
         except Exception as e:

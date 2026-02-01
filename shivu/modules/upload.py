@@ -1,11 +1,10 @@
 import asyncio
 import hashlib
-import html
 import io
-import logging
 import tempfile
+import logging
+import html
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict, Any, List, Tuple
 from functools import wraps
@@ -14,7 +13,6 @@ from contextlib import asynccontextmanager
 import aiohttp
 from aiohttp import ClientSession, TCPConnector
 from pymongo import ReturnDocument, ASCENDING
-from pymongo.errors import DuplicateKeyError
 from telegram import Update, InputFile, Message, PhotoSize, Document, InputMediaPhoto, InputMediaDocument
 from telegram.ext import CommandHandler, ContextTypes
 from telegram.error import TelegramError, NetworkError, TimedOut, BadRequest
@@ -22,14 +20,13 @@ from telegram.error import TelegramError, NetworkError, TimedOut, BadRequest
 from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
 from shivu.config import Config
 
-
-# ===================== LOGGING CONFIGURATION =====================
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# ===================== LOGGING SETUP =====================
 logger = logging.getLogger(__name__)
 
+# ===================== CONSTANTS =====================
+MAX_RARITY = 15
+MIN_RARITY = 1
+MAX_NAME_LENGTH = 100
 
 # ===================== SETUP FUNCTION =====================
 async def setup_database_indexes():
@@ -50,7 +47,6 @@ async def setup_database_indexes():
         logger.info("✅ Database indexes created successfully")
     except Exception as e:
         logger.error(f"⚠️ Failed to create indexes: {e}")
-
 
 # ===================== ENUMS =====================
 
@@ -133,10 +129,10 @@ class BotConfig:
     RETRY_DELAY: float = 1.0
     CONNECTION_LIMIT: int = 100
     CATBOX_API: str = "https://catbox.moe/user/api.php"
-    TELEGRAPH_API: str = "https://telegra.ph/upload"
     ALLOWED_MIME_TYPES: Tuple[str, ...] = (
         'image/jpeg', 'image/png', 'image/webp', 'image/jpg'
     )
+    CATBOX_API_KEY: Optional[str] = None
 
 
 @dataclass
@@ -152,32 +148,20 @@ class MediaFile:
     telegram_file_id: Optional[str] = None
 
     def __post_init__(self):
-        # Note: Hash computation will be done asynchronously via compute_hash_async()
+        if self.file_path and not self.hash:
+            object.__setattr__(self, 'hash', self._compute_hash())
         if self.file_path and not self.size:
             import os
             object.__setattr__(self, 'size', os.path.getsize(self.file_path))
 
-    def _compute_hash_sync(self) -> str:
-        """BLOCKING sync hash computation - DO NOT call directly in async code"""
+    def _compute_hash(self) -> str:
+        """Compute SHA256 hash of file efficiently"""
         sha256_hash = hashlib.sha256()
         if self.file_path:
             with open(self.file_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(65536), b""):
+                for byte_block in iter(lambda: f.read(4096), b""):
                     sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
-
-    async def compute_hash_async(self) -> str:
-        """
-        FIX #2: Non-blocking hash computation using executor
-        Offloads blocking file I/O to thread pool
-        """
-        if self.hash:
-            return self.hash
-        
-        loop = asyncio.get_event_loop()
-        computed_hash = await loop.run_in_executor(None, self._compute_hash_sync)
-        object.__setattr__(self, 'hash', computed_hash)
-        return computed_hash
 
     @property
     def is_valid_image(self) -> bool:
@@ -194,21 +178,13 @@ class MediaFile:
         return self.size <= BotConfig.MAX_FILE_SIZE
 
     def cleanup(self):
-        """
-        FIXED: Clean up temporary file with existence check
-        Prevents "No such file or directory" warnings
-        """
+        """Clean up temporary file"""
         if self.file_path:
             try:
                 import os
-                # FIX: Check if file exists before attempting to delete
-                if os.path.exists(self.file_path):
-                    os.unlink(self.file_path)
-                    logger.debug(f"Cleaned up temp file: {self.file_path}")
-                else:
-                    logger.debug(f"Temp file already removed: {self.file_path}")
+                os.unlink(self.file_path)
             except Exception as e:
-                logger.warning(f"Failed to cleanup file {self.file_path}: {e}")
+                logger.warning(f"Failed to cleanup temp file: {e}")
 
 
 @dataclass
@@ -237,578 +213,676 @@ class Character:
             'uploader_id': self.uploader_id,
             'uploader_name': self.uploader_name,
             'file_hash': self.media_file.hash,
-            'created_at': self.created_at or datetime.utcnow().isoformat(),
-            'updated_at': self.updated_at or datetime.utcnow().isoformat()
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
         }
 
+    def get_caption(self, action: str = "Added") -> str:
+        """Generate caption for channel post"""
+        rarity_obj = RarityLevel.from_number(self.rarity)
+        display_name = rarity_obj.display_name if rarity_obj else f"Level {self.rarity}"
 
-# ===================== SESSION MANAGER =====================
+        return (
+            f"{self.character_id}: {html.escape(self.name)}\n"
+            f"{html.escape(self.anime)}\n"
+            f"{rarity_obj.display_name.split()[0]} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_obj.display_name.split()[1]}\n\n"
+            f"𝑴𝒂𝒅𝒆 𝑩𝒚 ➥ <a href='tg://user?id={self.uploader_id}'>{html.escape(self.uploader_name)}</a>"
+        )
+
+
+@dataclass
+class UploadResult:
+    """Result of upload operation"""
+    success: bool
+    message: str
+    character_id: Optional[str] = None
+    character: Optional[Character] = None
+    error: Optional[Exception] = None
+    retry_count: int = 0
+
+
+# ===================== SESSION MANAGEMENT =====================
 
 class SessionManager:
-    """
-    FIX #3: Added User-Agent header for Telegraph compatibility
-    Manages aiohttp session with proper headers to prevent blocking
-    """
+    """Manages aiohttp sessions"""
     _session: Optional[ClientSession] = None
     _lock = asyncio.Lock()
 
     @classmethod
-    async def get_session(cls) -> ClientSession:
-        """Get or create the shared session with proper headers"""
-        if cls._session is None or cls._session.closed:
+    @asynccontextmanager
+    async def get_session(cls):
+        """Get or create aiohttp session with proper cleanup"""
+        session = None
+        try:
             async with cls._lock:
                 if cls._session is None or cls._session.closed:
-                    connector = TCPConnector(limit=BotConfig.CONNECTION_LIMIT)
-                    
-                    # FIX #3: Add browser-like User-Agent to prevent Telegraph blocking
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    }
-                    
+                    connector = TCPConnector(
+                        limit=BotConfig.CONNECTION_LIMIT,
+                        limit_per_host=30,
+                        ttl_dns_cache=300,
+                        enable_cleanup_closed=True
+                    )
+                    timeout = aiohttp.ClientTimeout(
+                        total=BotConfig.DOWNLOAD_TIMEOUT,
+                        connect=60,
+                        sock_read=60
+                    )
                     cls._session = ClientSession(
                         connector=connector,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=BotConfig.UPLOAD_TIMEOUT)
+                        timeout=timeout,
+                        raise_for_status=False
                     )
-        return cls._session
+                session = cls._session
+            yield session
+        except Exception as e:
+            logger.error(f"Session error: {e}")
+            raise
+        finally:
+            pass  # Session cleanup handled by close() method
 
     @classmethod
     async def close(cls):
         """Close the session"""
-        if cls._session and not cls._session.closed:
-            await cls._session.close()
-            cls._session = None
+        async with cls._lock:
+            if cls._session and not cls._session.closed:
+                await cls._session.close()
+                cls._session = None
 
 
-# ===================== MEDIA HANDLER =====================
+# ===================== RETRY DECORATOR =====================
+
+def retry_on_failure(max_attempts: int = 3, delay: float = 1.0):
+    """Decorator for retrying failed operations"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_attempts):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    logger.warning(f"Attempt {attempt + 1} failed for {func.__name__}: {e}")
+                    if attempt < max_attempts - 1:
+                        wait_time = delay * (attempt + 1)
+                        await asyncio.sleep(wait_time)
+                    continue
+            logger.error(f"All {max_attempts} attempts failed for {func.__name__}: {last_exception}")
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+# ===================== SEQUENCE GENERATOR =====================
+
+class SequenceGenerator:
+    """Generates sequential IDs for characters with atomic operations"""
+
+    @staticmethod
+    async def get_next_id(sequence_name: str = 'character_id') -> str:
+        """Get next sequential ID atomically"""
+        sequence_collection = db.sequences
+        
+        # Atomic increment using find_one_and_update
+        result = await sequence_collection.find_one_and_update(
+            {'_id': sequence_name},
+            {'$inc': {'sequence_value': 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER
+        )
+        
+        return str(result['sequence_value'])
+
+
+# ===================== MEDIA HANDLERS =====================
 
 class MediaHandler:
-    """Handles media file extraction and validation"""
+    """Handles media extraction and validation with efficient memory usage"""
 
     @staticmethod
-    async def extract_from_reply(message: Message) -> Optional[MediaFile]:
-        """
-        FIX #2 & #4: Improved resource management with proper cleanup
-        Extract media file from a message with guaranteed cleanup
-        """
-        media_type = MediaType.from_telegram_message(message)
-        if not media_type:
+    async def extract_from_reply(reply_message) -> Optional[MediaFile]:
+        """Extract media from replied message using streaming"""
+        media_type = MediaType.from_telegram_message(reply_message)
+
+        if media_type == MediaType.VIDEO:
+            raise ValueError("❌ Videos are not allowed! Please send only photos or image documents.")
+        elif media_type == MediaType.ANIMATION:
+            raise ValueError("❌ GIFs/Animations are not allowed! Please send only photos or image documents.")
+
+        if not media_type or media_type not in [MediaType.PHOTO, MediaType.DOCUMENT]:
             return None
 
-        media_file = None
-        temp_file = None
-        
         try:
-            if media_type == MediaType.PHOTO:
-                file_obj = message.photo[-1]
-                filename = f"photo_{file_obj.file_unique_id}.jpg"
-                mime_type = "image/jpeg"
-            elif media_type == MediaType.DOCUMENT:
-                file_obj = message.document
-                filename = file_obj.file_name or f"document_{file_obj.file_unique_id}"
-                mime_type = file_obj.mime_type
-            else:
-                return None
+            # Create temporary file with proper suffix
+            suffix = '.jpg' if media_type == MediaType.PHOTO else '.image'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                file_path = tmp_file.name
 
-            # Download file
-            file_info = await file_obj.get_file()
-            
-            # Create temp file
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")
-            temp_path = temp_file.name
-            temp_file.close()
+            try:
+                if media_type == MediaType.PHOTO:
+                    file = await reply_message.photo[-1].get_file()
+                    filename = f"photo_{reply_message.photo[-1].file_unique_id}.jpg"
+                    mime_type = 'image/jpeg'
+                else:  # DOCUMENT
+                    file = await reply_message.document.get_file()
+                    filename = reply_message.document.file_name or f"document_{reply_message.document.file_unique_id}"
+                    mime_type = reply_message.document.mime_type or ''
 
-            await file_info.download_to_drive(temp_path)
+                    if not mime_type.startswith('image/'):
+                        raise ValueError("❌ Only image files are allowed! The document must be an image file.")
 
-            # Create MediaFile object
-            media_file = MediaFile(
-                file_path=temp_path,
-                media_type=media_type,
-                filename=filename,
-                mime_type=mime_type,
-                telegram_file_id=file_obj.file_id
-            )
+                # Stream download to temporary file
+                await file.download_to_drive(file_path)
 
-            # FIX #2: Compute hash asynchronously (non-blocking)
-            await media_file.compute_hash_async()
+                # Get file size
+                import os
+                size = os.path.getsize(file_path)
 
-            return media_file
+                return MediaFile(
+                    file_path=file_path,
+                    media_type=media_type,
+                    filename=filename,
+                    mime_type=mime_type,
+                    size=size,
+                    telegram_file_id=file.file_id
+                )
+
+            except Exception as e:
+                # Clean up temp file on error
+                import os
+                if os.path.exists(file_path):
+                    os.unlink(file_path)
+                logger.error(f"Error extracting media: {e}")
+                raise
 
         except Exception as e:
-            logger.error(f"Failed to extract media: {e}", exc_info=True)
-            # FIX #4: Cleanup on error
-            if media_file:
-                media_file.cleanup()
-            elif temp_file and hasattr(temp_file, 'name'):
-                try:
-                    import os
-                    os.unlink(temp_file.name)
-                except:
-                    pass
-            return None
+            raise ValueError(f"❌ Failed to process media: {str(e)}")
 
 
-# ===================== MEDIA UPLOADER =====================
-
-class MediaUploader:
-    """Handles media upload to external services (Catbox/Telegraph)"""
+class CatboxUploader:
+    """Handles uploads to Catbox with streaming"""
 
     @staticmethod
+    @retry_on_failure(max_attempts=BotConfig.MAX_RETRIES, delay=BotConfig.RETRY_DELAY)
     async def upload(file_path: str, filename: str) -> Optional[str]:
-        """
-        Upload file to Catbox with Telegraph fallback
-        FIX #3: User-Agent now handled by SessionManager
-        """
-        # Try Catbox first
-        url = await MediaUploader._upload_to_catbox(file_path, filename)
-        if url:
-            return url
+        """Upload file to Catbox using streaming"""
+        async with SessionManager.get_session() as session:
+            data = aiohttp.FormData()
 
-        # Fallback to Telegraph
-        logger.info("Catbox failed, trying Telegraph...")
-        return await MediaUploader._upload_to_telegraph(file_path)
-
-    @staticmethod
-    async def _upload_to_catbox(file_path: str, filename: str) -> Optional[str]:
-        """Upload to Catbox.moe with retries"""
-        session = await SessionManager.get_session()
-
-        for attempt in range(BotConfig.MAX_RETRIES):
-            try:
-                data = aiohttp.FormData()
+            # Open file in binary mode and stream it
+            with open(file_path, 'rb') as f:
                 data.add_field('reqtype', 'fileupload')
-                data.add_field('fileToUpload', open(file_path, 'rb'), filename=filename)
+                data.add_field(
+                    'fileToUpload',
+                    f,
+                    filename=filename,
+                    content_type='application/octet-stream'
+                )
+                
+                # Add API key if available
+                if hasattr(Config, 'CATBOX_API_KEY') and Config.CATBOX_API_KEY:
+                    data.add_field('userhash', Config.CATBOX_API_KEY)
 
                 async with session.post(BotConfig.CATBOX_API, data=data) as response:
                     if response.status == 200:
-                        url = await response.text()
-                        if url and url.startswith('http'):
-                            logger.info(f"✅ Catbox upload successful: {url}")
-                            return url.strip()
-
-                logger.warning(f"Catbox attempt {attempt + 1} failed: status {response.status}")
-
-            except Exception as e:
-                logger.error(f"Catbox attempt {attempt + 1} error: {e}")
-
-            if attempt < BotConfig.MAX_RETRIES - 1:
-                await asyncio.sleep(BotConfig.RETRY_DELAY * (attempt + 1))
-
-        return None
-
-    @staticmethod
-    async def _upload_to_telegraph(file_path: str) -> Optional[str]:
-        """
-        Upload to Telegraph with User-Agent support
-        FIX #3: User-Agent now in SessionManager headers
-        """
-        session = await SessionManager.get_session()
-
-        for attempt in range(BotConfig.MAX_RETRIES):
-            try:
-                data = aiohttp.FormData()
-                data.add_field('file', open(file_path, 'rb'))
-
-                async with session.post(BotConfig.TELEGRAPH_API, data=data) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        if isinstance(result, list) and len(result) > 0:
-                            path = result[0].get('src', '')
-                            if path:
-                                url = f"https://telegra.ph{path}"
-                                logger.info(f"✅ Telegraph upload successful: {url}")
-                                return url
-
-                logger.warning(f"Telegraph attempt {attempt + 1} failed: status {response.status}")
-
-            except Exception as e:
-                logger.error(f"Telegraph attempt {attempt + 1} error: {e}")
-
-            if attempt < BotConfig.MAX_RETRIES - 1:
-                await asyncio.sleep(BotConfig.RETRY_DELAY * (attempt + 1))
-
-        return None
-
-
-# ===================== TELEGRAM UPLOADER =====================
-
-class TelegramUploader:
-    """Handles uploading characters to Telegram channel"""
-
-    @staticmethod
-    def format_caption(character: Character) -> str:
-        """Format character caption for Telegram"""
-        rarity = RarityLevel.from_number(character.rarity)
-        rarity_display = rarity.display_name if rarity else f"Rarity {character.rarity}"
-
-        return (
-            f"<b>Character Name:</b> {character.name}\n"
-            f"<b>Anime Name:</b> {character.anime}\n"
-            f"<b>Rarity:</b> {rarity_display}\n"
-            f"<b>ID:</b> <code>{character.character_id}</code>\n\n"
-            f"<b>Added by:</b> <a href='tg://user?id={character.uploader_id}'>{character.uploader_name}</a>"
-        )
-
-    @staticmethod
-    async def upload_to_channel(character: Character, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
-        """
-        FIXED: Upload character to channel using local file when available
-        This prevents "Wrong type of web page content" error
-        """
-        try:
-            caption = TelegramUploader.format_caption(character)
-            
-            # FIX: Check if local file exists and use it for upload
-            import os
-            if character.media_file.file_path and os.path.exists(character.media_file.file_path):
-                # Upload using local file (100% reliable)
-                logger.info(f"Uploading to channel using local file: {character.media_file.file_path}")
-                with open(character.media_file.file_path, 'rb') as photo_file:
-                    sent_message = await context.bot.send_photo(
-                        chat_id=CHARA_CHANNEL_ID,
-                        photo=photo_file,
-                        caption=caption,
-                        parse_mode='HTML'
-                    )
-            else:
-                # Fallback to URL if local file is missing
-                logger.info(f"Uploading to channel using URL: {character.media_file.catbox_url}")
-                sent_message = await context.bot.send_photo(
-                    chat_id=CHARA_CHANNEL_ID,
-                    photo=character.media_file.catbox_url,
-                    caption=caption,
-                    parse_mode='HTML'
-                )
-
-            return sent_message.message_id
-
-        except Exception as e:
-            logger.error(f"Failed to upload to channel: {e}", exc_info=True)
+                        result = (await response.text()).strip()
+                        if result.startswith('http'):
+                            logger.info(f"Uploaded to Catbox: {result[:50]}...")
+                            return result
+                    else:
+                        logger.error(f"Catbox upload failed with status {response.status}")
             return None
 
-    @staticmethod
-    async def update_channel_message(
-        character: Character,
-        context: ContextTypes.DEFAULT_TYPE,
-        old_message_id: Optional[int]
-    ) -> Optional[int]:
-        """
-        FIXED: Update channel message with proper message_id tracking
-        Uses local file when available to prevent "Wrong type of web page content" error
-        
-        Strategy: Try edit_message_caption first (preserves link), 
-        fallback to delete+send (returns new message_id for DB update)
-        """
+
+# ===================== PROGRESS TRACKER =====================
+
+class ProgressTracker:
+    """Tracks and displays upload/download progress"""
+
+    def __init__(self, message: Message):
+        self.message = message
+        self.last_update = 0
+        self.update_interval = 1.0
+
+    async def update(self, current: int, total: int):
+        """Update progress message with throttling"""
+        import time
+        now = time.time()
+
+        if now - self.last_update < self.update_interval and current < total:
+            return
+
+        self.last_update = now
+        percent = (current / total * 100) if total > 0 else 0
+
+        progress_bar = self._create_progress_bar(percent)
+
+        size_mb = current / (1024 * 1024)
+        total_mb = total / (1024 * 1024) if total > 0 else 0
+
         try:
-            caption = TelegramUploader.format_caption(character)
-
-            # FIX #6: Try to edit caption first (best approach - no broken links)
-            if old_message_id:
-                try:
-                    await context.bot.edit_message_caption(
-                        chat_id=CHARA_CHANNEL_ID,
-                        message_id=old_message_id,
-                        caption=caption,
-                        parse_mode='HTML'
-                    )
-                    logger.info(f"✅ Successfully edited message {old_message_id} caption")
-                    # Return same message_id since we edited in place
-                    return old_message_id
-                
-                except BadRequest as e:
-                    # If caption edit fails (e.g., photo needs changing), fall through to delete+send
-                    logger.warning(f"Caption edit failed, falling back to delete+send: {e}")
-
-            # FIX #1 & #6: Delete old message and send new one
-            if old_message_id:
-                try:
-                    await context.bot.delete_message(
-                        chat_id=CHARA_CHANNEL_ID,
-                        message_id=old_message_id
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to delete old message {old_message_id}: {e}")
-
-            # FIX: Send new message using local file when available
-            import os
-            if character.media_file.file_path and os.path.exists(character.media_file.file_path):
-                # Upload using local file (100% reliable)
-                logger.info(f"Updating channel using local file: {character.media_file.file_path}")
-                with open(character.media_file.file_path, 'rb') as photo_file:
-                    sent_message = await context.bot.send_photo(
-                        chat_id=CHARA_CHANNEL_ID,
-                        photo=photo_file,
-                        caption=caption,
-                        parse_mode='HTML'
-                    )
-            else:
-                # Fallback to URL if local file is missing
-                logger.info(f"Updating channel using URL: {character.media_file.catbox_url}")
-                sent_message = await context.bot.send_photo(
-                    chat_id=CHARA_CHANNEL_ID,
-                    photo=character.media_file.catbox_url,
-                    caption=caption,
-                    parse_mode='HTML'
-                )
-
-            # FIX #1: Return the NEW message_id so caller can update DB
-            new_message_id = sent_message.message_id
-            logger.info(f"✅ Sent new channel message with ID: {new_message_id}")
-            return new_message_id
-
+            await self.message.edit_text(
+                f"🔄 **Processing...**\n"
+                f"📊 {progress_bar} {percent:.1f}%\n"
+                f"📁 {size_mb:.2f} MB / {total_mb:.2f} MB"
+            )
         except Exception as e:
-            logger.error(f"Failed to update channel message: {e}", exc_info=True)
-            return None
+            logger.warning(f"Failed to update progress: {e}")
+
+    @staticmethod
+    def _create_progress_bar(percent: float, length: int = 10) -> str:
+        """Create ASCII progress bar"""
+        filled = int(length * percent / 100)
+        empty = length - filled
+        return "█" * filled + "░" * empty
 
 
 # ===================== CHARACTER FACTORY =====================
 
 class CharacterFactory:
-    """Factory for creating character instances"""
+    """Creates Character objects"""
 
     @staticmethod
-    async def get_next_id() -> str:
-        """Get next available character ID"""
-        last_character = await collection.find_one(
-            sort=[('id', -1)]
-        )
-
-        if last_character and 'id' in last_character:
-            try:
-                last_id = int(last_character['id'])
-                return str(last_id + 1)
-            except (ValueError, TypeError):
-                pass
-
-        # Fallback: count documents
-        count = await collection.count_documents({})
-        return str(count + 1)
+    def format_name(name: str) -> str:
+        """Format character/anime name (Title Case) with HTML escaping"""
+        return html.escape(name.strip().title())
 
     @staticmethod
-    def format_name(text: str) -> str:
-        """Format name with HTML escaping and title case"""
-        return html.escape(text.strip().title())
-
-    @staticmethod
-    async def create_from_upload(
-        name: str,
-        anime: str,
-        rarity: int,
+    async def create_from_input(
+        character_name: str,
+        anime_name: str,
+        rarity_num: int,
         media_file: MediaFile,
-        uploader_id: int,
-        uploader_name: str
-    ) -> Character:
-        """
-        Create a character from upload data
-        FIX #2: Ensures hash is computed asynchronously
-        """
-        character_id = await CharacterFactory.get_next_id()
-        
-        # Ensure hash is computed
-        if not media_file.hash:
-            await media_file.compute_hash_async()
+        user_id: int,
+        user_name: str
+    ) -> Optional[Character]:
+        """Create a Character from input data"""
+        # Validate rarity
+        rarity = RarityLevel.from_number(rarity_num)
+        if not rarity:
+            raise ValueError(f"Invalid rarity number: {rarity_num}. Must be between 1-15.")
+
+        # Generate ID
+        char_id = await SequenceGenerator.get_next_id()
+
+        # Format names
+        formatted_name = CharacterFactory.format_name(character_name)
+        formatted_anime = CharacterFactory.format_name(anime_name)
+
+        # Create timestamp
+        from datetime import datetime
+        timestamp = datetime.utcnow().isoformat()
 
         return Character(
-            character_id=character_id,
-            name=CharacterFactory.format_name(name),
-            anime=CharacterFactory.format_name(anime),
-            rarity=rarity,
+            character_id=char_id,
+            name=formatted_name,
+            anime=formatted_anime,
+            rarity=rarity_num,  # Store as integer
             media_file=media_file,
-            uploader_id=uploader_id,
-            uploader_name=CharacterFactory.format_name(uploader_name),
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat()
+            uploader_id=user_id,
+            uploader_name=user_name,
+            created_at=timestamp,
+            updated_at=timestamp
         )
 
 
-# ===================== UPLOAD HANDLER =====================
+# ===================== DUPLICATE CHECKER =====================
+
+class DuplicateChecker:
+    """Checks for duplicate files in database"""
+    
+    @staticmethod
+    async def check_duplicate(file_hash: str) -> Optional[Dict[str, Any]]:
+        """Check if file already exists in database"""
+        try:
+            existing = await collection.find_one({'file_hash': file_hash})
+            return existing
+        except Exception as e:
+            logger.error(f"Error checking duplicate: {e}")
+            return None
+
+
+# ===================== TELEGRAM UPLOADER =====================
+
+class TelegramUploader:
+    """Handles uploading to Telegram channel"""
+
+    @staticmethod
+    async def upload_to_channel(
+        character: Character,
+        context: ContextTypes.DEFAULT_TYPE,
+        telegram_file_id: str,
+        is_update: bool = False
+    ) -> Optional[int]:
+        """Upload character to channel using file_id for instant posting"""
+        try:
+            caption = character.get_caption("Updated" if is_update else "Added")
+
+            # Check if media type is DOCUMENT with image mime type
+            if character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/'):
+                # Use Catbox URL for image documents
+                if not character.media_file.catbox_url:
+                    raise ValueError("Catbox URL required for image documents")
+                
+                message = await context.bot.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=character.media_file.catbox_url,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
+            elif character.media_file.media_type == MediaType.PHOTO:
+                # Use Telegram file_id for photos
+                message = await context.bot.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=telegram_file_id,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
+            else:  # DOCUMENT (non-image)
+                message = await context.bot.send_document(
+                    chat_id=CHARA_CHANNEL_ID,
+                    document=telegram_file_id,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
+
+            logger.info(f"Uploaded to channel: {character.character_id}")
+            return message.message_id
+
+        except BadRequest as e:
+            error_msg = str(e).lower()
+            if "not found" in error_msg or "message to edit not found" in error_msg:
+                logger.warning(f"Message not found, retrying upload: {e}")
+                return await TelegramUploader.upload_to_channel(character, context, telegram_file_id, is_update)
+            raise
+        except Exception as e:
+            logger.error(f"Failed to upload to channel: {e}")
+            raise ValueError(f"Failed to upload to channel: {str(e)}")
+
+    @staticmethod
+    async def update_channel_message(
+        character: Character,
+        context: ContextTypes.DEFAULT_TYPE,
+        old_message_id: Optional[int] = None
+    ) -> Optional[int]:
+        """Update existing channel message with new media"""
+        try:
+            if not old_message_id:
+                # No existing message, send new one
+                return await TelegramUploader.upload_to_channel(
+                    character, 
+                    context, 
+                    character.media_file.telegram_file_id or character.media_file.catbox_url, 
+                    True
+                )
+
+            caption = character.get_caption("Updated")
+
+            # Try to edit the media (photo or document)
+            try:
+                if character.media_file.media_type == MediaType.PHOTO:
+                    media = InputMediaPhoto(
+                        media=character.media_file.catbox_url or character.media_file.telegram_file_id,
+                        caption=caption,
+                        parse_mode='HTML'
+                    )
+                    await context.bot.edit_message_media(
+                        chat_id=CHARA_CHANNEL_ID,
+                        message_id=old_message_id,
+                        media=media
+                    )
+                else:  # DOCUMENT
+                    media = InputMediaDocument(
+                        media=character.media_file.catbox_url or character.media_file.telegram_file_id,
+                        caption=caption,
+                        parse_mode='HTML'
+                    )
+                    await context.bot.edit_message_media(
+                        chat_id=CHARA_CHANNEL_ID,
+                        message_id=old_message_id,
+                        media=media
+                    )
+                logger.info(f"Updated channel message: {character.character_id}")
+                return old_message_id
+
+            except BadRequest as e:
+                error_msg = str(e).lower()
+                # If edit_message_media fails, send new message
+                if "message not found" in error_msg or "message to edit not found" in error_msg or "message can't be edited" in error_msg:
+                    logger.warning(f"Message not found, sending new: {e}")
+                    return await TelegramUploader.upload_to_channel(
+                        character, 
+                        context, 
+                        character.media_file.catbox_url or character.media_file.telegram_file_id, 
+                        True
+                    )
+                else:
+                    # For other BadRequest errors, try to update caption
+                    try:
+                        await context.bot.edit_message_caption(
+                            chat_id=CHARA_CHANNEL_ID,
+                            message_id=old_message_id,
+                            caption=caption,
+                            parse_mode='HTML'
+                        )
+                        return old_message_id
+                    except Exception as inner_e:
+                        logger.warning(f"Failed to edit caption, sending new: {inner_e}")
+                        return await TelegramUploader.upload_to_channel(
+                            character, 
+                            context, 
+                            character.media_file.catbox_url or character.media_file.telegram_file_id, 
+                            True
+                        )
+
+        except Exception as e:
+            logger.error(f"Failed to update channel message: {e}")
+            return await TelegramUploader.upload_to_channel(
+                character, 
+                context, 
+                character.media_file.catbox_url or character.media_file.telegram_file_id, 
+                True
+            )
+
+
+# ===================== COMMAND HANDLERS =====================
 
 class UploadHandler:
-    """Handle /upload command"""
+    """Handles /upload command"""
+
+    WRONG_FORMAT_TEXT = """❌ ɪɴᴄᴏʀʀᴇᴄᴛ ꜰᴏʀᴍᴀᴛ!
+
+📌 ʜᴏᴡ ᴛᴏ ᴜꜱᴇ /upload:
+
+ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ
+
+ꜱᴇɴᴅ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ /upload
+ɪɴᴄʟᴜᴅᴇ 3 ʟɪɴᴇꜱ ɪɴ ʏᴏᴜʀ ᴍᴇꜱꜱᴀɢᴇ:
+
+ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴀᴍᴇ 
+ᴀɴɪᴍᴇ ɴᴀᴍᴇ 
+ʀᴀʀɪᴛʏ (1-15)
+
+✨ ᴇxᴀᴍᴘʟᴇ:
+/upload 
+ɴᴇᴢᴜᴋᴏ ᴋᴀᴍᴀᴅᴏ 
+ᴅᴇᴍᴏɴ ꜱʟᴀʏᴇʀ 
+4
+
+📊 ʀᴀʀɪᴛʏ ᴍᴀᴘ (1-15):
+
+• 1 ⚪ ᴄᴏᴍᴍᴏɴ 
+• 2 🔵 ʀᴀʀᴇ 
+• 3 🟡 ʟᴇɢᴇɴᴅᴀʀʏ 
+• 4 💮 ꜱᴘᴇᴄɪᴀʟ 
+• 5 👹 ᴀɴᴄɪᴇɴᴛ 
+• 6 🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ 
+• 7 🔮 ᴇᴘɪᴄ 
+• 8 🪐 ᴄᴏꜱᴍɪᴄ 
+• 9 ⚰️ ɴɪɢʜᴛᴍᴀʀᴇ 
+• 10 🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ 
+• 11 💝 ᴠᴀʟᴇɴᴛɪɴᴇ 
+• 12 🌸 ꜱᴘʀɪɴɢ 
+• 13 🏖️ ᴛʀᴏᴘɪᴄᴀʟ 
+• 14 🍭 ᴋᴀᴡᴀɪɪ 
+• 15 🧬 ʜʏʙʀɪᴅ"""
 
     @staticmethod
-    def format_rarity_list() -> str:
-        """Format rarity list for display"""
-        rarities = RarityLevel.get_all()
-        return '\n'.join([f"{num}. {display}" for num, display in rarities.items()])
+    def parse_input(text_content: str) -> Optional[Tuple[str, str, int]]:
+        """Parse the 3-line input format from Code A"""
+        lines = [line.strip() for line in text_content.split('\n') if line.strip()]
 
-    @staticmethod
-    def format_upload_help() -> str:
-        """Format upload command help message"""
-        rarity_list = UploadHandler.format_rarity_list()
-        return (
-            "📝 ᴜᴘʟᴏᴀᴅ ᴄᴏᴍᴍᴀɴᴅ ᴜꜱᴀɢᴇ:\n\n"
-            "Reply to an image with:\n"
-            "`/upload Character_Name : Anime_Name : Rarity_Number`\n\n"
-            "ᴇxᴀᴍᴘʟᴇ:\n"
-            "`/upload Nezuko Kamado : Demon Slayer : 5`\n\n"
-            f"ʀᴀʀɪᴛʏ ʟᴇᴠᴇʟꜱ:\n{rarity_list}"
-        )
+        if lines and lines[0].startswith('/upload'):
+            lines = lines[1:]
+
+        if len(lines) != 3:
+            return None
+
+        char_raw, anime_raw, rarity_raw = lines
+
+        # Validate length
+        if len(char_raw) > MAX_NAME_LENGTH or len(anime_raw) > MAX_NAME_LENGTH:
+            return None
+
+        try:
+            rarity_num = int(rarity_raw.strip())
+            if not (MIN_RARITY <= rarity_num <= MAX_RARITY):
+                return None
+        except ValueError:
+            return None
+
+        return char_raw, anime_raw, rarity_num
 
     @staticmethod
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Handle /upload command with improved error handling and resource management
-        FIX #2, #4, #5: Non-blocking I/O, proper cleanup, atomic duplicate handling
-        """
+        """Handle /upload command with sequential flow"""
         if update.effective_user.id not in Config.SUDO_USERS:
             await update.message.reply_text('🔒 ᴀꜱᴋ ᴍʏ ᴏᴡɴᴇʀ...')
             return
 
         if not update.message.reply_to_message:
-            await update.message.reply_text(UploadHandler.format_upload_help())
-            return
-
-        if not context.args or len(context.args) < 5:
             await update.message.reply_text(
-                '❌ ɪɴᴠᴀʟɪᴅ ꜰᴏʀᴍᴀᴛ!\n\n' + UploadHandler.format_upload_help()
+                "📸 ʀᴇᴘʟʏ ʀᴇǫᴜɪʀᴇᴅ!\n\nʏᴏᴜ ᴍᴜꜱᴛ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴏʀ ɪᴍᴀɢᴇ ᴅᴏᴄᴜᴍᴇɴᴛ ᴡɪᴛʜ ᴛʜᴇ /upload ᴄᴏᴍᴍᴀɴᴅ."
             )
             return
 
-        media_file = None
-        
+        text_content = update.message.text or update.message.caption or ""
+        parsed = UploadHandler.parse_input(text_content)
+
+        if not parsed:
+            await update.message.reply_text(UploadHandler.WRONG_FORMAT_TEXT)
+            return
+
+        character_name, anime_name, rarity_num = parsed
+
+        processing_msg = await update.message.reply_text("🔄 **Starting upload process...**")
+
         try:
-            # Parse arguments
-            full_text = ' '.join(context.args)
-            parts = [p.strip() for p in full_text.split(':')]
-
-            if len(parts) != 3:
-                await update.message.reply_text(
-                    '❌ Please use format: Name : Anime : Rarity\n\n' +
-                    UploadHandler.format_upload_help()
-                )
-                return
-
-            character_name, anime_name, rarity_str = parts
-
-            # Validate rarity
-            try:
-                rarity_num = int(rarity_str.strip())
-                rarity = RarityLevel.from_number(rarity_num)
-                if not rarity:
-                    await update.message.reply_text(
-                        f'❌ Invalid rarity. Please use 1-15.\n\n{UploadHandler.format_rarity_list()}'
-                    )
-                    return
-            except ValueError:
-                await update.message.reply_text(
-                    f'❌ Rarity must be a number.\n\n{UploadHandler.format_rarity_list()}'
-                )
-                return
-
-            # Extract media
-            processing_msg = await update.message.reply_text("🔄 **Processing upload...**")
-            
-            # FIX #4: Extract media with automatic cleanup on error
+            # ===================== STEP 1: Download File =====================
+            await processing_msg.edit_text("🔄 **Downloading file from Telegram...**")
             media_file = await MediaHandler.extract_from_reply(update.message.reply_to_message)
 
             if not media_file or not media_file.is_valid_image:
-                await processing_msg.edit_text("❌ Invalid media! Only photos and image documents allowed.")
-                return
-
-            if not media_file.is_valid_size:
-                await processing_msg.edit_text(
-                    f"❌ File too large! Max size: {BotConfig.MAX_FILE_SIZE / (1024*1024):.1f} MB"
-                )
+                await processing_msg.edit_text("❌ Invalid media! Only photos and image documents are allowed.")
                 if media_file:
                     media_file.cleanup()
                 return
 
-            # FIX #5: Check for duplicate BEFORE upload (but handle race condition)
-            existing = await collection.find_one({'file_hash': media_file.hash})
-            if existing:
+            if not media_file.is_valid_size:
                 await processing_msg.edit_text(
-                    f'❌ This image already exists!\n'
-                    f'Character ID: {existing.get("id")}\n'
-                    f'Name: {existing.get("name")}'
+                    f"❌ File too large! Maximum size: {BotConfig.MAX_FILE_SIZE / (1024 * 1024):.1f} MB"
                 )
                 media_file.cleanup()
                 return
 
-            # Create character
-            character = await CharacterFactory.create_from_upload(
-                name=character_name,
-                anime=anime_name,
-                rarity=rarity_num,
-                media_file=media_file,
-                uploader_id=update.effective_user.id,
-                uploader_name=update.effective_user.first_name
+            # ===================== STEP 2: Check for Duplicate =====================
+            await processing_msg.edit_text("🔄 **Checking for duplicate...**")
+            duplicate = await DuplicateChecker.check_duplicate(media_file.hash)
+            if duplicate:
+                await processing_msg.edit_text(
+                    f"❌ This image already exists in database!\n"
+                    f"Character ID: {duplicate.get('id', 'N/A')}\n"
+                    f"Name: {duplicate.get('name', 'N/A')}"
+                )
+                media_file.cleanup()
+                return
+
+            # ===================== STEP 3: Create Character Object =====================
+            await processing_msg.edit_text("🔄 **Creating character...**")
+            character = await CharacterFactory.create_from_input(
+                character_name,
+                anime_name,
+                rarity_num,
+                media_file,
+                update.effective_user.id,
+                update.effective_user.first_name
             )
 
-            # Upload to cloud storage
-            await processing_msg.edit_text("☁️ **Uploading to cloud...**")
-            catbox_url = await MediaUploader.upload(media_file.file_path, media_file.filename)
-
+            # ===================== STEP 4: Upload to Catbox =====================
+            await processing_msg.edit_text("🔄 **Uploading to Catbox...**")
+            catbox_url = await CatboxUploader.upload(media_file.file_path, media_file.filename)
+            
             if not catbox_url:
-                await processing_msg.edit_text("❌ Failed to upload to cloud storage.")
+                await processing_msg.edit_text("❌ Failed to upload to Catbox. Please try again.")
                 media_file.cleanup()
                 return
+            
+            # Update media file with Catbox URL
+            media_file.catbox_url = catbox_url
+            character.media_file = media_file
 
-            character.media_file.catbox_url = catbox_url
-
-            # Upload to Telegram channel (uses local file - no "Wrong type" error!)
-            await processing_msg.edit_text("📤 **Uploading to channel...**")
-            message_id = await TelegramUploader.upload_to_channel(character, context)
-
+            # ===================== STEP 5: Upload to Telegram =====================
+            await processing_msg.edit_text("🔄 **Posting to Telegram channel...**")
+            message_id = await TelegramUploader.upload_to_channel(
+                character, 
+                context, 
+                media_file.telegram_file_id, 
+                is_update=False
+            )
+            
             if not message_id:
-                await processing_msg.edit_text("❌ Failed to upload to channel.")
+                await processing_msg.edit_text("❌ Failed to post to channel. Please try again.")
                 media_file.cleanup()
                 return
-
+            
             character.message_id = message_id
 
-            # FIX #5: Atomic insert with race condition handling
-            try:
-                await collection.insert_one(character.to_dict())
-                logger.info(f"✅ Character {character.character_id} uploaded successfully")
-                
-                await processing_msg.edit_text(
-                    f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!\n\n'
-                    f'🆔 ID: `{character.character_id}`\n'
-                    f'📛 Name: {character.name}\n'
-                    f'📺 Anime: {character.anime}\n'
-                    f'⭐ Rarity: {rarity.display_name}'
-                )
+            # ===================== STEP 6: Save to Database =====================
+            await processing_msg.edit_text("🔄 **Saving to database...**")
+            await collection.insert_one(character.to_dict())
 
-            except DuplicateKeyError:
-                # FIX #5: Handle race condition - another process inserted the same ID
-                logger.warning(f"Duplicate key error for ID {character.character_id} - race condition detected")
-                await processing_msg.edit_text(
-                    "❌ A duplicate was detected during upload (race condition). Please try again."
-                )
-                # Try to delete the channel message we just created
-                try:
-                    await context.bot.delete_message(
-                        chat_id=CHARA_CHANNEL_ID,
-                        message_id=message_id
-                    )
-                except:
-                    pass
+            # ===================== STEP 7: Cleanup =====================
+            media_file.cleanup()
 
+            # ===================== SUCCESS MESSAGE =====================
+            rarity_obj = RarityLevel.from_number(character.rarity)
+            display_name = rarity_obj.display_name if rarity_obj else f"Level {character.rarity}"
+
+            success_text = (
+                f"✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!\n\n"
+                f"🆔 ID: {character.character_id}\n"
+                f"👤 Name: {character.name}\n"
+                f"🎬 Anime: {character.anime}\n"
+                f"⭐ Rarity: {display_name}\n\n"
+                f"🌐 Catbox URL: {catbox_url[:50]}..."
+            )
+            await processing_msg.edit_text(success_text)
+
+            logger.info(f"Character added successfully: {character.character_id}")
+
+        except ValueError as e:
+            await processing_msg.edit_text(str(e))
+            logger.warning(f"ValueError in upload: {e}")
         except Exception as e:
             logger.error(f"Upload failed: {e}", exc_info=True)
-            await update.message.reply_text(f'❌ Upload failed: {str(e)}')
-        
-        finally:
-            # FIX #4: ALWAYS cleanup temp files
-            if media_file:
-                media_file.cleanup()
+            error_msg = f"❌ ᴜᴘʟᴏᴀᴅ ꜰᴀɪʟᴇᴅ!\n\nᴇʀʀᴏʀ: {str(e)[:200]}"
+            if SUPPORT_CHAT:
+                error_msg += f"\n\nɪꜰ ᴛʜɪꜱ ᴇʀʀᴏʀ ᴘᴇʀꜱɪꜱᴛꜱ, ᴄᴏɴᴛᴀᴄᴛ: {SUPPORT_CHAT}"
+            await processing_msg.edit_text(error_msg)
 
-
-# ===================== DELETE HANDLER =====================
 
 class DeleteHandler:
-    """Handle /delete command"""
-
-    @staticmethod
-    def format_delete_help() -> str:
-        """Format delete command help message"""
-        return (
-            "🗑️ ᴅᴇʟᴇᴛᴇ ᴄᴏᴍᴍᴀɴᴅ ᴜꜱᴀɢᴇ:\n\n"
-            "/delete character_id\n\n"
-            "ᴇxᴀᴍᴘʟᴇ:\n"
-            "/delete 12"
-        )
+    """Handles /delete command"""
 
     @staticmethod
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -817,39 +891,44 @@ class DeleteHandler:
             await update.message.reply_text('🔒 ᴀꜱᴋ ᴍʏ ᴏᴡɴᴇʀ...')
             return
 
-        if not context.args:
-            await update.message.reply_text(DeleteHandler.format_delete_help())
+        if not context.args or len(context.args) != 1:
+            await update.message.reply_text('❌ ɪɴᴄᴏʀʀᴇᴄᴛ ꜰᴏʀᴍᴀᴛ... ᴘʟᴇᴀꜱᴇ ᴜꜱᴇ: /delete ID')
             return
 
-        char_id = context.args[0]
-        character = await collection.find_one({'id': char_id})
+        character_id = context.args[0]
+
+        character = await collection.find_one_and_delete({'id': character_id})
 
         if not character:
-            await update.message.reply_text('❌ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏᴛ ꜰᴏᴜɴᴅ.')
+            await update.message.reply_text('❌ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏᴛ ꜰᴏᴜɴᴅ ɪɴ ᴅᴀᴛᴀʙᴀꜱᴇ.')
             return
 
-        # Delete from channel
-        if 'message_id' in character:
-            try:
+        try:
+            if 'message_id' in character:
                 await context.bot.delete_message(
                     chat_id=CHARA_CHANNEL_ID,
                     message_id=character['message_id']
                 )
-            except Exception as e:
-                logger.warning(f"Failed to delete channel message: {e}")
+                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ ᴀɴᴅ ᴄʜᴀɴɴᴇʟ.')
+            else:
+                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ɴᴏ ᴄʜᴀɴɴᴇʟ ᴍᴇꜱꜱᴀɢᴇ ꜰᴏᴜɴᴅ).')
+        except BadRequest as e:
+            error_msg = str(e).lower()
+            if "message to delete not found" in error_msg:
+                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ᴄʜᴀɴɴᴇʟ ᴍᴇꜱꜱᴀɢᴇ ᴡᴀꜱ ᴀʟʀᴇᴀᴅʏ ɢᴏɴᴇ).')
+            else:
+                await update.message.reply_text(
+                    f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ.\n\n⚠️ ᴄᴏᴜʟᴅ ɴᴏᴛ ᴅᴇʟᴇᴛᴇ ꜰʀᴏᴍ ᴄʜᴀɴɴᴇʟ: {str(e)}'
+                )
+        except Exception as e:
+            await update.message.reply_text(
+                f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ.'
+            )
 
-        # Delete from database
-        await collection.delete_one({'id': char_id})
-
-        await update.message.reply_text(
-            f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ {char_id} ᴅᴇʟᴇᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!'
-        )
-
-
-# ===================== UPDATE HANDLER =====================
 
 class UpdateHandler:
-    """Handle /update command"""
+    """Handles /update command"""
+
     VALID_FIELDS = ['img_url', 'name', 'anime', 'rarity']
 
     @staticmethod
@@ -872,11 +951,7 @@ class UpdateHandler:
 
     @staticmethod
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Handle /update command with multi-word argument support
-        FIX #1: Properly save new message_id after channel update
-        FIX #2, #4: Non-blocking I/O and proper cleanup
-        """
+        """Handle /update command with sequential flow for images"""
         if update.effective_user.id not in Config.SUDO_USERS:
             await update.message.reply_text('🔒 ᴀꜱᴋ ᴍʏ ᴏᴡɴᴇʀ...')
             return
@@ -900,188 +975,191 @@ class UpdateHandler:
             return
 
         update_data = {}
-        media_file = None
 
-        try:
-            if field == 'img_url':
-                if len(context.args) == 2:
-                    if not (update.message.reply_to_message and 
-                           (update.message.reply_to_message.photo or 
-                            update.message.reply_to_message.document)):
-                        await update.message.reply_text(
-                            '📸 ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ʀᴇǫᴜɪʀᴇᴅ!\n\nʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴀɴᴅ ᴜꜱᴇ: /update id img_url'
-                        )
-                        return
+        if field == 'img_url':
+            if len(context.args) == 2:
+                if not (update.message.reply_to_message and 
+                       (update.message.reply_to_message.photo or 
+                        update.message.reply_to_message.document)):
+                    await update.message.reply_text(
+                        '📸 ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ʀᴇǫᴜɪʀᴇᴅ!\n\nʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴀɴᴅ ᴜꜱᴇ: /update id img_url'
+                    )
+                    return
 
-                    processing_msg = await update.message.reply_text("🔄 **Processing new image...**")
+                processing_msg = await update.message.reply_text("🔄 **Starting image update...**")
 
-                    # FIX #4: Extract with automatic cleanup
+                try:
+                    # ===================== STEP 1: Download File =====================
+                    await processing_msg.edit_text("🔄 **Downloading new image...**")
                     media_file = await MediaHandler.extract_from_reply(update.message.reply_to_message)
 
                     if not media_file or not media_file.is_valid_image:
                         await processing_msg.edit_text("❌ Invalid media! Only photos and image documents are allowed.")
+                        if media_file:
+                            media_file.cleanup()
                         return
 
-                    # Create character for parallel upload with HTML-escaped data
+                    # ===================== STEP 2: Check for Duplicate =====================
+                    await processing_msg.edit_text("🔄 **Checking for duplicate...**")
+                    duplicate = await DuplicateChecker.check_duplicate(media_file.hash)
+                    if duplicate and duplicate['id'] != char_id:
+                        await processing_msg.edit_text(
+                            f"❌ This image already exists for another character!\n"
+                            f"Character ID: {duplicate.get('id', 'N/A')}"
+                        )
+                        media_file.cleanup()
+                        return
+
+                    # ===================== STEP 3: Create Character for Update =====================
                     char_for_upload = Character(
                         character_id=character['id'],
-                        name=html.escape(character['name']),
-                        anime=html.escape(character['anime']),
-                        rarity=character['rarity'],  # Already integer
+                        name=character['name'],
+                        anime=character['anime'],
+                        rarity=character['rarity'],
                         media_file=media_file,
                         uploader_id=update.effective_user.id,
-                        uploader_name=html.escape(update.effective_user.first_name)
+                        uploader_name=update.effective_user.first_name
                     )
 
-                    # Step 1: Upload to Catbox/Telegraph first
-                    await processing_msg.edit_text("☁️ **Uploading to cloud...**")
-                    catbox_url = await MediaUploader.upload(media_file.file_path, media_file.filename)
-
+                    # ===================== STEP 4: Upload to Catbox =====================
+                    await processing_msg.edit_text("🔄 **Uploading to Catbox...**")
+                    catbox_url = await CatboxUploader.upload(media_file.file_path, media_file.filename)
+                    
                     if not catbox_url:
-                        await processing_msg.edit_text("❌ Failed to upload to cloud storage.")
+                        await processing_msg.edit_text("❌ Failed to upload to Catbox.")
+                        media_file.cleanup()
                         return
+                    
+                    media_file.catbox_url = catbox_url
+                    char_for_upload.media_file = media_file
 
-                    # Update character with Catbox URL
-                    char_for_upload.media_file.catbox_url = catbox_url
-
-                    # Step 2: Update Telegram channel message (uses local file!)
-                    await processing_msg.edit_text("📤 **Updating channel...**")
+                    # ===================== STEP 5: Update Telegram Channel =====================
+                    await processing_msg.edit_text("🔄 **Updating Telegram channel...**")
                     new_message_id = await TelegramUploader.update_channel_message(
                         char_for_upload, 
                         context, 
                         character.get('message_id')
                     )
 
-                    # FIX #1: Save the new message_id to database
-                    update_data['img_url'] = catbox_url
-                    update_data['file_hash'] = media_file.hash
-                    if new_message_id:
-                        update_data['message_id'] = new_message_id
-
-                    await processing_msg.edit_text('✅ ɪᴍᴀɢᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!')
-
-                else:
-                    # Validate context.args length before accessing
-                    if len(context.args) < 3:
-                        await update.message.reply_text('❌ Missing image URL. Usage: /update id img_url URL')
+                    if not new_message_id:
+                        await processing_msg.edit_text("❌ Failed to update channel.")
+                        media_file.cleanup()
                         return
 
-                    new_value = context.args[2]
-                    update_data['img_url'] = new_value
+                    # ===================== STEP 6: Update Database =====================
+                    update_data['img_url'] = catbox_url
+                    update_data['file_hash'] = media_file.hash
+                    update_data['message_id'] = new_message_id
 
-            elif field in ['name', 'anime']:
-                # Join all remaining arguments for multi-word support
-                if len(context.args) < 3:
-                    await update.message.reply_text(
-                        f'❌ Missing value. Usage: /update id {field} new_value'
-                    )
+                    # ===================== STEP 7: Cleanup =====================
+                    media_file.cleanup()
+                    await processing_msg.edit_text('✅ ɪᴍᴀɢᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!')
+
+                except Exception as e:
+                    logger.error(f"Image update failed: {e}", exc_info=True)
+                    await update.message.reply_text(f'❌ Failed to update image: {str(e)[:200]}')
                     return
 
-                # Join all arguments from index 2 onwards for multi-word support
-                new_value = " ".join(context.args[2:])
-                # Apply HTML escaping and title case formatting
-                update_data[field] = CharacterFactory.format_name(new_value)
-
-            elif field == 'rarity':
-                # Validate context.args length
+            else:
                 if len(context.args) < 3:
-                    await update.message.reply_text(
-                        f'❌ Missing rarity value. Usage: /update id rarity 1-15'
-                    )
+                    await update.message.reply_text('❌ Missing image URL. Usage: /update id img_url URL')
                     return
 
                 new_value = context.args[2]
-                try:
-                    rarity_num = int(new_value)
-                    rarity = RarityLevel.from_number(rarity_num)
-                    if not rarity:
-                        await update.message.reply_text(
-                            f'❌ Invalid rarity. Please use a number between 1 and 15.'
-                        )
-                        return
-                    update_data['rarity'] = rarity_num  # Store as integer
-                except ValueError:
-                    await update.message.reply_text(f'❌ Rarity must be a number (1-15).')
-                    return
+                update_data['img_url'] = new_value
 
-            # Update timestamp
-            update_data['updated_at'] = datetime.utcnow().isoformat()
-
-            # Update in database
-            updated_character = await collection.find_one_and_update(
-                {'id': char_id},
-                {'$set': update_data},
-                return_document=ReturnDocument.AFTER
-            )
-
-            if not updated_character:
-                await update.message.reply_text('❌ Failed to update character in database.')
+        elif field in ['name', 'anime']:
+            if len(context.args) < 3:
+                await update.message.reply_text(
+                    f'❌ Missing value. Usage: /update id {field} new_value'
+                )
                 return
 
-            # Update channel message (if not img_url which was already handled)
-            if field != 'img_url' and 'message_id' in updated_character:
-                try:
-                    # Create character object for channel update with HTML-escaped data
-                    channel_char = Character(
-                        character_id=updated_character['id'],
-                        name=html.escape(updated_character['name']),
-                        anime=html.escape(updated_character['anime']),
-                        rarity=updated_character['rarity'],
-                        media_file=MediaFile(catbox_url=updated_character['img_url']),
-                        uploader_id=update.effective_user.id,
-                        uploader_name=html.escape(update.effective_user.first_name)
+            new_value = context.args[2]
+            update_data[field] = CharacterFactory.format_name(new_value)
+
+        elif field == 'rarity':
+            if len(context.args) < 3:
+                await update.message.reply_text(
+                    f'❌ Missing rarity value. Usage: /update id rarity 1-15'
+                )
+                return
+
+            new_value = context.args[2]
+            try:
+                rarity_num = int(new_value)
+                rarity = RarityLevel.from_number(rarity_num)
+                if not rarity:
+                    await update.message.reply_text(
+                        f'❌ Invalid rarity. Please use a number between 1 and 15.'
                     )
+                    return
+                update_data['rarity'] = rarity_num
+            except ValueError:
+                await update.message.reply_text(f'❌ Rarity must be a number (1-15).')
+                return
 
-                    # FIX #1: Capture and save new message_id if channel update changes it
-                    new_message_id = await TelegramUploader.update_channel_message(
-                        channel_char,
-                        context,
-                        updated_character['message_id']
-                    )
-                    
-                    # FIX #1: If message_id changed (delete+send), update DB
-                    if new_message_id and new_message_id != updated_character['message_id']:
-                        await collection.update_one(
-                            {'id': char_id},
-                            {'$set': {'message_id': new_message_id}}
-                        )
-                        logger.info(f"Updated message_id in DB: {updated_character['message_id']} -> {new_message_id}")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to update channel message: {e}")
-                    pass  # Channel update is optional
+        # Update timestamp
+        from datetime import datetime
+        update_data['updated_at'] = datetime.utcnow().isoformat()
 
-            await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!')
+        # Update in database
+        updated_character = await collection.find_one_and_update(
+            {'id': char_id},
+            {'$set': update_data},
+            return_document=ReturnDocument.AFTER
+        )
 
-        except Exception as e:
-            logger.error(f"Update failed: {e}", exc_info=True)
-            await update.message.reply_text(f'❌ Failed to update: {str(e)}')
-        
-        finally:
-            # FIX #4: ALWAYS cleanup temp files
-            if media_file:
-                media_file.cleanup()
+        if not updated_character:
+            await update.message.reply_text('❌ Failed to update character in database.')
+            return
 
+        # Update channel message for non-image fields
+        if field != 'img_url' and 'message_id' in updated_character:
+            try:
+                # Create character object for channel update
+                channel_char = Character(
+                    character_id=updated_character['id'],
+                    name=updated_character['name'],
+                    anime=updated_character['anime'],
+                    rarity=updated_character['rarity'],
+                    media_file=MediaFile(catbox_url=updated_character['img_url']),
+                    uploader_id=update.effective_user.id,
+                    uploader_name=update.effective_user.first_name
+                )
+
+                await TelegramUploader.update_channel_message(
+                    channel_char,
+                    context,
+                    updated_character['message_id']
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update channel message: {e}")
+                pass
+
+        await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!')
+
+# ===================== STARTUP AND CLEANUP =====================
+
+async def on_startup(application):
+    """Run on bot startup"""
+    logger.info("Starting bot...")
+    await setup_database_indexes()
+    logger.info("Bot started successfully")
+
+async def on_shutdown(application):
+    """Run on bot shutdown"""
+    logger.info("Shutting down bot...")
+    await SessionManager.close()
+    logger.info("Bot shutdown complete")
 
 # ===================== APPLICATION SETUP =====================
-
-async def post_init(application):
-    """Initialize database indexes after application starts"""
-    await setup_database_indexes()
-
 
 # Register command handlers with non-blocking option
 application.add_handler(CommandHandler("upload", UploadHandler.handle, block=False))
 application.add_handler(CommandHandler("delete", DeleteHandler.handle, block=False))
 application.add_handler(CommandHandler("update", UpdateHandler.handle, block=False))
 
-# Set up post_init to run setup_database_indexes
-application.post_init = post_init
-
-
-# ===================== CLEANUP =====================
-
-async def cleanup():
-    """Cleanup on shutdown"""
-    await SessionManager.close()
-    logger.info("Bot shutdown complete")
+# Set up startup and shutdown handlers
+application.post_init = on_startup
+application.post_shutdown = on_shutdown

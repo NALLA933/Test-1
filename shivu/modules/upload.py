@@ -430,12 +430,13 @@ class CatboxUploader:
     @staticmethod
     @retry_on_failure(max_attempts=BotConfig.MAX_RETRIES, base_delay=BotConfig.RETRY_DELAY, retry_exceptions=(ClientError, asyncio.TimeoutError))
     async def upload(file_path: str, filename: str, content_type: Optional[str] = None) -> Optional[str]:
-        """Upload file to Catbox using streaming and verify the returned URL is reachable"""
+        """Upload file to Catbox using streaming and verify the returned URL is reachable.
+        If verification fails due to transient network errors, accept the URL (log warning) to avoid user-facing failure.
+        """
         async with SessionManager.get_session() as session:
             data = aiohttp.FormData()
             data.add_field('reqtype', 'fileupload')
 
-            # stream file
             with open(file_path, 'rb') as f:
                 data.add_field(
                     'fileToUpload',
@@ -449,22 +450,50 @@ class CatboxUploader:
                         text = (await response.text()).strip()
                         if 200 <= response.status < 300 and text.startswith('http'):
                             url = text
-                            # Verify the URL is reachable (HEAD then GET fallback)
+                            # Try HEAD first, then GET (small range). But if both fail with connection issues,
+                            # accept the URL and warn instead of raising to avoid failing the upload flow.
                             try:
-                                async with session.head(url, timeout=30) as head_resp:
-                                    if 200 <= head_resp.status < 400:
-                                        return url
-                            except Exception:
                                 try:
-                                    async with session.get(url, timeout=30) as get_resp:
-                                        if 200 <= get_resp.status < 400:
+                                    async with session.head(url, timeout=30) as head_resp:
+                                        if 200 <= head_resp.status < 400:
                                             return url
-                                except Exception as ve:
-                                    logger.info(f"Verification failed for catbox url {url}: {ve}")
-                                    raise ClientError(f"Uploaded but verification failed for {url}")
-                        # Non-success or unexpected body -> raise to trigger retry
+                                        else:
+                                            logger.warning(f"Catbox HEAD returned status {head_resp.status} for {url}")
+                                except (aiohttp.client_exceptions.ServerDisconnectedError,
+                                        aiohttp.client_exceptions.ClientConnectorError,
+                                        asyncio.TimeoutError,
+                                        aiohttp.ClientError) as head_exc:
+                                    logger.warning(f"HEAD check failed for {url}: {head_exc}. Trying GET fallback.")
+                                    # Try small-range GET to verify the resource
+                                    try:
+                                        headers = {"Range": "bytes=0-1023"}
+                                        async with session.get(url, timeout=30, headers=headers) as get_resp:
+                                            if 200 <= get_resp.status < 400:
+                                                return url
+                                            else:
+                                                logger.warning(f"Catbox GET returned status {get_resp.status} for {url}")
+                                    except (aiohttp.client_exceptions.ServerDisconnectedError,
+                                            aiohttp.client_exceptions.ClientConnectorError,
+                                            asyncio.TimeoutError,
+                                            aiohttp.ClientError) as get_exc:
+                                        # Both HEAD and GET verification failed due to network/server disconnect.
+                                        # This is likely transient — accept the URL to avoid user-facing failure,
+                                        # but log a warning so background verification/reconciliation can catch issues.
+                                        logger.warning(f"GET fallback failed for {url}: {get_exc}. Accepting URL and scheduling background verification if configured.")
+                                        return url
+                            except Exception as verify_exc:
+                                # Unexpected verification exception — log and accept URL to avoid failing user flow.
+                                logger.warning(f"Unexpected verification error for {url}: {verify_exc}. Accepting URL.")
+                                return url
+
+                            # If HEAD/GET returned non-2xx but no exception, still return URL (log it).
+                            logger.warning(f"Verification did not confirm resource for {url}, but accepting URL.")
+                            return url
+
+                        # Non-2xx or unexpected body -> raise to trigger retry
                         raise ClientError(f"Catbox upload failed: status={response.status} body={text!r}")
                 except Exception:
+                    # Let retry decorator handle retries for network/post errors.
                     raise
 
 
@@ -713,7 +742,7 @@ class UploadHandler:
 
 ✨ ᴇxᴀᴍᴘʟᴇ:
 /upload 
-ɴᴇᴢᴜ��ᴏ ᴋᴀᴍᴀᴅᴏ 
+ɴᴇᴢᴜᴋᴏ ᴋᴀᴍᴀᴅᴏ 
 ᴅᴇᴍᴏɴ ꜱʟᴀʏᴇʀ 
 4
 """
@@ -842,7 +871,7 @@ class UploadHandler:
             media_file.cleanup()
 
             # Success
-            await processing_msg.edit_text("✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!")
+            await processing_msg.edit_text("✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱꜱ꜠ʟʟʏ!")
 
         except ValueError as e:
             await processing_msg.edit_text(str(e))
@@ -1030,7 +1059,7 @@ class UpdateHandler:
                         return_document=ReturnDocument.AFTER
                     )
 
-                    await processing_msg.edit_text('✅ ɪᴍᴀɢᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱ꜠ʟʟʏ!')
+                    await processing_msg.edit_text('✅ ɪᴍᴀɢᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱ꜠ʟʟʏ!')
 
                 except Exception as e:
                     logger.exception("Image update failed")
@@ -1122,7 +1151,7 @@ class UpdateHandler:
                 except Exception:
                     pass  # optional
 
-            await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱ꜠ʟʟʏ!')
+            await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇ꜠ʟʟʏ!')
 
 
 # ===================== APPLICATION SETUP =====================

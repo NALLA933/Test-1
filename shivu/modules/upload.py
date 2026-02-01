@@ -6,16 +6,17 @@ import random
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, Tuple
 from functools import wraps
 from contextlib import asynccontextmanager
 
 import aiohttp
 from aiohttp import ClientSession, TCPConnector, ClientError
+import aiohttp.client_exceptions
 from pymongo import ReturnDocument, ASCENDING
-from telegram import Update, InputFile, Message, PhotoSize, Document, InputMediaPhoto, InputMediaDocument
+from telegram import Update, InputFile, Message, InputMediaPhoto, InputMediaDocument
 from telegram.ext import CommandHandler, ContextTypes
-from telegram.error import TelegramError, NetworkError, TimedOut, BadRequest
+from telegram.error import BadRequest
 
 from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
 from shivu.config import Config
@@ -222,7 +223,6 @@ class Character:
         """Generate caption for channel post"""
         rarity_obj = RarityLevel.from_number(self.rarity)
         display_name = rarity_obj.display_name if rarity_obj else f"Level {self.rarity}"
-        # Keep caption simple and safe (escape not included here — telegram parse_mode='HTML' used by caller)
         return (
             f"{self.character_id}: {self.name}\n"
             f"{self.anime}\n"
@@ -307,7 +307,7 @@ def retry_on_failure(max_attempts: int = 3, base_delay: float = 1.0, retry_excep
                     sleep_for = delay + jitter
                     logger.info(f"Retryable error in {func.__name__}: {e}. Retrying in {sleep_for:.1f}s (attempt {attempt}/{max_attempts})")
                     await asyncio.sleep(sleep_for)
-                except Exception as e:
+                except Exception:
                     # Non-retryable, re-raise
                     raise
             raise last_exception
@@ -592,7 +592,10 @@ class CharacterFactory:
 # ===================== TELEGRAM UPLOADER =====================
 
 class TelegramUploader:
-    """Handles uploading to Telegram channel"""
+    """Handles uploading to Telegram channel with robust fallback:
+       1) Try to post using the Catbox URL (fast, no re-upload to Telegram)
+       2) If Telegram rejects the URL (BadRequest 'web page content' etc.), fallback to uploading the local file via InputFile
+    """
 
     @staticmethod
     async def upload_to_channel(
@@ -601,12 +604,16 @@ class TelegramUploader:
         media_source: str,
         is_update: bool = False
     ) -> Optional[int]:
-        """Upload character to channel using media_source which can be a file_id or a public URL"""
-        try:
-            caption = character.get_caption("Updated" if is_update else "Added")
+        """Upload character to channel using media_source which can be a file_id or a public URL.
+        If sending by URL fails with known BadRequest errors, fallback to uploading local file_path.
+        """
+        import os
 
-            # If the media is image (photo/document with image mime), send as photo using URL/file_id
+        caption = character.get_caption("Updated" if is_update else "Added")
+
+        try:
             if character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/'):
+                # image-document -> prefer send_photo
                 message = await context.bot.send_photo(
                     chat_id=CHARA_CHANNEL_ID,
                     photo=media_source,
@@ -614,14 +621,14 @@ class TelegramUploader:
                     parse_mode='HTML'
                 )
             elif character.media_file.media_type == MediaType.PHOTO:
-                # For photos, media_source (URL) is preferred (guaranteed persistent)
                 message = await context.bot.send_photo(
                     chat_id=CHARA_CHANNEL_ID,
                     photo=media_source,
                     caption=caption,
                     parse_mode='HTML'
                 )
-            else:  # fallback to document
+            else:
+                # fallback to document for unknown types
                 message = await context.bot.send_document(
                     chat_id=CHARA_CHANNEL_ID,
                     document=media_source,
@@ -632,94 +639,63 @@ class TelegramUploader:
             return message.message_id
 
         except BadRequest as e:
-            error_msg = str(e).lower()
-            if "not found" in error_msg or "message to edit not found" in error_msg:
-                # retry once
-                return await TelegramUploader.upload_to_channel(character, context, media_source, is_update)
-            raise
-        except Exception as e:
-            raise ValueError(f"Failed to upload to channel: {str(e)}")
+            err_text = str(e).lower()
+            logger.warning(f"Telegram BadRequest when sending media by URL/file_id: {err_text}")
 
-    @staticmethod
-    async def update_channel_message(
-        character: Character,
-        context: ContextTypes.DEFAULT_TYPE,
-        old_message_id: Optional[int] = None
-    ) -> Optional[int]:
-        """Update existing channel message with new media if possible, otherwise send new message"""
-        try:
-            if not old_message_id:
-                # No existing message, send new one
-                return await TelegramUploader.upload_to_channel(
-                    character,
-                    context,
-                    character.media_file.catbox_url or character.media_file.telegram_file_id,
-                    True
-                )
-
-            caption = character.get_caption("Updated")
-
-            try:
-                if character.media_file.media_type == MediaType.PHOTO:
-                    media = InputMediaPhoto(
-                        media=character.media_file.catbox_url or character.media_file.telegram_file_id,
-                        caption=caption,
-                        parse_mode='HTML'
-                    )
-                    await context.bot.edit_message_media(
-                        chat_id=CHARA_CHANNEL_ID,
-                        message_id=old_message_id,
-                        media=media
-                    )
-                else:
-                    media = InputMediaDocument(
-                        media=character.media_file.catbox_url or character.media_file.telegram_file_id,
-                        caption=caption,
-                        parse_mode='HTML'
-                    )
-                    await context.bot.edit_message_media(
-                        chat_id=CHARA_CHANNEL_ID,
-                        message_id=old_message_id,
-                        media=media
-                    )
-                return old_message_id
-
-            except BadRequest as e:
-                error_msg = str(e).lower()
-                # If edit_message_media fails (message too old or can't be edited), send new message
-                if "message not found" in error_msg or "message to edit not found" in error_msg or "message can't be edited" in error_msg:
-                    return await TelegramUploader.upload_to_channel(
-                        character,
-                        context,
-                        character.media_file.catbox_url or character.media_file.telegram_file_id,
-                        True
-                    )
-                else:
-                    # Try to at least update caption
+            # If Telegram complains about "web page content" / wrong type, attempt local upload fallback
+            if ("wrong type of the web page content" in err_text) or ("web page content" in err_text) or ("wrong type" in err_text) or ("url is invalid" in err_text):
+                # Try fallback: upload the local file if available
+                local_path = getattr(character.media_file, "file_path", None)
+                if local_path and os.path.exists(local_path):
                     try:
-                        await context.bot.edit_message_caption(
-                            chat_id=CHARA_CHANNEL_ID,
-                            message_id=old_message_id,
-                            caption=caption,
-                            parse_mode='HTML'
-                        )
-                        return old_message_id
+                        with open(local_path, "rb") as fh:
+                            if character.media_file.media_type in (MediaType.PHOTO,):
+                                # Upload as photo
+                                message = await context.bot.send_photo(
+                                    chat_id=CHARA_CHANNEL_ID,
+                                    photo=InputFile(fh, filename=character.media_file.filename or "photo.jpg"),
+                                    caption=caption,
+                                    parse_mode='HTML'
+                                )
+                            elif character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/'):
+                                message = await context.bot.send_photo(
+                                    chat_id=CHARA_CHANNEL_ID,
+                                    photo=InputFile(fh, filename=character.media_file.filename or "image.jpg"),
+                                    caption=caption,
+                                    parse_mode='HTML'
+                                )
+                            else:
+                                # fallback to document
+                                message = await context.bot.send_document(
+                                    chat_id=CHARA_CHANNEL_ID,
+                                    document=InputFile(fh, filename=character.media_file.filename or "file"),
+                                    caption=caption,
+                                    parse_mode='HTML'
+                                )
+                        return message.message_id
+                    except Exception as fallback_exc:
+                        logger.exception(f"Fallback local upload failed: {fallback_exc}")
+                        raise ValueError(f"Failed to upload to Telegram (fallback local): {fallback_exc}") from fallback_exc
+                else:
+                    logger.warning("Local file not available for fallback upload.")
+                    # Try a simple retry once (this covers transient issues)
+                    try:
+                        return await TelegramUploader.upload_to_channel(character, context, media_source, is_update)
                     except Exception:
-                        return await TelegramUploader.upload_to_channel(
-                            character,
-                            context,
-                            character.media_file.catbox_url or character.media_file.telegram_file_id,
-                            True
-                        )
+                        # re-raise original BadRequest if fallback failed
+                        raise
+
+            # If error is "message to edit not found" or similar, attempt retry once
+            if ("not found" in err_text) or ("message to edit not found" in err_text):
+                return await TelegramUploader.upload_to_channel(character, context, media_source, is_update)
+
+            # For other BadRequest reasons, re-raise to be handled upstream
+            raise
 
         except Exception as e:
-            # For any failure, send a new message
-            return await TelegramUploader.upload_to_channel(
-                character,
-                context,
-                character.media_file.catbox_url or character.media_file.telegram_file_id,
-                True
-            )
+            # Bubble up other exceptions to be handled by caller
+            logger.exception(f"Unexpected error while uploading to Telegram: {e}")
+            raise
 
 
 # ===================== COMMAND HANDLERS =====================
@@ -826,7 +802,7 @@ class UploadHandler:
 
             media_file.catbox_url = catbox_url
 
-            # 3) Telegram Upload (use persistent URL to ensure durability)
+            # 3) Telegram Upload (try URL first, fallback to local file)
             await processing_msg.edit_text("🔄 **Posting to channel...**")
 
             # Create character (ID will be assigned next)
@@ -844,7 +820,6 @@ class UploadHandler:
             except Exception as e:
                 logger.exception("Telegram post failed after Catbox upload")
                 await processing_msg.edit_text(f"❌ Failed to post to channel after Catbox upload: {str(e)}")
-                # Optionally insert a 'pending' record for background retry. For now, inform and abort.
                 return
 
             if not message_id:
@@ -864,7 +839,6 @@ class UploadHandler:
             except Exception as e:
                 logger.exception("DB insert failed")
                 await processing_msg.edit_text(f"❌ Failed to save to database: {str(e)}")
-                # We already posted to channel; consider scheduling reconciliation or manual cleanup.
                 return
 
             # Cleanup temp file
@@ -924,14 +898,14 @@ class DeleteHandler:
         except BadRequest as e:
             error_msg = str(e).lower()
             if "message to delete not found" in error_msg:
-                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ᴄʜᴀɴɴᴇʟ ᴍᴇꜱꜱᴀɢᴇ ᴡᴀꜱ ᴀʟʀᴇᴀᴅʏ ɢᴏne).')
+                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ᴄʜᴀɴɴᴇʟ ᴍᴇꜱꜱᴀɢᴇ ᴡᴀꜱ ᴀʟʀᴇᴀᴅʏ ɢᴏɴᴇ).')
             else:
                 await update.message.reply_text(
                     f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ.\n\n⚠️ ᴄᴏᴜʟᴅ ɴᴏᴛ ᴅᴇʟᴇᴛᴇ ꜰʀᴏᴍ ᴄʜᴀɴɴᴇʟ: {str(e)}'
                 )
-        except Exception as e:
+        except Exception:
             await update.message.reply_text(
-                f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱ꜠ʟʟʏ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ.'
+                f'✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜱᴜᴄᴄᴇꜱ꜠ʟʟʏ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ.'
             )
 
 
@@ -1059,7 +1033,7 @@ class UpdateHandler:
                         return_document=ReturnDocument.AFTER
                     )
 
-                    await processing_msg.edit_text('✅ ɪᴍᴀɢᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱ꜠ʟʟʏ!')
+                    await processing_msg.edit_text('✅ ɪᴍᴀɢᴇ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇ꜠ʟʟʏ!')
 
                 except Exception as e:
                     logger.exception("Image update failed")
@@ -1118,10 +1092,6 @@ class UpdateHandler:
             update_data['updated_at'] = datetime.utcnow().isoformat()
 
             updated_character = await collection.find_one_and_update(
-                {'id': char_id},
-                {'$set': update_data},
-                return_document=ReturnDocument.AFTER
-            ) if False else await collection.find_one_and_update(
                 {'id': char_id},
                 {'$set': update_data},
                 return_document=ReturnDocument.AFTER

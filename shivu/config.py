@@ -77,10 +77,6 @@ class Config:
             print("\n💡 Please set the required environment variables and try again.")
             sys.exit(1)
 
-        # Add OWNER_ID to SUDO_USERS if not already present
-        if cls.OWNER_ID not in cls.SUDO_USERS:
-            cls.SUDO_USERS.append(cls.OWNER_ID)
-
 
 class Production(Config):
     """Production environment configuration."""

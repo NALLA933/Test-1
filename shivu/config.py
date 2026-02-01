@@ -32,7 +32,7 @@ class Config:
     # Database
     MONGO_URL: str = os.getenv(
         "MONGO_URL",
-        "mongodb+srv://ravi:ravi12345@cluster0.hndinhj.mongodb.net/?retryWrites=true&w=majority"
+        "mongodb+srv://chatbot10:j@cluster0.9esnn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
     )
 
     # Media

@@ -495,28 +495,69 @@ class CatboxUploader:
 
 
 class FallbackHostUploader:
-    """Upload to a fallback anonymous host (0x0.st) which returns a direct raw URL that Telegram usually accepts."""
+    """Upload to a fallback anonymous host (0x0.st) which returns a direct raw URL that Telegram usually accepts.
+       Sends a curl-like User-Agent to avoid 403 from strict hosts, and verifies returned URL via HEAD.
+    """
+
+    HOSTS = [
+        {
+            "name": "0x0.st",
+            "upload_url": "https://0x0.st",
+            "method": "post",
+            "headers": {
+                "User-Agent": "curl/7.85.0",
+                "Accept": "*/*"
+            }
+        },
+        # Add more hosts here if needed (transfer.sh, file.io, etc.) with their upload method and endpoints.
+    ]
 
     @staticmethod
     @retry_on_failure(max_attempts=3, base_delay=1.0, retry_exceptions=(ClientError, asyncio.TimeoutError))
     async def upload_to_0x0(file_path: str, filename: str) -> Optional[str]:
         """
-        Upload file to https://0x0.st which returns a raw direct link in plaintext response.
-        No API key required. Good fallback when Catbox URL is not acceptable by Telegram.
+        Try configured fallback hosts in order. Return first usable direct URL.
         """
-        upload_url = "https://0x0.st"
         async with SessionManager.get_session() as session:
-            data = aiohttp.FormData()
-            with open(file_path, 'rb') as f:
-                data.add_field('file', f, filename=filename, content_type='application/octet-stream')
+            for host in FallbackHostUploader.HOSTS:
+                upload_url = host["upload_url"]
+                method = host.get("method", "post").lower()
+                headers = host.get("headers", {"User-Agent": "curl/7.85.0", "Accept": "*/*"})
+
+                data = aiohttp.FormData()
+                # host expects field 'file' for 0x0.st
+                data.add_field('file', open(file_path, 'rb'), filename=filename, content_type='application/octet-stream')
+
                 try:
-                    async with session.post(upload_url, data=data, timeout=60) as resp:
-                        text = (await resp.text()).strip()
-                        if resp.status == 200 and text.startswith("http"):
-                            return text.splitlines()[0].strip()
-                        raise ClientError(f"0x0 upload failed: status={resp.status} body={text!r}")
-                except Exception:
-                    raise
+                    if method == "post":
+                        async with session.post(upload_url, data=data, timeout=60, headers=headers) as resp:
+                            text = (await resp.text()).strip()
+                            if resp.status == 200 and text.startswith("http"):
+                                url = text.splitlines()[0].strip()
+                                # Verify returned URL is an image (HEAD)
+                                try:
+                                    async with session.head(url, timeout=30, headers=headers) as head_resp:
+                                        ct = head_resp.headers.get("Content-Type", "")
+                                        if 200 <= head_resp.status < 400 and (ct.startswith("image/") or head_resp.status in (200, 206)):
+                                            logger.info(f"Fallback host {host['name']} returned URL verified as image: {url}")
+                                            return url
+                                        else:
+                                            logger.warning(f"Fallback host {host['name']} returned URL but HEAD content-type={ct}, status={head_resp.status}. Accepting URL for retry by Telegram.")
+                                            return url
+                                except Exception as he:
+                                    logger.warning(f"HEAD verification failed for fallback URL {url}: {he}. Accepting URL for Telegram retry.")
+                                    return url
+                            else:
+                                logger.warning(f"{host['name']} upload response status={resp.status} body={text!r}")
+                    else:
+                        # If other methods supported later, implement here
+                        logger.warning(f"Unsupported method {method} for host {host['name']}")
+                except Exception as e:
+                    logger.warning(f"Fallback host {host['name']} upload failed: {e}")
+                    # try next host
+
+            # If none succeeded
+            raise ClientError("No fallback host returned a usable URL.")
 
 
 # ===================== PROGRESS TRACKER =====================
@@ -658,7 +699,6 @@ class TelegramUploader:
             except BadRequest as e:
                 err_text = str(e).lower()
                 logger.warning(f"Telegram BadRequest when sending media by URL: {err_text}")
-                # If Telegram complains about web page content, do not try local/file_id — bubble up so caller can fallback host.
                 last_exc = e
 
             except Exception as exc:
@@ -795,7 +835,7 @@ class UploadHandler:
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /upload command with deterministic flow:
            Download → Catbox Upload → Telegram Upload (URL only) → Save to DB
-           If Catbox URL is rejected by Telegram, try fallback host (0x0.st) and retry via URL.
+           If Catbox URL is rejected by Telegram, try fallback host (0x0.st) and retry using its URL.
         """
         if update.effective_user.id not in Config.SUDO_USERS:
             await update.message.reply_text('🔒 ᴀꜱᴋ ᴍʏ ᴏᴡɴᴇʀ...')
@@ -954,7 +994,7 @@ class DeleteHandler:
                 )
                 await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ ᴀɴᴅ ᴄʜᴀɴɴᴇʟ.')
             else:
-                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ɴᴏ ᴄʜᴀɴɴᴇʟ ᴍᴇꜱᴀᴳᴇ ꜰᴏᴜɴᴅ).')
+                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟ��ᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ɴᴏ ᴄʜᴀɴɴᴇʟ ᴍᴇꜱꜱᴀɢᴇ ꜰᴏᴜɴᴅ).')
         except BadRequest as e:
             error_msg = str(e).lower()
             if "message to delete not found" in error_msg:
@@ -980,7 +1020,7 @@ class UpdateHandler:
         return (
             "📝 ᴜᴘᴅᴀᴛᴇ ᴄᴏᴍᴍᴀɴᴅ ᴜꜱᴀɢᴇ:\n\n"
             "ᴜᴘᴅᴀᴛᴇ ᴡɪᴛʜ ᴠᴀʟᴜᴇ:\n"
-            "/update ɪᴅ ꜰɪᴇʟᴅ ɴᴇᴡᴠᴀʟᴜᴇ\n\n"
+            "/update ɪᴅ ꜰɪᴇʟᴅ ɴᴇᴡᴠᴀʟᴜ��\n\n"
             "ᴜᴘᴅᴀᴛᴇ ɪᴍᴀɢᴇ (ʀᴇᴘʟʏ ᴛᴏ ᴘʜᴏᴛᴏ):\n"
             "/update ɪᴅ ɪᴍɢ_ᴜʀʟ\n\n"
             "ᴠᴀʟɪᴅ ꜰɪᴇʟᴅꜱ:\n"

@@ -44,26 +44,22 @@ class MediaType(Enum):
 
 
 class RarityLevel(Enum):
-    COMMON = (1, "🟢 Common")
-    RARE = (2, "🟣 Rare")
-    LEGENDARY = (3, "🟡 Legendary")
-    SPECIAL_EDITION = (4, "💮 Special Edition")
-    NEON = (5, "💫 Neon")
-    MANGA = (6, "✨ Manga")
-    COSPLAY = (7, "🎭 Cosplay")
-    CELESTIAL = (8, "🎐 Celestial")
-    PREMIUM = (9, "🔮 Premium Edition")
-    EROTIC = (10, "💋 Erotic")
-    SUMMER = (11, "🌤 Summer")
-    WINTER = (12, "☃️ Winter")
-    MONSOON = (13, "☔️ Monsoon")
-    VALENTINE = (14, "💝 Valentine")
-    HALLOWEEN = (15, "🎃 Halloween")
-    CHRISTMAS = (16, "🎄 Christmas")
-    MYTHIC = (17, "🏵 Mythic")
-    SPECIAL_EVENTS = (18, "🎗 Special Events")
-    AMV = (19, "🎥 AMV")
-    TINY = (20, "👼 Tiny")
+    COMMON = (1, "⚪ ᴄᴏᴍᴍᴏɴ")
+    RARE = (2, "🔵 ʀᴀʀᴇ")
+    LEGENDARY = (3, "🟡 ʟᴇɢᴇɴᴅᴀʀʏ")
+    SPECIAL = (4, "💮 ꜱᴘᴇᴄɪᴀʟ")
+    ANCIENT = (5, "👹 ᴀɴᴄɪᴇɴᴛ")
+    CELESTIAL = (6, "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ")
+    EPIC = (7, "🔮 ᴇᴘɪᴄ")
+    COSMIC = (8, "🪐 ᴄᴏꜱᴍɪᴄ")
+    NIGHTMARE = (9, "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ")
+    FROSTBORN = (10, "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ")
+    VALENTINE = (11, "💝 ᴠᴀʟᴇɴᴛɪɴᴇ")
+    SPRING = (12, "🌸 ꜱᴘʀɪɴɢ")
+    TROPICAL = (13, "🏖️ ᴛʀᴏᴘɪᴄᴀʟ")
+    KAWAII = (14, "🍭 ᴋᴀᴡᴀɪɪ")
+    HYBRID = (15, "🧬 ʜʏʙʀɪᴅ")
+
 
     def __init__(self, level: int, display: str):
         self._level = level

@@ -194,11 +194,19 @@ class MediaFile:
         return self.size <= BotConfig.MAX_FILE_SIZE
 
     def cleanup(self):
-        """Clean up temporary file"""
+        """
+        FIXED: Clean up temporary file with existence check
+        Prevents "No such file or directory" warnings
+        """
         if self.file_path:
             try:
                 import os
-                os.unlink(self.file_path)
+                # FIX: Check if file exists before attempting to delete
+                if os.path.exists(self.file_path):
+                    os.unlink(self.file_path)
+                    logger.debug(f"Cleaned up temp file: {self.file_path}")
+                else:
+                    logger.debug(f"Temp file already removed: {self.file_path}")
             except Exception as e:
                 logger.warning(f"Failed to cleanup file {self.file_path}: {e}")
 
@@ -444,18 +452,33 @@ class TelegramUploader:
     @staticmethod
     async def upload_to_channel(character: Character, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
         """
-        Upload character to channel
-        FIX #4: Proper error handling with cleanup
+        FIXED: Upload character to channel using local file when available
+        This prevents "Wrong type of web page content" error
         """
         try:
             caption = TelegramUploader.format_caption(character)
-
-            sent_message = await context.bot.send_photo(
-                chat_id=CHARA_CHANNEL_ID,
-                photo=character.media_file.catbox_url,
-                caption=caption,
-                parse_mode='HTML'
-            )
+            
+            # FIX: Check if local file exists and use it for upload
+            import os
+            if character.media_file.file_path and os.path.exists(character.media_file.file_path):
+                # Upload using local file (100% reliable)
+                logger.info(f"Uploading to channel using local file: {character.media_file.file_path}")
+                with open(character.media_file.file_path, 'rb') as photo_file:
+                    sent_message = await context.bot.send_photo(
+                        chat_id=CHARA_CHANNEL_ID,
+                        photo=photo_file,
+                        caption=caption,
+                        parse_mode='HTML'
+                    )
+            else:
+                # Fallback to URL if local file is missing
+                logger.info(f"Uploading to channel using URL: {character.media_file.catbox_url}")
+                sent_message = await context.bot.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=character.media_file.catbox_url,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
 
             return sent_message.message_id
 
@@ -470,7 +493,8 @@ class TelegramUploader:
         old_message_id: Optional[int]
     ) -> Optional[int]:
         """
-        FIX #1 & #6: Update channel message with proper message_id tracking
+        FIXED: Update channel message with proper message_id tracking
+        Uses local file when available to prevent "Wrong type of web page content" error
         
         Strategy: Try edit_message_caption first (preserves link), 
         fallback to delete+send (returns new message_id for DB update)
@@ -505,13 +529,27 @@ class TelegramUploader:
                 except Exception as e:
                     logger.warning(f"Failed to delete old message {old_message_id}: {e}")
 
-            # Send new message
-            sent_message = await context.bot.send_photo(
-                chat_id=CHARA_CHANNEL_ID,
-                photo=character.media_file.catbox_url,
-                caption=caption,
-                parse_mode='HTML'
-            )
+            # FIX: Send new message using local file when available
+            import os
+            if character.media_file.file_path and os.path.exists(character.media_file.file_path):
+                # Upload using local file (100% reliable)
+                logger.info(f"Updating channel using local file: {character.media_file.file_path}")
+                with open(character.media_file.file_path, 'rb') as photo_file:
+                    sent_message = await context.bot.send_photo(
+                        chat_id=CHARA_CHANNEL_ID,
+                        photo=photo_file,
+                        caption=caption,
+                        parse_mode='HTML'
+                    )
+            else:
+                # Fallback to URL if local file is missing
+                logger.info(f"Updating channel using URL: {character.media_file.catbox_url}")
+                sent_message = await context.bot.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=character.media_file.catbox_url,
+                    caption=caption,
+                    parse_mode='HTML'
+                )
 
             # FIX #1: Return the NEW message_id so caller can update DB
             new_message_id = sent_message.message_id
@@ -708,7 +746,7 @@ class UploadHandler:
 
             character.media_file.catbox_url = catbox_url
 
-            # Upload to Telegram channel
+            # Upload to Telegram channel (uses local file - no "Wrong type" error!)
             await processing_msg.edit_text("📤 **Uploading to channel...**")
             message_id = await TelegramUploader.upload_to_channel(character, context)
 
@@ -906,7 +944,7 @@ class UpdateHandler:
                     # Update character with Catbox URL
                     char_for_upload.media_file.catbox_url = catbox_url
 
-                    # Step 2: Update Telegram channel message
+                    # Step 2: Update Telegram channel message (uses local file!)
                     await processing_msg.edit_text("📤 **Updating channel...**")
                     new_message_id = await TelegramUploader.update_channel_message(
                         char_for_upload, 

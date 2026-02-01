@@ -18,7 +18,7 @@ from telegram.error import TelegramError, NetworkError, TimedOut
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT, sudo_users
-from shivu import SUDO_USERS as sudo_users
+from shivu.config import Config
 
 
 class MediaType(Enum):

@@ -13,7 +13,7 @@ from shivu import application, user_collection, collection, db, LOGGER
 
 claim_codes_collection = db.claim_codes
 
-ALLOWED_GROUP_ID = -1003317636069
+ALLOWED_GROUP_ID = -1003100468240
 SUPPORT_GROUP = "https://t.me/THE_DRAGON_SUPPORT"
 SUPPORT_CHANNEL = "https://t.me/Senpai_Updates"
 SUPPORT_GROUP_ID = -1003100468240

@@ -86,7 +86,7 @@ class RarityLevel(Enum):
 
 
 @dataclass(frozen=True)
-class Config:
+class UploaderConfig:
     MAX_FILE_SIZE: int = 50 * 1024 * 1024
     DOWNLOAD_TIMEOUT: int = 300
     UPLOAD_TIMEOUT: int = 300
@@ -162,7 +162,7 @@ class MediaFile:
 
     @property
     def is_valid_size(self) -> bool:
-        return self.size <= Config.MAX_FILE_SIZE
+        return self.size <= UploaderConfig.MAX_FILE_SIZE
 
 
 @dataclass
@@ -236,13 +236,13 @@ class SessionManager:
         async with cls._lock:
             if cls._session is None or cls._session.closed:
                 connector = TCPConnector(
-                    limit=Config.CONNECTION_LIMIT,
+                    limit=UploaderConfig.CONNECTION_LIMIT,
                     limit_per_host=30,
                     ttl_dns_cache=300,
                     enable_cleanup_closed=True
                 )
                 timeout = aiohttp.ClientTimeout(
-                    total=Config.DOWNLOAD_TIMEOUT,
+                    total=UploaderConfig.DOWNLOAD_TIMEOUT,
                     connect=60,
                     sock_read=60
                 )
@@ -320,7 +320,7 @@ class FileDownloader:
         }
 
     @staticmethod
-    @retry_on_failure(max_attempts=Config.MAX_RETRIES, delay=Config.RETRY_DELAY)
+    @retry_on_failure(max_attempts=UploaderConfig.MAX_RETRIES, delay=UploaderConfig.RETRY_DELAY)
     async def download(url: str) -> Optional[bytes]:
         async with SessionManager.get_session() as session:
             async with session.get(
@@ -335,13 +335,13 @@ class FileDownloader:
                 chunks = []
                 total_size = 0
 
-                async for chunk in response.content.iter_chunked(Config.CHUNK_SIZE):
+                async for chunk in response.content.iter_chunked(UploaderConfig.CHUNK_SIZE):
                     if not chunk:
                         break
 
                     total_size += len(chunk)
-                    if total_size > Config.MAX_FILE_SIZE:
-                        raise ValueError(f"File size exceeds {Config.MAX_FILE_SIZE} bytes")
+                    if total_size > UploaderConfig.MAX_FILE_SIZE:
+                        raise ValueError(f"File size exceeds {UploaderConfig.MAX_FILE_SIZE} bytes")
 
                     chunks.append(chunk)
 
@@ -360,13 +360,13 @@ class FileDownloader:
                     return None
 
                 total_size = int(response.headers.get('content-length', 0))
-                if total_size > Config.MAX_FILE_SIZE:
+                if total_size > UploaderConfig.MAX_FILE_SIZE:
                     raise ValueError(f"File size exceeds limit")
 
                 chunks = []
                 downloaded = 0
 
-                async for chunk in response.content.iter_chunked(Config.CHUNK_SIZE):
+                async for chunk in response.content.iter_chunked(UploaderConfig.CHUNK_SIZE):
                     if not chunk:
                         break
 
@@ -381,7 +381,7 @@ class FileDownloader:
 
 class CatboxUploader:
     @staticmethod
-    @retry_on_failure(max_attempts=Config.MAX_RETRIES, delay=Config.RETRY_DELAY)
+    @retry_on_failure(max_attempts=UploaderConfig.MAX_RETRIES, delay=UploaderConfig.RETRY_DELAY)
     async def upload(file_bytes: bytes, filename: str) -> Optional[str]:
         async with SessionManager.get_session() as session:
             data = aiohttp.FormData()
@@ -393,7 +393,7 @@ class CatboxUploader:
                 content_type='application/octet-stream'
             )
 
-            async with session.post(Config.CATBOX_API, data=data) as response:
+            async with session.post(UploaderConfig.CATBOX_API, data=data) as response:
                 if response.status == 200:
                     result = (await response.text()).strip()
                     if result.startswith('http'):
@@ -423,7 +423,7 @@ class TelegramUploader:
     ) -> UploadResult:
         caption = character.get_caption(is_update)
 
-        for attempt in range(Config.MAX_RETRIES):
+        for attempt in range(UploaderConfig.MAX_RETRIES):
             try:
                 if character.media_file.file_bytes:
                     result = await TelegramUploader._upload_with_bytes(
@@ -438,8 +438,8 @@ class TelegramUploader:
                     return result
 
             except (NetworkError, TimedOut) as e:
-                if attempt < Config.MAX_RETRIES - 1:
-                    await asyncio.sleep(Config.RETRY_DELAY * (attempt + 1))
+                if attempt < UploaderConfig.MAX_RETRIES - 1:
+                    await asyncio.sleep(UploaderConfig.RETRY_DELAY * (attempt + 1))
                     continue
                 return UploadResult(
                     success=False,
@@ -471,7 +471,7 @@ class TelegramUploader:
         return UploadResult(
             success=False,
             message="❌ Upload failed after maximum retries",
-            retry_count=Config.MAX_RETRIES
+            retry_count=UploaderConfig.MAX_RETRIES
         )
 
     @staticmethod
@@ -557,8 +557,8 @@ class TelegramUploader:
             'chat_id': CHARA_CHANNEL_ID,
             'caption': caption,
             'parse_mode': 'HTML',
-            'read_timeout': Config.UPLOAD_TIMEOUT,
-            'write_timeout': Config.UPLOAD_TIMEOUT
+            'read_timeout': UploaderConfig.UPLOAD_TIMEOUT,
+            'write_timeout': UploaderConfig.UPLOAD_TIMEOUT
         }
 
         try:
@@ -595,8 +595,8 @@ class TelegramUploader:
             'chat_id': CHARA_CHANNEL_ID,
             'caption': caption,
             'parse_mode': 'HTML',
-            'read_timeout': Config.UPLOAD_TIMEOUT,
-            'write_timeout': Config.UPLOAD_TIMEOUT,
+            'read_timeout': UploaderConfig.UPLOAD_TIMEOUT,
+            'write_timeout': UploaderConfig.UPLOAD_TIMEOUT,
             'connect_timeout': 60,
             'pool_timeout': 60
         }
@@ -739,7 +739,7 @@ class CharacterUploadHandler:
 
         if not media_file.is_valid_size:
             await processing_msg.edit_text(
-                f'❌ File too large! Maximum size: {Config.MAX_FILE_SIZE / (1024 * 1024):.1f} MB'
+                f'❌ File too large! Maximum size: {UploaderConfig.MAX_FILE_SIZE / (1024 * 1024):.1f} MB'
             )
             return
 
@@ -857,7 +857,7 @@ class CharacterUploadHandler:
 
         if not media_file.is_valid_size:
             await processing_msg.edit_text(
-                f'❌ File exceeds {Config.MAX_FILE_SIZE / (1024 * 1024):.1f} MB limit!'
+                f'❌ File exceeds {UploaderConfig.MAX_FILE_SIZE / (1024 * 1024):.1f} MB limit!'
             )
             return
 
@@ -1193,7 +1193,7 @@ def require_sudo(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        # Allow if user is owner or in configured sudo users
+        # Allow if user is owner or in configured sudo users (read from shivu.config.Config)
         if user_id != Config.OWNER_ID and user_id not in Config.SUDO_USERS:
             await update.message.reply_text(
                 '❌ Access Denied\n\n'

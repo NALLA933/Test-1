@@ -398,7 +398,8 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
 async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
 
-    if user_id != OWNER_ID and user_id not in SUDO_USERS:
+    sudo_check = SUDO_USERS if isinstance(SUDO_USERS, (list, set, tuple)) else []
+    if user_id != OWNER_ID and user_id not in sudo_check:
         await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
 
@@ -446,7 +447,8 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
 
-    if user_id != OWNER_ID and user_id not in SUDO_USERS:
+    sudo_check = SUDO_USERS if isinstance(SUDO_USERS, (list, set, tuple)) else []
+    if user_id != OWNER_ID and user_id not in sudo_check:
         await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
 

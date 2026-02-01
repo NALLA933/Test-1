@@ -1,9 +1,9 @@
 import io
 import asyncio
 import hashlib
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Tuple, Dict, List, Union, Any
+from typing import Optional, Dict, List, Any
 from pathlib import Path
 from functools import wraps, lru_cache
 from contextlib import asynccontextmanager
@@ -15,7 +15,6 @@ from pymongo import ReturnDocument
 from telegram import Update, InputFile, Message
 from telegram.ext import CommandHandler, ContextTypes
 from telegram.error import TelegramError, NetworkError, TimedOut
-from motor.motor_asyncio import AsyncIOMotorCollection
 
 from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
 from shivu.config import Config
@@ -58,7 +57,6 @@ class RarityLevel(Enum):
     TROPICAL = (13, "🏖️ ᴛʀᴏᴘɪᴄᴀʟ")
     KAWAII = (14, "🍭 ᴋᴀᴡᴀɪɪ")
     HYBRID = (15, "🧬 ʜʏʙʀɪᴅ")
-
 
     def __init__(self, level: int, display: str):
         self._level = level
@@ -618,12 +616,31 @@ class TelegramUploader:
                     photo=url,
                     **send_kwargs
                 )
-        except TelegramError:
-            return await context.bot.send_document(
-                document=url,
-                **send_kwargs
-            )
+        except TelegramError as e:
+            # If Telegram can't fetch media from the URL (e.g. WEBPAGE_MEDIA_EMPTY),
+            # fallback to downloading the file locally and sending as bytes.
+            err_text = str(e)
+            if 'WEBPAGE_MEDIA_EMPTY' in err_text or 'MEDIA_EMPTY' in err_text or 'wrong file' in err_text.lower():
+                try:
+                    file_bytes = await FileDownloader.download(url)
+                    if file_bytes:
+                        fp = io.BytesIO(file_bytes)
+                        name = Path(url).name or "file"
+                        fp.name = name
+                        return await TelegramUploader._send_media_bytes(fp, media_type, caption, context)
+                except Exception as de:
+                    # Log fallback download/send failure and continue to final fallback
+                    print(f"Fallback download/send failed for {url}: {type(de).__name__}: {de}")
 
+            # Final fallback: try send_document by URL
+            try:
+                return await context.bot.send_document(
+                    document=url,
+                    **send_kwargs
+                )
+            except Exception:
+                # Re-raise original error to be handled by caller
+                raise
 
 class TextFormatter:
     @staticmethod
@@ -1094,7 +1111,6 @@ class CharacterUpdateHandler:
         if not character_data:
             return
 
-        is_video_file = character_data.get('is_video', False)
         media_type = character_data.get('media_type', 'image')
 
         media_type_display = {

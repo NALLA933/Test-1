@@ -476,9 +476,6 @@ class CatboxUploader:
                                             aiohttp.client_exceptions.ClientConnectorError,
                                             asyncio.TimeoutError,
                                             aiohttp.ClientError) as get_exc:
-                                        # Both HEAD and GET verification failed due to network/server disconnect.
-                                        # This is likely transient — accept the URL to avoid user-facing failure,
-                                        # but log a warning so background verification/reconciliation can catch issues.
                                         logger.warning(f"GET fallback failed for {url}: {get_exc}. Accepting URL and scheduling background verification if configured.")
                                         return url
                             except Exception as verify_exc:
@@ -494,6 +491,31 @@ class CatboxUploader:
                         raise ClientError(f"Catbox upload failed: status={response.status} body={text!r}")
                 except Exception:
                     # Let retry decorator handle retries for network/post errors.
+                    raise
+
+
+class FallbackHostUploader:
+    """Upload to a fallback anonymous host (0x0.st) which returns a direct raw URL that Telegram usually accepts."""
+
+    @staticmethod
+    @retry_on_failure(max_attempts=3, base_delay=1.0, retry_exceptions=(ClientError, asyncio.TimeoutError))
+    async def upload_to_0x0(file_path: str, filename: str) -> Optional[str]:
+        """
+        Upload file to https://0x0.st which returns a raw direct link in plaintext response.
+        No API key required. Good fallback when Catbox URL is not acceptable by Telegram.
+        """
+        upload_url = "https://0x0.st"
+        async with SessionManager.get_session() as session:
+            data = aiohttp.FormData()
+            with open(file_path, 'rb') as f:
+                data.add_field('file', f, filename=filename, content_type='application/octet-stream')
+                try:
+                    async with session.post(upload_url, data=data, timeout=60) as resp:
+                        text = (await resp.text()).strip()
+                        if resp.status == 200 and text.startswith("http"):
+                            return text.splitlines()[0].strip()
+                        raise ClientError(f"0x0 upload failed: status={resp.status} body={text!r}")
+                except Exception:
                     raise
 
 
@@ -592,12 +614,9 @@ class CharacterFactory:
 # ===================== TELEGRAM UPLOADER =====================
 
 class TelegramUploader:
-    """Handles uploading to Telegram channel using only the Catbox URL (ignore telegram file_id).
-       Strategy:
-         - Try to send as photo (preferred for images)
-         - If Telegram rejects with 'web page content' or similar, try sending as document using the same URL
-         - Retry a few times with exponential backoff for transient errors
-       Note: This class intentionally does NOT fallback to uploading local file or using telegram file_id.
+    """Handles uploading to Telegram channel using URL only (ignoring telegram file_id).
+       If the Catbox URL is rejected by Telegram, UploadHandler will attempt an alternate host (0x0.st)
+       and retry sending via URL.
     """
 
     MAX_ATTEMPTS = 3
@@ -616,7 +635,6 @@ class TelegramUploader:
 
         for attempt in range(1, TelegramUploader.MAX_ATTEMPTS + 1):
             try:
-                # Prefer sending as photo for image types
                 if character.media_file.media_type in (MediaType.PHOTO,) or (
                     character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/')
                 ):
@@ -628,7 +646,6 @@ class TelegramUploader:
                         parse_mode='HTML'
                     )
                 else:
-                    # Non-image -> send as document using URL
                     logger.info(f"Attempt {attempt}: sending document via URL {media_source}")
                     message = await context.bot.send_document(
                         chat_id=CHARA_CHANNEL_ID,
@@ -636,54 +653,15 @@ class TelegramUploader:
                         caption=caption,
                         parse_mode='HTML'
                     )
-
                 return message.message_id
 
             except BadRequest as e:
                 err_text = str(e).lower()
                 logger.warning(f"Telegram BadRequest when sending media by URL: {err_text}")
-
-                # If Telegram complains about page content/type, try the other method (photo <-> document)
-                if ("wrong type of the web page content" in err_text) or ("web page content" in err_text) or ("wrong type" in err_text):
-                    try:
-                        # Try alternative method once immediately
-                        if character.media_file.media_type in (MediaType.PHOTO,) or (
-                            character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/')
-                        ):
-                            # previously tried send_photo -> try send_document
-                            logger.info("BadRequest photo-> trying send_document with URL")
-                            message = await context.bot.send_document(
-                                chat_id=CHARA_CHANNEL_ID,
-                                document=media_source,
-                                caption=caption,
-                                parse_mode='HTML'
-                            )
-                        else:
-                            # previously tried send_document -> try send_photo
-                            logger.info("BadRequest document-> trying send_photo with URL")
-                            message = await context.bot.send_photo(
-                                chat_id=CHARA_CHANNEL_ID,
-                                photo=media_source,
-                                caption=caption,
-                                parse_mode='HTML'
-                            )
-                        return message.message_id
-                    except BadRequest as alt_e:
-                        logger.warning(f"Alternative send via URL also failed: {alt_e}")
-                        last_exc = alt_e
-                    except Exception as alt_other:
-                        logger.exception(f"Unexpected error during alternative send: {alt_other}")
-                        last_exc = alt_other
-                else:
-                    # For 'not found' or similar, allow retry after backoff
-                    if "not found" in err_text or "message to edit not found" in err_text:
-                        last_exc = e
-                    else:
-                        # other BadRequest -> do not retry many times; save and break loop to raise
-                        last_exc = e
+                # If Telegram complains about web page content, do not try local/file_id — bubble up so caller can fallback host.
+                last_exc = e
 
             except Exception as exc:
-                # Network or other transient errors: log and retry with backoff
                 logger.exception(f"Unexpected error when sending media by URL: {exc}")
                 last_exc = exc
 
@@ -710,20 +688,17 @@ class TelegramUploader:
         """Update existing channel message with new media using only the Catbox URL.
            If edit fails (too old/not found/can't edit), send a new message (also by URL).
         """
-        # Only use the persistent URL; ignore telegram file ids.
         media_source = character.media_file.catbox_url
         if not media_source:
             raise ValueError("No catbox URL available for updating the channel message.")
 
         try:
             if not old_message_id:
-                # No existing message, send new one
                 return await TelegramUploader.upload_to_channel(character, context, media_source, True)
 
             caption = character.get_caption("Updated")
 
             try:
-                # Try to edit as photo/document depending on media_type
                 if character.media_file.media_type in (MediaType.PHOTO,) or (
                     character.media_file.media_type == MediaType.DOCUMENT and character.media_file.mime_type and character.media_file.mime_type.startswith('image/')
                 ):
@@ -753,7 +728,6 @@ class TelegramUploader:
                 if "message not found" in err_text or "message to edit not found" in err_text or "message can't be edited" in err_text:
                     return await TelegramUploader.upload_to_channel(character, context, media_source, True)
                 else:
-                    # Try to update caption only
                     try:
                         await context.bot.edit_message_caption(
                             chat_id=CHARA_CHANNEL_ID,
@@ -763,7 +737,6 @@ class TelegramUploader:
                         )
                         return old_message_id
                     except Exception:
-                        # If caption update fails too, send new
                         return await TelegramUploader.upload_to_channel(character, context, media_source, True)
 
         except Exception as e:
@@ -822,6 +795,7 @@ class UploadHandler:
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /upload command with deterministic flow:
            Download → Catbox Upload → Telegram Upload (URL only) → Save to DB
+           If Catbox URL is rejected by Telegram, try fallback host (0x0.st) and retry via URL.
         """
         if update.effective_user.id not in Config.SUDO_USERS:
             await update.message.reply_text('🔒 ᴀꜱᴋ ᴍʏ ᴏᴡɴᴇʀ...')
@@ -875,7 +849,8 @@ class UploadHandler:
 
             media_file.catbox_url = catbox_url
 
-            # 3) Telegram Upload (URL only - ignore telegram file_id)
+            # 3) Telegram Upload (URL only - ignore telegram file_id). If Catbox URL is rejected,
+            # try fallback host (0x0.st) and retry using its URL.
             await processing_msg.edit_text("🔄 **Posting to channel using URL only...**")
 
             # Create character (ID will be assigned next)
@@ -890,10 +865,23 @@ class UploadHandler:
 
             try:
                 message_id = await TelegramUploader.upload_to_channel(character, context, media_source=media_file.catbox_url, is_update=False)
-            except Exception as e:
-                logger.exception("Telegram post failed after Catbox upload (URL only)")
-                await processing_msg.edit_text(f"❌ Failed to post to channel using URL: {str(e)}")
-                return
+            except Exception as first_exc:
+                # If Telegram rejected Catbox URL (BadRequest 'web page content' etc.), try fallback host
+                logger.warning(f"Initial Telegram URL upload failed: {first_exc}. Trying fallback host (0x0.st).")
+                try:
+                    fallback_url = await FallbackHostUploader.upload_to_0x0(media_file.file_path, media_file.filename)
+                    if fallback_url:
+                        logger.info(f"Fallback host returned URL: {fallback_url}. Retrying Telegram upload via fallback URL.")
+                        # Update character.media_file.catbox_url to fallback URL temporarily so DB stores usable URL
+                        media_file.catbox_url = fallback_url
+                        character.media_file.catbox_url = fallback_url
+                        message_id = await TelegramUploader.upload_to_channel(character, context, media_source=fallback_url, is_update=False)
+                    else:
+                        raise ValueError("Fallback upload did not return a URL")
+                except Exception as fallback_exc:
+                    logger.exception(f"Fallback host upload or Telegram retry failed: {fallback_exc}")
+                    await processing_msg.edit_text(f"❌ Failed to post to channel using URL (both Catbox and fallback).")
+                    return
 
             if not message_id:
                 await processing_msg.edit_text("❌ Failed to post to channel. Please try again.")
@@ -901,8 +889,7 @@ class UploadHandler:
 
             # 4) Save to DB (idempotent)
             character.message_id = message_id
-            character.media_file.catbox_url = catbox_url
-
+            # media_file.catbox_url already set to the final URL (catbox or fallback)
             try:
                 await collection.update_one(
                     {'file_hash': media_file.hash},
@@ -918,7 +905,7 @@ class UploadHandler:
             media_file.cleanup()
 
             # Success
-            await processing_msg.edit_text("✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇꜱ꜠ʟʟʏ!")
+            await processing_msg.edit_text("✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴅᴅᴇᴅ ꜱᴜᴄᴄᴇ꜠ʟʟʏ!")
 
         except ValueError as e:
             await processing_msg.edit_text(str(e))
@@ -967,7 +954,7 @@ class DeleteHandler:
                 )
                 await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ ᴀɴᴅ ᴄʜᴀɴɴᴇʟ.')
             else:
-                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ɴᴏ ᴄʜᴀɴɴᴇʟ ᴍᴇꜱꜱᴀɢᴇ ꜰᴏᴜɴᴅ).')
+                await update.message.reply_text('✅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴅᴇʟᴇᴛᴇᴅ ꜰʀᴏᴍ ᴅᴀᴛᴀʙᴀꜱᴇ (ɴᴏ ᴄʜᴀɴɴᴇʟ ᴍᴇꜱᴀᴳᴇ ꜰᴏᴜɴᴅ).')
         except BadRequest as e:
             error_msg = str(e).lower()
             if "message to delete not found" in error_msg:
@@ -1087,14 +1074,34 @@ class UpdateHandler:
 
                     # Update channel message (attempt to edit, otherwise post new) - URL only
                     await processing_msg.edit_text("🔄 **Updating channel message...**")
-                    new_message_id = await TelegramUploader.update_channel_message(
-                        char_for_upload,
-                        context,
-                        character.get('message_id')
-                    )
+                    try:
+                        new_message_id = await TelegramUploader.update_channel_message(
+                            char_for_upload,
+                            context,
+                            character.get('message_id')
+                        )
+                    except Exception as first_exc:
+                        # Try fallback host
+                        logger.warning(f"Update via Catbox URL failed: {first_exc}. Trying fallback host (0x0.st).")
+                        try:
+                            fallback_url = await FallbackHostUploader.upload_to_0x0(media_file.file_path, media_file.filename)
+                            if fallback_url:
+                                media_file.catbox_url = fallback_url
+                                char_for_upload.media_file.catbox_url = fallback_url
+                                new_message_id = await TelegramUploader.update_channel_message(
+                                    char_for_upload,
+                                    context,
+                                    character.get('message_id')
+                                )
+                            else:
+                                raise ValueError("Fallback upload did not return a URL")
+                        except Exception as fallback_exc:
+                            logger.exception(f"Fallback update failed: {fallback_exc}")
+                            await processing_msg.edit_text(f"❌ Failed to update channel using URL (both Catbox and fallback).")
+                            return
 
                     # Save changes to DB
-                    update_data['img_url'] = catbox_url
+                    update_data['img_url'] = media_file.catbox_url
                     update_data['file_hash'] = media_file.hash
                     update_data['message_id'] = new_message_id
                     from datetime import datetime

@@ -1,5 +1,6 @@
 import secrets
 import string
+import time
 from typing import Optional, Dict, Any
 from html import escape
 
@@ -8,11 +9,8 @@ from telegram.ext import CommandHandler, ContextTypes
 
 from shivu import application, user_collection, collection, db, LOGGER, OWNER_ID, SUDO_USERS
 
-# MongoDB setup - using the same db as other modules
 redeem_codes_collection = db.redeem_codes
 
-
-# ---------- Small Caps Utility (matching your existing style) ----------
 SMALL_CAPS_MAP = {
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
     'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
@@ -29,7 +27,6 @@ SMALL_CAPS_MAP = {
     '6': '6', '7': '7', '8': '8', '9': '9'
 }
 
-# ---------- Rarity Mapping (matching your system) ----------
 RARITY_MAP = {
     1: "⚪ ᴄᴏᴍᴍᴏɴ",
     2: "🔵 ʀᴀʀᴇ",
@@ -48,83 +45,82 @@ RARITY_MAP = {
     15: "🧬 ʜʏʙʀɪᴅ"
 }
 
+_redeem_rate_limiter = {}
+_RATE_LIMIT_WINDOW = 2
+_RATE_LIMIT_MAX = 3
+
 def to_small_caps(text: str) -> str:
-    """Convert text to small caps Unicode characters."""
     return ''.join(SMALL_CAPS_MAP.get(char, char) for char in str(text))
 
-
 def get_rarity_display(rarity: int) -> str:
-    """Get rarity display string with emoji and name."""
     return RARITY_MAP.get(rarity, f"⚪ ᴜɴᴋɴᴏᴡɴ ({rarity})")
 
-
-# ---------- Code Generation (UPDATED FORMAT) ----------
 def generate_unique_code(length: int = 8) -> str:
-    """
-    Generate a unique alphanumeric redeem code in format: sanpai-xxxxxxxx
-    - 'sanpai' prefix remains constant
-    - Random part is in lowercase letters and digits
-    - Total format: sanpai-xxxxxxxx (where x is random)
-    """
-    # Use lowercase letters and digits for the random part
     alphabet = string.ascii_lowercase + string.digits
-    # Remove confusing characters: 0, o, i, l, 1
     alphabet = alphabet.replace('0', '').replace('o', '').replace('i', '').replace('l', '').replace('1', '')
-
-    # Generate random part
     random_part = ''.join(secrets.choice(alphabet) for _ in range(length))
-
-    # Combine with prefix
     code = f"sanpai-{random_part}"
     return code
 
+def _check_rate_limit(user_id: int) -> bool:
+    now = time.time()
+    if user_id in _redeem_rate_limiter:
+        timestamps = [t for t in _redeem_rate_limiter[user_id] if now - t < _RATE_LIMIT_WINDOW]
+        _redeem_rate_limiter[user_id] = timestamps
+        if len(timestamps) >= _RATE_LIMIT_MAX:
+            return False
+        _redeem_rate_limiter[user_id].append(now)
+    else:
+        _redeem_rate_limiter[user_id] = [now]
+    return True
 
-# ---------- Database Operations ----------
+async def _ensure_indexes():
+    try:
+        await redeem_codes_collection.create_index("code", unique=True)
+    except Exception as e:
+        LOGGER.error(f"Index creation failed: {e}")
+
 async def create_coin_code(amount: int, max_uses: int, created_by: int) -> Optional[str]:
-    """Create a coin redeem code in the database."""
     if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
 
     try:
-        # Generate unique code
-        code = generate_unique_code()
-
-        # Ensure code is unique
-        while await redeem_codes_collection.find_one({"code": code}):
+        await _ensure_indexes()
+        
+        for attempt in range(10):
             code = generate_unique_code()
-
-        # Create document
-        document = {
-            "code": code,
-            "type": "coin",
-            "amount": int(amount),
-            "max_uses": int(max_uses),
-            "used_by": [],
-            "is_active": True,
-            "created_by": int(created_by)
-        }
-
-        await redeem_codes_collection.insert_one(document)
-        LOGGER.info(f"Created coin code: {code} for {amount} coins, max uses: {max_uses}")
-        return code
+            document = {
+                "code": code,
+                "type": "coin",
+                "amount": int(amount),
+                "max_uses": int(max_uses),
+                "used_by": [],
+                "is_active": True,
+                "created_by": int(created_by)
+            }
+            
+            try:
+                await redeem_codes_collection.insert_one(document)
+                LOGGER.info(f"Created coin code: {code} for {amount} coins, max uses: {max_uses}")
+                return code
+            except Exception as insert_err:
+                if "duplicate key" in str(insert_err).lower() or "E11000" in str(insert_err):
+                    continue
+                raise
+        
+        LOGGER.error("Failed to generate unique code after 10 attempts")
+        return None
     except Exception as e:
         LOGGER.error(f"Failed to create coin code: {e}")
         return None
 
-
 async def create_character_code(character_id: int, max_uses: int, created_by: int) -> Optional[str]:
-    """
-    Create a character redeem code in the database.
-    Validates character exists in anime_characters_lol collection.
-    """
     if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
 
     try:
-        # Verify character exists in main collection (anime_characters_lol)
-        # Try both integer and string format
         character = await collection.find_one({"id": character_id})
         if not character:
             character = await collection.find_one({"id": str(character_id)})
@@ -133,234 +129,258 @@ async def create_character_code(character_id: int, max_uses: int, created_by: in
             LOGGER.warning(f"Character ID {character_id} not found in anime_characters_lol collection")
             return None
 
-        # Generate unique code
-        code = generate_unique_code()
-
-        # Ensure code is unique
-        while await redeem_codes_collection.find_one({"code": code}):
+        await _ensure_indexes()
+        
+        for attempt in range(10):
             code = generate_unique_code()
-
-        # Create document
-        document = {
-            "code": code,
-            "type": "character",
-            "character_id": int(character_id),
-            "max_uses": int(max_uses),
-            "used_by": [],
-            "is_active": True,
-            "created_by": int(created_by)
-        }
-
-        await redeem_codes_collection.insert_one(document)
-        LOGGER.info(f"Created character code: {code} for character {character_id}, max uses: {max_uses}")
-        return code
+            document = {
+                "code": code,
+                "type": "character",
+                "character_id": int(character_id),
+                "max_uses": int(max_uses),
+                "used_by": [],
+                "is_active": True,
+                "created_by": int(created_by)
+            }
+            
+            try:
+                await redeem_codes_collection.insert_one(document)
+                LOGGER.info(f"Created character code: {code} for character {character_id}, max uses: {max_uses}")
+                return code
+            except Exception as insert_err:
+                if "duplicate key" in str(insert_err).lower() or "E11000" in str(insert_err):
+                    continue
+                raise
+        
+        LOGGER.error("Failed to generate unique code after 10 attempts")
+        return None
     except Exception as e:
         LOGGER.error(f"Failed to create character code: {e}")
         return None
 
-
 async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
-    """
-    Redeem a code for a user.
-    Returns dict with 'success', 'message', and optional 'data' keys.
-    
-    For character codes:
-    - Fetches full character from anime_characters_lol (id, name, anime, rarity, img_url)
-    - Adds to user_collection_lmaoooo.characters array
-    - Handles duplicates gracefully
-    """
     if redeem_codes_collection is None:
         return {"success": False, "message": "❌ System error: database not available"}
 
+    if not _check_rate_limit(user_id):
+        return {
+            "success": False,
+            "message": "⚠️ ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ᴀ ꜰᴇᴡ sᴇᴄᴏɴᴅs ʙᴇꜰᴏʀᴇ ʀᴇᴅᴇᴇᴍɪɴɢ ᴀɢᴀɪɴ.",
+            "show_alert": True
+        }
+
     try:
-        # Find the code (normalize to lowercase for consistency)
-        code_doc = await redeem_codes_collection.find_one({"code": code.lower()})
+        code_normalized = code.lower()
+        
+        update_result = await redeem_codes_collection.find_one_and_update(
+            {
+                "code": code_normalized,
+                "is_active": True,
+                "used_by": {"$ne": user_id},
+                "$expr": {"$lt": [{"$size": "$used_by"}, "$max_uses"]}
+            },
+            {
+                "$push": {"used_by": user_id}
+            },
+            return_document=True
+        )
 
-        if not code_doc:
-            return {
-                "success": False, 
-                "message": "⚠️ ɪɴᴠᴀʟɪᴅ ᴄᴏᴅᴇ\nᴛʜɪs ᴄᴏᴅᴇ ᴅᴏᴇs ɴᴏᴛ ᴇxɪsᴛ.",
-                "show_alert": True
-            }
-
-        # Check if code is active
-        if not code_doc.get("is_active", False):
-            return {
-                "success": False,
-                "message": "❌ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.",
-                "show_alert": True
-            }
-
-        # Check if user already redeemed this code
-        used_by = code_doc.get("used_by", [])
-        if user_id in used_by:
-            return {
-                "success": False,
-                "message": "⚠️ ʏᴏᴜ ʜᴀᴠᴇ ᴀʟʀᴇᴀᴅʏ ʀᴇᴅᴇᴇᴍᴇᴅ ᴛʜɪs ᴄᴏᴅᴇ.",
-                "show_alert": True
-            }
-
-        # Check if max uses reached
-        max_uses = code_doc.get("max_uses", 1)
-        current_uses = len(used_by)
-
-        if current_uses >= max_uses:
-            # Deactivate the code
-            await redeem_codes_collection.update_one(
-                {"code": code.lower()},
-                {"$set": {"is_active": False}}
-            )
-            return {
-                "success": False,
-                "message": "❌ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.",
-                "show_alert": True
-            }
-
-        # Process redemption based on type
-        code_type = code_doc.get("type")
-
-        if code_type == "coin":
-            # Coin redemption
-            amount = code_doc.get("amount", 0)
-
-            # Add coins to user's balance
-            await user_collection.update_one(
-                {"id": user_id},
-                {
-                    "$inc": {"balance": amount},
-                    "$setOnInsert": {"id": user_id}
-                },
-                upsert=True
-            )
-
-            # Mark code as used by this user
-            await redeem_codes_collection.update_one(
-                {"code": code.lower()},
-                {"$push": {"used_by": user_id}}
-            )
-
-            # Check if this was the last use
-            if current_uses + 1 >= max_uses:
-                await redeem_codes_collection.update_one(
-                    {"code": code.lower()},
-                    {"$set": {"is_active": False}}
-                )
-
-            LOGGER.info(f"User {user_id} redeemed coin code {code} for {amount} coins")
-
-            return {
-                "success": True,
-                "message": (
-                    f"<b>✅ {to_small_caps('CODE REDEEMED SUCCESSFULLY!')}</b>\n\n"
-                    f"💰 {to_small_caps('You received:')} <b>{amount:,}</b> {to_small_caps('coins')}\n"
-                    f"🎟️ {to_small_caps('Code:')} <code>{code}</code>"
-                ),
-                "data": {
-                    "type": "coin",
-                    "amount": amount
+        if not update_result:
+            code_doc = await redeem_codes_collection.find_one({"code": code_normalized})
+            
+            if not code_doc:
+                return {
+                    "success": False, 
+                    "message": "⚠️ ɪɴᴠᴀʟɪᴅ ᴄᴏᴅᴇ\nᴛʜɪs ᴄᴏᴅᴇ ᴅᴏᴇs ɴᴏᴛ ᴇxɪsᴛ.",
+                    "show_alert": True
                 }
-            }
-
-        elif code_type == "character":
-            # Character redemption
-            character_id = code_doc.get("character_id")
-
-            # Fetch full character data from anime_characters_lol collection
-            character = await collection.find_one({"id": character_id})
-            if not character:
-                character = await collection.find_one({"id": str(character_id)})
-
-            if not character:
-                LOGGER.error(f"Character {character_id} not found in collection during redemption")
+            
+            if not code_doc.get("is_active", False):
                 return {
                     "success": False,
-                    "message": "❌ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏᴛ ғᴏᴜɴᴅ ɪɴ ᴅᴀᴛᴀʙᴀsᴇ.",
+                    "message": "❌ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.",
+                    "show_alert": True
+                }
+            
+            if user_id in code_doc.get("used_by", []):
+                return {
+                    "success": False,
+                    "message": "⚠️ ʏᴏᴜ ʜᴀᴠᴇ ᴀʟʀᴇᴀᴅʏ ʀᴇᴅᴇᴇᴍᴇᴅ ᴛʜɪs ᴄᴏᴅᴇ.",
+                    "show_alert": True
+                }
+            
+            if len(code_doc.get("used_by", [])) >= code_doc.get("max_uses", 1):
+                await redeem_codes_collection.update_one(
+                    {"code": code_normalized},
+                    {"$set": {"is_active": False}}
+                )
+                return {
+                    "success": False,
+                    "message": "❌ ᴛʜɪs ᴄᴏᴅᴇ ʜᴀs ᴀʟʀᴇᴀᴅʏ ʙᴇᴇɴ ʀᴇᴅᴇᴇᴍᴇᴅ.",
+                    "show_alert": True
+                }
+            
+            return {
+                "success": False,
+                "message": "❌ ʀᴇᴅᴇᴍᴘᴛɪᴏɴ ꜰᴀɪʟᴇᴅ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ.",
+                "show_alert": True
+            }
+
+        code_type = update_result.get("type")
+
+        if code_type == "coin":
+            amount = update_result.get("amount", 0)
+            
+            try:
+                coin_update = await user_collection.update_one(
+                    {"id": user_id},
+                    {"$inc": {"balance": amount}},
+                    upsert=True
+                )
+                
+                if coin_update.modified_count == 0 and coin_update.upserted_id is None and coin_update.matched_count == 0:
+                    raise Exception("Failed to update user balance")
+                
+                if len(update_result.get("used_by", [])) >= update_result.get("max_uses", 1):
+                    await redeem_codes_collection.update_one(
+                        {"code": code_normalized},
+                        {"$set": {"is_active": False}}
+                    )
+                
+                message = (
+                    f"<b>✅ {to_small_caps('CODE REDEEMED SUCCESSFULLY!')}</b>\n\n"
+                    f"💰 {to_small_caps('Coins Received:')} <b>{amount:,}</b>\n"
+                    f"🎉 {to_small_caps('Your new balance has been updated!')}"
+                )
+                
+                return {
+                    "success": True,
+                    "message": message,
+                    "data": {
+                        "type": "coin",
+                        "amount": amount
+                    }
+                }
+            
+            except Exception as reward_error:
+                LOGGER.error(f"Reward distribution failed for user {user_id}, code {code_normalized}: {reward_error}")
+                
+                await redeem_codes_collection.update_one(
+                    {"code": code_normalized},
+                    {"$pull": {"used_by": user_id}}
+                )
+                
+                return {
+                    "success": False,
+                    "message": "❌ sʏsᴛᴇᴍ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.",
                     "show_alert": True
                 }
 
-            # Extract character data
-            character_name = character.get("name", "Unknown")
-            anime_name = character.get("anime", "Unknown")
-            rarity = character.get("rarity", 1)
-            img_url = character.get("img_url", "")
-
-            # Prepare character entry with ALL fields (including optional ones)
-            character_entry = {
-                "id": character.get("id"),
-                "name": character.get("name"),
-                "anime": character.get("anime"),
-                "rarity": character.get("rarity"),
-                "img_url": character.get("img_url")
-            }
-
-            # Add optional fields if they exist in the character document
-            optional_fields = ["id_al", "video_url"]
-            for field in optional_fields:
-                if field in character:
-                    character_entry[field] = character.get(field)
-
-            # Add character to user's collection
+        elif code_type == "character":
+            character_id = update_result.get("character_id")
+            
             try:
-                await user_collection.update_one(
-                    {"id": user_id},
+                character = await collection.find_one({"id": character_id})
+                if not character:
+                    character = await collection.find_one({"id": str(character_id)})
+                
+                if not character:
+                    await redeem_codes_collection.update_one(
+                        {"code": code_normalized},
+                        {"$pull": {"used_by": user_id}}
+                    )
+                    
+                    return {
+                        "success": False,
+                        "message": "❌ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴏᴛ ꜰᴏᴜɴᴅ ɪɴ ᴅᴀᴛᴀʙᴀsᴇ.",
+                        "show_alert": True
+                    }
+                
+                character_name = character.get("name", "Unknown")
+                anime_name = character.get("anime", "Unknown")
+                rarity = character.get("rarity", 1)
+                img_url = character.get("img_url", "")
+                
+                rarity_display = get_rarity_display(rarity)
+                
+                character_data = {
+                    "id": str(character.get("id", character_id)),
+                    "name": character_name,
+                    "anime": anime_name,
+                    "rarity": rarity,
+                    "img_url": img_url
+                }
+                
+                char_update = await user_collection.update_one(
                     {
-                        "$push": {"characters": character_entry},
-                        "$setOnInsert": {
-                            "id": user_id,
-                            "balance": 0,
-                            "favorites": []
-                        }
+                        "id": user_id,
+                        "characters.id": {"$ne": str(character_id)}
+                    },
+                    {
+                        "$push": {"characters": character_data},
+                        "$setOnInsert": {"id": user_id}
                     },
                     upsert=True
                 )
-            except Exception as db_error:
-                LOGGER.error(f"Database error while adding character {character_id} to user {user_id}: {db_error}")
+                
+                if char_update.modified_count == 0 and char_update.upserted_id is None:
+                    user_doc = await user_collection.find_one({"id": user_id})
+                    
+                    if user_doc:
+                        existing_chars = user_doc.get("characters", [])
+                        has_char = any(
+                            str(c.get("id")) == str(character_id) 
+                            for c in existing_chars
+                        )
+                        
+                        if not has_char:
+                            raise Exception("Failed to add character to user collection")
+                
+                if len(update_result.get("used_by", [])) >= update_result.get("max_uses", 1):
+                    await redeem_codes_collection.update_one(
+                        {"code": code_normalized},
+                        {"$set": {"is_active": False}}
+                    )
+                
+                message = (
+                    f"<b>✅ {to_small_caps('CHARACTER CODE REDEEMED!')}</b>\n\n"
+                    f"🎴 <b>{to_small_caps('Character:')}</b> {escape(character_name)}\n"
+                    f"📺 <b>{to_small_caps('Anime:')}</b> {escape(anime_name)}\n"
+                    f"⭐ <b>{to_small_caps('Rarity:')}</b> {rarity_display}\n\n"
+                    f"🎉 {to_small_caps('Added to your collection!')}"
+                )
+                
+                return {
+                    "success": True,
+                    "message": message,
+                    "img_url": img_url,
+                    "data": {
+                        "type": "character",
+                        "character_id": character_id,
+                        "character_name": character_name
+                    }
+                }
+            
+            except Exception as reward_error:
+                LOGGER.error(f"Character reward failed for user {user_id}, code {code_normalized}: {reward_error}")
+                
+                await redeem_codes_collection.update_one(
+                    {"code": code_normalized},
+                    {"$pull": {"used_by": user_id}}
+                )
+                
                 return {
                     "success": False,
-                    "message": "❌ ᴅᴀᴛᴀʙᴀsᴇ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ.",
+                    "message": "❌ sʏsᴛᴇᴍ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.",
                     "show_alert": True
                 }
 
-
-            # Mark code as used by this user
-            await redeem_codes_collection.update_one(
-                {"code": code.lower()},
-                {"$push": {"used_by": user_id}}
-            )
-
-            # Check if this was the last use
-            if current_uses + 1 >= max_uses:
-                await redeem_codes_collection.update_one(
-                    {"code": code.lower()},
-                    {"$set": {"is_active": False}}
-                )
-
-            LOGGER.info(f"User {user_id} redeemed character code {code} for character {character_id} ({character_name})")
-
-            # Get rarity display
-            rarity_display = get_rarity_display(rarity)
-
-            # Build message
-            message = (
-                f"<b>✅ {to_small_caps('CHARACTER CODE REDEEMED!')}</b>\n\n"
-                f"🎴 <b>{to_small_caps('Character:')}</b> {escape(character_name)}\n"
-                f"📺 <b>{to_small_caps('Anime:')}</b> {escape(anime_name)}\n"
-                f"⭐ <b>{to_small_caps('Rarity:')}</b> {rarity_display}\n"
-                f"🎟️ {to_small_caps('Code:')} <code>{code}</code>"
-            )
-
-            return {
-                "success": True,
-                "message": message,
-                "img_url": img_url,
-                "data": {
-                    "type": "character",
-                    "character_id": character_id,
-                    "character_name": character_name
-                }
-            }
-
         else:
+            await redeem_codes_collection.update_one(
+                {"code": code_normalized},
+                {"$pull": {"used_by": user_id}}
+            )
+            
             return {
                 "success": False,
                 "message": "❌ ᴜɴᴋɴᴏᴡɴ ᴄᴏᴅᴇ ᴛʏᴘᴇ.",
@@ -375,21 +395,14 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
             "show_alert": True
         }
 
-
-# ---------- Command Handlers ----------
 async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /gen <amount> <max_users>
-    Generate a coin redeem code. Admin only.
-    """
     user_id = update.effective_user.id
 
-    # Check permissions
-    if user_id != OWNER_ID and user_id not in SUDO_USERS:
+    sudo_check = SUDO_USERS if isinstance(SUDO_USERS, (list, set, tuple)) else []
+    if user_id != OWNER_ID and user_id not in sudo_check:
         await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
 
-    # Validate arguments
     if len(context.args) < 2:
         usage_msg = (
             f"<b>💰 {to_small_caps('COIN CODE GENERATOR')}</b>\n\n"
@@ -415,7 +428,6 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ " + to_small_caps("Max users must be greater than 0."))
         return
 
-    # Create code
     code = await create_coin_code(amount, max_uses, user_id)
 
     if code:
@@ -432,21 +444,14 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             f"❌ {to_small_caps('Failed to generate code. Please try again.')}"
         )
 
-
 async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /sgen <character_id> <max_users>
-    Generate a character redeem code. Admin only.
-    Fetches character data from anime_characters_lol (main collection).
-    """
     user_id = update.effective_user.id
 
-    # Check permissions
-    if user_id != OWNER_ID and user_id not in SUDO_USERS:
+    sudo_check = SUDO_USERS if isinstance(SUDO_USERS, (list, set, tuple)) else []
+    if user_id != OWNER_ID and user_id not in sudo_check:
         await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
 
-    # Validate arguments
     if len(context.args) < 2:
         usage_msg = (
             f"<b>🎴 {to_small_caps('CHARACTER CODE GENERATOR')}</b>\n\n"
@@ -472,11 +477,8 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ " + to_small_caps("Max users must be greater than 0."))
         return
 
-    # Fetch character from anime_characters_lol (main collection)
-    # Try both integer and string format for ID
     character = await collection.find_one({"id": character_id})
 
-    # If not found with integer, try string
     if not character:
         character = await collection.find_one({"id": str(character_id)})
 
@@ -489,7 +491,6 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(error_msg, parse_mode="HTML")
         return
 
-    # Create code (validated character exists)
     code = await create_character_code(character_id, max_uses, user_id)
 
     if code:
@@ -516,15 +517,9 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"❌ {to_small_caps('Failed to generate code. Please try again.')}"
         )
 
-
 async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /redeem <code>
-    Redeem a coin or character code.
-    """
     user_id = update.effective_user.id
 
-    # Validate arguments
     if len(context.args) < 1:
         usage_msg = (
             f"<b>🎁 {to_small_caps('REDEEM CODE')}</b>\n\n"
@@ -534,13 +529,11 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(usage_msg, parse_mode="HTML")
         return
 
-    code = context.args[0].lower()  # Normalize to lowercase
+    code = context.args[0].lower()
 
-    # Process redemption
     result = await redeem_code(code, user_id)
 
     if result["success"]:
-        # Check if this is a character redemption with image
         if result.get("img_url"):
             try:
                 await update.message.reply_photo(
@@ -550,24 +543,16 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
             except Exception as e:
                 LOGGER.error(f"Failed to send image: {e}")
-                # Fallback to text message
                 await update.message.reply_text(result["message"], parse_mode="HTML")
         else:
-            # Coin redemption or no image available
             await update.message.reply_text(result["message"], parse_mode="HTML")
     else:
-        # Show error message
         await update.message.reply_text(result["message"], parse_mode="HTML")
 
-
-# ---------- Handler Registration ----------
 def register_handlers():
-    """Register all redeem system handlers with the application."""
     application.add_handler(CommandHandler("gen", gen_command, block=False))
     application.add_handler(CommandHandler("sgen", sgen_command, block=False))
     application.add_handler(CommandHandler("redeem", redeem_command, block=False))
     LOGGER.info("Redeem system handlers registered successfully")
 
-
-# Auto-register handlers when module is imported
 register_handlers()

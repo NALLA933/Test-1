@@ -84,7 +84,7 @@ def generate_coin_code(length: int = 8) -> str:
 async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user has joined support group and update channel"""
     user_id = update.effective_user.id
-    
+
     try:
         # Check support group membership
         try:
@@ -95,7 +95,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             # If bot is not admin or other error, skip this check
             LOGGER.warning(f"Cannot check support group membership (bot needs admin rights): {e}")
             # Continue to channel check
-        
+
         # Check update channel membership
         try:
             channel_member = await context.bot.get_chat_member(SUPPORT_CHANNEL_ID, user_id)
@@ -106,7 +106,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             LOGGER.warning(f"Cannot check update channel membership (bot needs admin rights): {e}")
             # If we can't verify, we'll allow the user (or you can set to False for strict mode)
             pass
-        
+
         return True
     except Exception as e:
         LOGGER.error(f"Error checking membership: {e}")
@@ -121,7 +121,7 @@ async def show_join_buttons(update: Update):
         [InlineKeyboardButton("👥 Support Group", url=SUPPORT_GROUP)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(
         f"<b>⚠️ {to_small_caps('JOIN REQUIRED')}</b>\n\n"
         f"🔒 {to_small_caps('You need to join our Update Channel and Support Group first!')}\n\n"
@@ -134,36 +134,36 @@ async def show_join_buttons(update: Update):
 async def check_cooldown(user_id: int, command_type: str) -> bool:
     """Check if user can use the command (24hr cooldown)"""
     user = await user_collection.find_one({"id": user_id})
-    
+
     if not user:
         return True
-    
+
     last_claim_time = user.get(f"last_{command_type}", None)
-    
+
     if last_claim_time is None:
         return True
-    
+
     time_diff = datetime.utcnow() - last_claim_time
     if time_diff >= timedelta(hours=24):
         return True
-    
+
     return False
 
 
 async def get_cooldown_time(user_id: int, command_type: str) -> Optional[str]:
     """Get remaining cooldown time"""
     user = await user_collection.find_one({"id": user_id})
-    
+
     if not user or not user.get(f"last_{command_type}"):
         return None
-    
+
     last_claim_time = user[f"last_{command_type}"]
     next_claim_time = last_claim_time + timedelta(hours=24)
     remaining = next_claim_time - datetime.utcnow()
-    
+
     hours = int(remaining.total_seconds() // 3600)
     minutes = int((remaining.total_seconds() % 3600) // 60)
-    
+
     return f"{hours}h {minutes}m"
 
 
@@ -175,19 +175,19 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    
+
     # Check if command is used in allowed group
     if chat_id != ALLOWED_GROUP_ID:
         await show_join_buttons(update)
         return
-    
+
     # Check membership (if enabled)
     if ENABLE_MEMBERSHIP_CHECK:
         is_member = await check_membership(update, context)
         if not is_member:
             await show_join_buttons(update)
             return
-    
+
     # Check cooldown
     can_claim = await check_cooldown(user_id, "sclaim")
     if not can_claim:
@@ -199,28 +199,28 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="HTML"
         )
         return
-    
+
     # Get random character from allowed rarities (anime_characters_lol collection)
     pipeline = [
         {"$match": {"rarity": {"$in": ALLOWED_RARITIES}}},
         {"$sample": {"size": 1}}
     ]
-    
+
     characters = await collection.aggregate(pipeline).to_list(1)
-    
+
     if not characters:
         await update.message.reply_text(
             f"❌ {to_small_caps('No characters available at the moment!')}"
         )
         return
-    
+
     character = characters[0]
     character_id = character.get("id")
     character_name = character.get("name", "Unknown")
     anime_name = character.get("anime", "Unknown")
     rarity = character.get("rarity", 1)
     img_url = character.get("img_url", "")
-    
+
     # Add character to user's collection (user_collection_lmaoooo.characters)
     await user_collection.update_one(
         {"id": user_id},
@@ -238,9 +238,9 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         },
         upsert=True
     )
-    
+
     rarity_display = get_rarity_display(rarity)
-    
+
     # Send character with image
     message = (
         f"<b>🎉 {to_small_caps('CONGRATULATIONS!')}</b>\n\n"
@@ -250,7 +250,7 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"🆔 <b>{to_small_caps('ID:')}</b> {character_id}\n\n"
         f"✅ {to_small_caps('Character has been added to your collection!')}"
     )
-    
+
     if img_url:
         try:
             await update.message.reply_photo(
@@ -263,7 +263,7 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text(message, parse_mode="HTML")
     else:
         await update.message.reply_text(message, parse_mode="HTML")
-    
+
     LOGGER.info(f"User {user_id} claimed character {character_id} ({character_name}) via /sclaim")
 
 
@@ -274,19 +274,19 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    
+
     # Check if command is used in allowed group
     if chat_id != ALLOWED_GROUP_ID:
         await show_join_buttons(update)
         return
-    
+
     # Check membership (if enabled)
     if ENABLE_MEMBERSHIP_CHECK:
         is_member = await check_membership(update, context)
         if not is_member:
             await show_join_buttons(update)
             return
-    
+
     # Check cooldown
     can_claim = await check_cooldown(user_id, "claim")
     if not can_claim:
@@ -298,15 +298,15 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             parse_mode="HTML"
         )
         return
-    
+
     # Generate random coin amount (1000-3000)
     coin_amount = random.randint(1000, 3000)
     coin_code = generate_coin_code()
-    
+
     # Ensure code is unique
     while await claim_codes_collection.find_one({"code": coin_code}):
         coin_code = generate_coin_code()
-    
+
     # Store coin code in database
     await claim_codes_collection.insert_one({
         "code": coin_code,
@@ -315,50 +315,50 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "created_at": datetime.utcnow(),
         "is_redeemed": False
     })
-    
+
     # Update user's last claim time
     await user_collection.update_one(
         {"id": user_id},
         {"$set": {"last_claim": datetime.utcnow()}},
         upsert=True
     )
-    
+
     await update.message.reply_text(
         f"<b>💰 {to_small_caps('COIN CODE GENERATED!')}</b>\n\n"
         f"🎟️ <b>{to_small_caps('Your Code:')}</b> <code>{coin_code}</code>\n"
         f"💎 <b>{to_small_caps('Amount:')}</b> {coin_amount:,} {to_small_caps('coins')}\n\n"
-        f"📌 {to_small_caps('Use')} <code>/redeem {coin_code}</code> {to_small_caps('to claim your coins!')}\n"
+        f"📌 {to_small_caps('Use')} <code>/credeem {coin_code}</code> {to_small_caps('to claim your coins!')}\n"
         f"⏰ {to_small_caps('Valid for 24 hours')}",
         parse_mode="HTML"
     )
-    
+
     LOGGER.info(f"User {user_id} generated coin code {coin_code} for {coin_amount} coins")
 
 
-async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def credeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    /redeem <code> - Redeem a coin code
+    /credeem <code> - Redeem a coin code
     """
     user_id = update.effective_user.id
-    
+
     # Validate arguments
     if len(context.args) < 1:
         usage_msg = (
             f"<b>🎁 {to_small_caps('REDEEM CODE')}</b>\n\n"
-            f"📝 {to_small_caps('Usage:')} <code>/redeem &lt;CODE&gt;</code>\n\n"
+            f"📝 {to_small_caps('Usage:')} <code>/credeem &lt;CODE&gt;</code>\n\n"
             f"💡 {to_small_caps('Redeem your coin codes to add coins to your balance!')}"
         )
         await update.message.reply_text(usage_msg, parse_mode="HTML")
         return
-    
+
     code = context.args[0].upper()
-    
+
     # Find the coin code
     code_doc = await claim_codes_collection.find_one({
         "code": code,
         "user_id": user_id
     })
-    
+
     if not code_doc:
         await update.message.reply_text(
             f"<b>❌ {to_small_caps('INVALID CODE')}</b>\n\n"
@@ -367,7 +367,7 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="HTML"
         )
         return
-    
+
     # Check if already redeemed
     if code_doc.get("is_redeemed", False):
         await update.message.reply_text(
@@ -377,7 +377,7 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="HTML"
         )
         return
-    
+
     # Check if code is expired (24 hours)
     created_at = code_doc.get("created_at")
     if created_at:
@@ -390,29 +390,29 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 parse_mode="HTML"
             )
             return
-    
+
     coin_amount = code_doc.get("amount", 0)
-    
+
     # Add coins to user's balance (user_collection_lmaoooo.balance)
     await user_collection.update_one(
         {"id": user_id},
         {
             "$inc": {"balance": coin_amount},
-            "$set": {"last_redeem": datetime.utcnow()}
+            "$set": {"last_credeem": datetime.utcnow()}
         },
         upsert=True
     )
-    
+
     # Mark code as redeemed
     await claim_codes_collection.update_one(
         {"code": code},
         {"$set": {"is_redeemed": True, "redeemed_at": datetime.utcnow()}}
     )
-    
+
     # Get updated balance
     updated_user = await user_collection.find_one({"id": user_id})
     new_balance = updated_user.get("balance", 0) if updated_user else coin_amount
-    
+
     await update.message.reply_text(
         f"<b>✅ {to_small_caps('CODE REDEEMED SUCCESSFULLY!')}</b>\n\n"
         f"💰 <b>{to_small_caps('Coins Added:')}</b> {coin_amount:,}\n"
@@ -420,7 +420,7 @@ async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"🎉 {to_small_caps('Enjoy your coins!')}",
         parse_mode="HTML"
     )
-    
+
     LOGGER.info(f"User {user_id} redeemed code {code} for {coin_amount} coins")
 
 
@@ -429,7 +429,7 @@ def register_handlers():
     """Register all claim system handlers with the application."""
     application.add_handler(CommandHandler("sclaim", sclaim_command, block=False))
     application.add_handler(CommandHandler("claim", claim_command, block=False))
-    application.add_handler(CommandHandler("redeem", redeem_command, block=False))
+    application.add_handler(CommandHandler("credeem", credeem_command, block=False))
     LOGGER.info("Claim system handlers registered successfully")
 
 

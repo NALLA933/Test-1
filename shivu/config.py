@@ -19,12 +19,7 @@ class Config:
 
     # Owner and Sudo Users
     OWNER_ID: int = int(os.getenv("OWNER_ID", "7818323042"))
-    SUDO_USERS: List[int] = [
-        int(user_id.strip())
-        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527,8555362860,6024289634").split(",")
-        if user_id.strip().isdigit()
-    ]
-
+    SUDO_USERS = int(os.getenv("SUDO_USERS", "5147822244"))
     # Group and Channel IDs
     GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003727098465"))
     CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003749495721"))

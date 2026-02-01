@@ -1,12 +1,18 @@
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
+from typing import List, Dict, Optional, Tuple
+from cachetools import TTLCache
+import asyncio
+from functools import wraps
 
 from shivu import shivuu, collection, user_collection
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ==================== CONFIGURATION ====================
 
 # Rarity mapping with small caps
 RARITY_MAP = {
@@ -39,65 +45,227 @@ SMALL_CAPS_MAP = {
     'Y': 'ʏ', 'Z': 'ᴢ'
 }
 
+# TTL Caches (5 minutes TTL for high performance)
+character_cache = TTLCache(maxsize=1000, ttl=300)  # Cache character lookups
+count_cache = TTLCache(maxsize=500, ttl=300)       # Cache character counts
+grabber_cache = TTLCache(maxsize=500, ttl=300)     # Cache top grabbers
+search_cache = TTLCache(maxsize=200, ttl=300)      # Cache search results
+
+# ==================== UTILITY FUNCTIONS ====================
+
 def to_small_caps(text):
     """Convert text to small caps for premium UI"""
     text = str(text) if text is not None else 'Unknown'
     return ''.join(SMALL_CAPS_MAP.get(c, c) for c in text)
 
-# Storage for sfind pagination
-sfind_sessions = {}  # {user_id: {'characters': [...], 'page': 0}}
+
+def cache_key(*args):
+    """Generate cache key from arguments"""
+    return ':'.join(str(arg) for arg in args)
 
 
-async def get_character_count(character_id):
-    """Count how many users have this character"""
+# ==================== DATABASE ACCESS LAYER ====================
+
+async def get_character_by_id(character_id: str) -> Optional[Dict]:
+    """
+    Fetch character from database with caching.
+    
+    Args:
+        character_id: The character ID to search for
+        
+    Returns:
+        Character document or None if not found
+    """
+    key = cache_key('char', character_id)
+    
+    # Check cache first
+    if key in character_cache:
+        return character_cache[key]
+    
     try:
-        # Count users who have this character ID in their collection
-        count = 0
-        async for user in user_collection.find({'characters.id': character_id}):
-            # Count how many times this character appears in user's collection
-            user_chars = user.get('characters', [])
-            for char in user_chars:
-                if char.get('id') == character_id:
-                    count += 1
-        return count
+        character = await collection.find_one({'id': character_id})
+        if character:
+            character_cache[key] = character
+        return character
     except Exception as e:
-        logger.error(f"Error counting characters: {e}")
+        logger.error(f"Error fetching character {character_id}: {e}")
+        return None
+
+
+async def get_character_count_optimized(character_id: str) -> int:
+    """
+    Count how many instances of a character exist across all users using aggregation.
+    
+    This uses MongoDB aggregation pipeline for optimal performance instead of
+    iterating through all documents in Python.
+    
+    Args:
+        character_id: The character ID to count
+        
+    Returns:
+        Total count of this character across all users
+    """
+    key = cache_key('count', character_id)
+    
+    # Check cache first
+    if key in count_cache:
+        return count_cache[key]
+    
+    try:
+        # Use aggregation pipeline for efficient counting
+        pipeline = [
+            # Match only users who have this character
+            {'$match': {'characters.id': character_id}},
+            # Unwind the characters array
+            {'$unwind': '$characters'},
+            # Match only the specific character ID
+            {'$match': {'characters.id': character_id}},
+            # Count the results
+            {'$count': 'total'}
+        ]
+        
+        result = await user_collection.aggregate(pipeline).to_list(length=1)
+        count = result[0]['total'] if result else 0
+        
+        # Cache the result
+        count_cache[key] = count
+        return count
+        
+    except Exception as e:
+        logger.error(f"Error counting characters {character_id}: {e}")
         return 0
 
 
-async def get_top_grabbers(character_id, limit=10):
-    """Get top 10 users who have the most of this character"""
+async def get_top_grabbers_optimized(character_id: str, limit: int = 10) -> List[Dict]:
+    """
+    Get top users who own the most of this character using aggregation.
+    
+    This uses MongoDB aggregation pipeline for optimal performance.
+    
+    Args:
+        character_id: The character ID to analyze
+        limit: Maximum number of top users to return
+        
+    Returns:
+        List of dicts with user_id, username, first_name, count
+    """
+    key = cache_key('grabbers', character_id, limit)
+    
+    # Check cache first
+    if key in grabber_cache:
+        return grabber_cache[key]
+    
     try:
+        # Use aggregation pipeline for efficient top grabbers query
+        pipeline = [
+            # Match only users who have this character
+            {'$match': {'characters.id': character_id}},
+            # Project the necessary fields and count matching characters
+            {
+                '$project': {
+                    'id': 1,
+                    'username': 1,
+                    'first_name': 1,
+                    'count': {
+                        '$size': {
+                            '$filter': {
+                                'input': '$characters',
+                                'as': 'char',
+                                'cond': {'$eq': ['$$char.id', character_id]}
+                            }
+                        }
+                    }
+                }
+            },
+            # Sort by count descending
+            {'$sort': {'count': -1}},
+            # Limit to top N
+            {'$limit': limit}
+        ]
+        
         top_users = []
-
-        # Find all users who have this character
-        async for user in user_collection.find({'characters.id': character_id}):
-            user_id = user.get('id')
-            username = user.get('username', 'Unknown')
-            first_name = user.get('first_name', 'User')
-
-            # Count how many times this character appears
-            char_count = sum(1 for char in user.get('characters', []) if char.get('id') == character_id)
-
-            if char_count > 0:
-                top_users.append({
-                    'user_id': user_id,
-                    'username': username,
-                    'first_name': first_name,
-                    'count': char_count
-                })
-
-        # Sort by count and get top 10
-        top_users.sort(key=lambda x: x['count'], reverse=True)
-        return top_users[:limit]
-
+        async for user in user_collection.aggregate(pipeline):
+            top_users.append({
+                'user_id': user.get('id'),
+                'username': user.get('username', 'Unknown'),
+                'first_name': user.get('first_name', 'User'),
+                'count': user.get('count', 0)
+            })
+        
+        # Cache the result
+        grabber_cache[key] = top_users
+        return top_users
+        
     except Exception as e:
-        logger.error(f"Error getting top grabbers: {e}")
+        logger.error(f"Error getting top grabbers for {character_id}: {e}")
         return []
 
 
-def format_character_details(character, total_count, top_grabbers):
-    """Format character details with top grabbers"""
+async def search_characters_optimized(search_query: str) -> List[Dict]:
+    """
+    Search for characters by name with caching.
+    
+    Args:
+        search_query: The search term (case-insensitive)
+        
+    Returns:
+        List of character documents
+    """
+    # Normalize query for caching
+    normalized_query = search_query.lower().strip()
+    key = cache_key('search', normalized_query)
+    
+    # Check cache first
+    if key in search_cache:
+        return search_cache[key]
+    
+    try:
+        characters = []
+        search_regex = {'$regex': search_query, '$options': 'i'}
+        
+        # Use optimized find with projection to reduce data transfer
+        async for char in collection.find(
+            {
+                '$or': [
+                    {'name': search_regex},
+                    {'first_name': search_regex},
+                    {'last_name': search_regex}
+                ]
+            },
+            {
+                'id': 1,
+                'name': 1,
+                'anime': 1,
+                'rarity': 1,
+                'img_url': 1,
+                '_id': 0
+            }
+        ):
+            characters.append(char)
+        
+        # Cache the result
+        search_cache[key] = characters
+        return characters
+        
+    except Exception as e:
+        logger.error(f"Error searching characters for '{search_query}': {e}")
+        return []
+
+
+# ==================== FORMATTING LAYER ====================
+
+def format_character_details(character: Dict, total_count: int, top_grabbers: List[Dict]) -> str:
+    """
+    Format character details with top grabbers.
+    
+    Args:
+        character: Character document
+        total_count: Total instances of this character
+        top_grabbers: List of top users
+        
+    Returns:
+        Formatted message string
+    """
     name = character.get('name', 'Unknown')
     anime = character.get('anime', 'Unknown')
     char_id = character.get('id', 'Unknown')
@@ -114,7 +282,7 @@ def format_character_details(character, total_count, top_grabbers):
     anime_sc = to_small_caps(anime)
     char_id_sc = to_small_caps(char_id)
 
-    # Build message with new format
+    # Build message with exact same format
     msg = (
         f"📜 ᴄʜᴀʀᴀᴄᴛᴇʀ ɪɴꜰᴏ\n"
         f"🧩 ɴᴀᴍᴇ   : {name_sc}\n"
@@ -125,7 +293,7 @@ def format_character_details(character, total_count, top_grabbers):
 
     # Add global owners
     msg += f"🌍 ɢʟᴏʙᴀʟ ᴏᴡɴᴇʀs\n"
-    
+
     if top_grabbers:
         for i, grabber in enumerate(top_grabbers, 1):
             first_name = grabber['first_name']
@@ -137,8 +305,19 @@ def format_character_details(character, total_count, top_grabbers):
     return msg
 
 
-def format_sfind_page(characters, page, total_pages, search_query):
-    """Format sfind results page"""
+def format_sfind_page(characters: List[Dict], page: int, total_pages: int, search_query: str) -> str:
+    """
+    Format sfind results page.
+    
+    Args:
+        characters: Full list of characters
+        page: Current page number (0-indexed)
+        total_pages: Total number of pages
+        search_query: Original search query
+        
+    Returns:
+        Formatted page message
+    """
     start_idx = page * 10
     end_idx = min(start_idx + 10, len(characters))
     page_chars = characters[start_idx:end_idx]
@@ -176,6 +355,134 @@ def format_sfind_page(characters, page, total_pages, search_query):
     return msg
 
 
+def create_sfind_keyboard(page: int, total_pages: int, user_id: int, search_hash: str) -> InlineKeyboardMarkup:
+    """
+    Create keyboard for sfind pagination with stateless callback data.
+    
+    Args:
+        page: Current page (0-indexed)
+        total_pages: Total number of pages
+        user_id: User ID for authorization
+        search_hash: Hash of search query for session management
+        
+    Returns:
+        InlineKeyboardMarkup with navigation buttons
+    """
+    buttons = []
+    
+    if total_pages > 1:
+        buttons.append([
+            InlineKeyboardButton(
+                to_small_caps("Previous"), 
+                callback_data=f"sfind_prev:{user_id}:{page}:{search_hash}"
+            ),
+            InlineKeyboardButton(
+                f"{page + 1}/{total_pages}", 
+                callback_data=f"sfind_page:{user_id}:{page}:{search_hash}"
+            ),
+            InlineKeyboardButton(
+                to_small_caps("Next"), 
+                callback_data=f"sfind_next:{user_id}:{page}:{search_hash}"
+            )
+        ])
+    
+    buttons.append([
+        InlineKeyboardButton(
+            to_small_caps("Close"), 
+            callback_data=f"sfind_close:{user_id}"
+        )
+    ])
+    
+    return InlineKeyboardMarkup(buttons)
+
+
+# ==================== MEDIA HANDLING ====================
+
+async def safe_send_media(
+    message,
+    img_url: Optional[str],
+    caption: str,
+    reply_markup: InlineKeyboardMarkup
+) -> bool:
+    """
+    Safely send media with fallback to text if media fails.
+    
+    This prevents bot crashes from invalid/expired URLs.
+    
+    Args:
+        message: Message object to reply to
+        img_url: Image URL (can be None or invalid)
+        caption: Message caption/text
+        reply_markup: Keyboard markup
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not img_url:
+        # No image, send text directly
+        try:
+            await message.reply_text(caption, reply_markup=reply_markup)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending text message: {e}")
+            return False
+    
+    # Try sending with image
+    try:
+        await message.reply_photo(
+            photo=img_url,
+            caption=caption,
+            reply_markup=reply_markup
+        )
+        return True
+    except Exception as e:
+        # Image failed, fallback to text
+        logger.warning(f"Failed to send image {img_url}: {e}. Falling back to text.")
+        try:
+            await message.reply_text(caption, reply_markup=reply_markup)
+            return True
+        except Exception as text_error:
+            logger.error(f"Error sending fallback text: {text_error}")
+            return False
+
+
+# ==================== STATELESS PAGINATION HELPERS ====================
+
+def compute_search_hash(search_query: str) -> str:
+    """
+    Compute a short hash of the search query for callback data.
+    
+    Args:
+        search_query: The search string
+        
+    Returns:
+        8-character hash string
+    """
+    return str(hash(search_query.lower().strip()) % 100000000).zfill(8)
+
+
+async def get_cached_search_results(search_hash: str, search_query: str) -> Optional[List[Dict]]:
+    """
+    Get search results from cache, re-search if not found.
+    
+    Args:
+        search_hash: Hash of the search query
+        search_query: Original search query
+        
+    Returns:
+        List of character documents or None if search fails
+    """
+    normalized_query = search_query.lower().strip()
+    key = cache_key('search', normalized_query)
+    
+    if key in search_cache:
+        return search_cache[key]
+    
+    # Cache miss - re-execute search
+    logger.info(f"Cache miss for search '{search_query}', re-executing")
+    return await search_characters_optimized(search_query)
+
+
 # ==================== SCHECK COMMAND ====================
 
 @shivuu.on_message(filters.command(["scheck", "s", "check"]))
@@ -193,8 +500,8 @@ async def scheck_command(client, message):
 
         character_id = message.command[1]
 
-        # Search for character in database
-        character = await collection.find_one({'id': character_id})
+        # Search for character in database (with caching)
+        character = await get_character_by_id(character_id)
 
         if not character:
             await message.reply_text(
@@ -203,9 +510,11 @@ async def scheck_command(client, message):
             )
             return
 
-        # Get character stats
-        total_count = await get_character_count(character_id)
-        top_grabbers = await get_top_grabbers(character_id, limit=10)
+        # Get character stats (optimized with aggregation and caching)
+        total_count, top_grabbers = await asyncio.gather(
+            get_character_count_optimized(character_id),
+            get_top_grabbers_optimized(character_id, limit=10)
+        )
 
         # Format message
         details_msg = format_character_details(character, total_count, top_grabbers)
@@ -213,43 +522,48 @@ async def scheck_command(client, message):
         # Get character image
         img_url = character.get('img_url')
 
-        # Create keyboard with cancel button (small caps, no emoji)
+        # Create keyboard with cancel button
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(to_small_caps("Close"), callback_data=f"scheck_close:{message.from_user.id}")]
         ])
 
-        # Send with image if available
-        if img_url:
-            await message.reply_photo(
-                photo=img_url,
-                caption=details_msg,
-                reply_markup=keyboard
-            )
+        # Send with safe media handler
+        success = await safe_send_media(message, img_url, details_msg, keyboard)
+        
+        if success:
+            logger.info(f"Scheck: User {message.from_user.id} checked character {character_id}")
         else:
+            # Last resort error message
             await message.reply_text(
-                details_msg,
-                reply_markup=keyboard
+                f"❌ {to_small_caps('an error occurred while processing your request')}. "
+                f"{to_small_caps('please try again')}!"
             )
-
-        logger.info(f"Scheck: User {message.from_user.id} checked character {character_id}")
 
     except Exception as e:
-        logger.error(f"Error in scheck command: {e}")
-        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
+        logger.error(f"Error in scheck command: {e}", exc_info=True)
+        await message.reply_text(
+            f"❌ {to_small_caps('an error occurred while processing your request')}. "
+            f"{to_small_caps('please try again')}!"
+        )
 
 
 @shivuu.on_callback_query(filters.regex(r"^scheck_close:(\d+)$"))
 async def scheck_close_callback(client, callback_query):
     """Handle scheck close button"""
-    user_id = int(callback_query.data.split(":")[1])
+    try:
+        user_id = int(callback_query.data.split(":")[1])
 
-    # Only allow the user who initiated the command to close
-    if callback_query.from_user.id != user_id:
-        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
-        return
+        # Only allow the user who initiated the command to close
+        if callback_query.from_user.id != user_id:
+            await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
+            return
 
-    await callback_query.message.delete()
-    await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
+        await callback_query.message.delete()
+        await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
+        
+    except Exception as e:
+        logger.error(f"Error in scheck_close callback: {e}", exc_info=True)
+        await callback_query.answer(f"❌ {to_small_caps('error')}", show_alert=True)
 
 
 # ==================== SFIND COMMAND ====================
@@ -270,132 +584,141 @@ async def sfind_command(client, message):
         # Get search query (support multiple words)
         search_query = ' '.join(message.command[1:])
 
-        # Search in database (case-insensitive search for first_name, last_name, or name)
-        characters = []
-        search_regex = {'$regex': search_query, '$options': 'i'}
-
-        async for char in collection.find({
-            '$or': [
-                {'name': search_regex},
-                {'first_name': search_regex},
-                {'last_name': search_regex}
-            ]
-        }):
-            characters.append(char)
+        # Search in database (optimized with caching)
+        characters = await search_characters_optimized(search_query)
 
         if not characters:
             await message.reply_text(
                 f"❌ **{to_small_caps('no characters found')}!**\n\n"
-                f"{to_small_caps('character with name')} **{to_small_caps(search_query)}** {to_small_caps('is not available in main database')}."
+                f"{to_small_caps('character with name')} **{to_small_caps(search_query)}** "
+                f"{to_small_caps('is not available in main database')}."
             )
             return
 
-        # Store session
+        # Calculate pagination
         user_id = message.from_user.id
-        sfind_sessions[user_id] = {
-            'characters': characters,
-            'page': 0,
-            'search_query': search_query
-        }
-
-        # Calculate total pages
         total_pages = (len(characters) + 9) // 10  # Ceiling division
+        page = 0
+        search_hash = compute_search_hash(search_query)
 
         # Format first page
-        page_msg = format_sfind_page(characters, 0, total_pages, search_query)
+        page_msg = format_sfind_page(characters, page, total_pages, search_query)
 
-        # Create keyboard (small caps, no emojis)
-        buttons = []
-        if total_pages > 1:
-            buttons.append([
-                InlineKeyboardButton(to_small_caps("Previous"), callback_data=f"sfind_prev:{user_id}"),
-                InlineKeyboardButton(f"{1}/{total_pages}", callback_data=f"sfind_page:{user_id}"),
-                InlineKeyboardButton(to_small_caps("Next"), callback_data=f"sfind_next:{user_id}")
-            ])
-        buttons.append([
-            InlineKeyboardButton(to_small_caps("Close"), callback_data=f"sfind_close:{user_id}")
-        ])
+        # Create stateless keyboard
+        keyboard = create_sfind_keyboard(page, total_pages, user_id, search_hash)
 
-        keyboard = InlineKeyboardMarkup(buttons)
-
-        await message.reply_text(
-            page_msg,
-            reply_markup=keyboard
-        )
+        await message.reply_text(page_msg, reply_markup=keyboard)
 
         logger.info(f"Sfind: User {user_id} searched for '{search_query}' - found {len(characters)} results")
 
     except Exception as e:
-        logger.error(f"Error in sfind command: {e}")
-        await message.reply_text(f"❌ {to_small_caps('an error occurred while processing your request')}. {to_small_caps('please try again')}!")
+        logger.error(f"Error in sfind command: {e}", exc_info=True)
+        await message.reply_text(
+            f"❌ {to_small_caps('an error occurred while processing your request')}. "
+            f"{to_small_caps('please try again')}!"
+        )
 
 
-@shivuu.on_callback_query(filters.regex(r"^sfind_(prev|next|close):(\d+)$"))
+@shivuu.on_callback_query(filters.regex(r"^sfind_(prev|next|close):(\d+)(?::(\d+):(\w+))?$"))
 async def sfind_navigation_callback(client, callback_query):
-    """Handle sfind navigation buttons"""
-    data_parts = callback_query.data.split(":")
-    action = data_parts[0].split("_")[1]  # prev, next, or close
-    user_id = int(data_parts[1])
+    """
+    Handle sfind navigation buttons with stateless pagination.
+    
+    Callback data format:
+    - sfind_close:USER_ID
+    - sfind_prev:USER_ID:PAGE:SEARCH_HASH
+    - sfind_next:USER_ID:PAGE:SEARCH_HASH
+    """
+    try:
+        data_parts = callback_query.data.split(":")
+        action = data_parts[0].split("_")[1]  # prev, next, or close
+        user_id = int(data_parts[1])
 
-    # Only allow the user who initiated the command
-    if callback_query.from_user.id != user_id:
-        await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
-        return
-
-    # Handle close
-    if action == "close":
-        if user_id in sfind_sessions:
-            del sfind_sessions[user_id]
-        await callback_query.message.delete()
-        await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
-        return
-
-    # Check if session exists
-    if user_id not in sfind_sessions:
-        await callback_query.answer(f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", show_alert=True)
-        return
-
-    session = sfind_sessions[user_id]
-    characters = session['characters']
-    current_page = session['page']
-    search_query = session['search_query']
-    total_pages = (len(characters) + 9) // 10
-
-    # Handle navigation
-    if action == "prev":
-        if current_page > 0:
-            session['page'] -= 1
-        else:
-            await callback_query.answer(f"❌ {to_small_caps('this is the first page')}!", show_alert=True)
-            return
-    elif action == "next":
-        if current_page < total_pages - 1:
-            session['page'] += 1
-        else:
-            await callback_query.answer(f"❌ {to_small_caps('this is the last page')}!", show_alert=True)
+        # Only allow the user who initiated the command
+        if callback_query.from_user.id != user_id:
+            await callback_query.answer(f"❌ {to_small_caps('this is not for you')}!", show_alert=True)
             return
 
-    # Format new page
-    new_page = session['page']
-    page_msg = format_sfind_page(characters, new_page, total_pages, search_query)
+        # Handle close
+        if action == "close":
+            await callback_query.message.delete()
+            await callback_query.answer(to_small_caps("closed") + "!", show_alert=False)
+            return
 
-    # Update keyboard (small caps, no emojis)
-    buttons = []
-    if total_pages > 1:
-        buttons.append([
-            InlineKeyboardButton(to_small_caps("Previous"), callback_data=f"sfind_prev:{user_id}"),
-            InlineKeyboardButton(f"{new_page + 1}/{total_pages}", callback_data=f"sfind_page:{user_id}"),
-            InlineKeyboardButton(to_small_caps("Next"), callback_data=f"sfind_next:{user_id}")
-        ])
-    buttons.append([
-        InlineKeyboardButton(to_small_caps("Close"), callback_data=f"sfind_close:{user_id}")
-    ])
+        # Parse pagination data
+        if len(data_parts) < 4:
+            await callback_query.answer(
+                f"❌ {to_small_caps('invalid request')}!", 
+                show_alert=True
+            )
+            return
 
-    keyboard = InlineKeyboardMarkup(buttons)
+        current_page = int(data_parts[2])
+        search_hash = data_parts[3]
 
-    # Update message
-    await callback_query.message.edit_text(
-        page_msg,
-        reply_markup=keyboard
-    )
-    await callback_query.answer(f"{to_small_caps('page')} {new_page + 1}/{total_pages}", show_alert=False)
+        # Extract search query from message (parse from existing message)
+        message_text = callback_query.message.text
+        query_line = [line for line in message_text.split('\n') if 'query' in line.lower()]
+        
+        if not query_line:
+            await callback_query.answer(
+                f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", 
+                show_alert=True
+            )
+            return
+
+        # Extract query from formatted message (between ** markers)
+        try:
+            search_query = query_line[0].split('**')[1]
+            # Reverse small caps conversion for cache lookup
+            search_query_normalized = search_query.lower()
+        except (IndexError, AttributeError):
+            await callback_query.answer(
+                f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", 
+                show_alert=True
+            )
+            return
+
+        # Get characters from cache
+        characters = await get_cached_search_results(search_hash, search_query_normalized)
+
+        if not characters:
+            await callback_query.answer(
+                f"❌ {to_small_caps('session expired')}! {to_small_caps('please search again')}.", 
+                show_alert=True
+            )
+            return
+
+        total_pages = (len(characters) + 9) // 10
+
+        # Handle navigation
+        new_page = current_page
+        if action == "prev":
+            if current_page > 0:
+                new_page = current_page - 1
+            else:
+                await callback_query.answer(f"❌ {to_small_caps('this is the first page')}!", show_alert=True)
+                return
+        elif action == "next":
+            if current_page < total_pages - 1:
+                new_page = current_page + 1
+            else:
+                await callback_query.answer(f"❌ {to_small_caps('this is the last page')}!", show_alert=True)
+                return
+
+        # Format new page
+        page_msg = format_sfind_page(characters, new_page, total_pages, search_query)
+
+        # Update keyboard with new page number
+        keyboard = create_sfind_keyboard(new_page, total_pages, user_id, search_hash)
+
+        # Update message
+        await callback_query.message.edit_text(page_msg, reply_markup=keyboard)
+        await callback_query.answer(f"{to_small_caps('page')} {new_page + 1}/{total_pages}", show_alert=False)
+
+    except Exception as e:
+        logger.error(f"Error in sfind navigation callback: {e}", exc_info=True)
+        await callback_query.answer(
+            f"❌ {to_small_caps('error')}. {to_small_caps('please try again')}!", 
+            show_alert=True
+        )

@@ -1192,8 +1192,9 @@ class CharacterUpdateHandler:
 def require_sudo(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = str(update.effective_user.id)
-        if user_id not in sudo_users:
+        user_id = update.effective_user.id
+        # Allow if user is owner or in configured sudo users
+        if user_id != Config.OWNER_ID and user_id not in Config.SUDO_USERS:
             await update.message.reply_text(
                 '❌ Access Denied\n\n'
                 'This command requires sudo privileges.\n'

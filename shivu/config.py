@@ -10,7 +10,7 @@ class Config:
     LOGGER: bool = True
 
     # Bot Credentials (from BotFather)
-    TOKEN: str = os.getenv("BOT_TOKEN", "8551975632:AAHB_mZTANp_yu-eKKyopgergkQJWJ4RYuo")
+    TOKEN: str = os.getenv("BOT_TOKEN", "8551975632:AAH1vrphQvEf_O5w9IfecwUmHJ_QwQbgBwM")
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "Senpai_Waifu_Grabbing_Bot")
 
     # Telegram API Credentials (from my.telegram.org/apps)
@@ -19,15 +19,20 @@ class Config:
 
     # Owner and Sudo Users
     OWNER_ID: int = int(os.getenv("OWNER_ID", "7818323042"))
-    SUDO_USERS = (os.getenv("SUDO_USERS", "5147822244 ,8453236527"))
+    SUDO_USERS: List[int] = [
+        int(user_id.strip())
+        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527").split(",")
+        if user_id.strip().isdigit()
+    ]
+
     # Group and Channel IDs
-    GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003727098465"))
-    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003749495721"))
+    GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003129952280"))
+    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003150808065"))
 
     # Database
     MONGO_URL: str = os.getenv(
         "MONGO_URL",
-        "mongodb+srv://chatbot10:j@cluster0.9esnn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+        "mongodb+srv://ravi:ravi12345@cluster0.hndinhj.mongodb.net/?retryWrites=true&w=majority"
     )
 
     # Media
@@ -42,7 +47,7 @@ class Config:
 
     # Community Links
     SUPPORT_CHAT: str = os.getenv("SUPPORT_CHAT", "THE_DRAGON_SUPPORT")
-    UPDATE_CHAT: str = os.getenv("UPDATE_CHAT", "Senpai_Updates")
+    UPDATE_CHAT: str = os.getenv("UPDATE_CHAT", "PICK_X_UPDATE")
 
     @classmethod
     def validate(cls) -> None:
@@ -76,6 +81,10 @@ class Config:
                 print(f"   - {error}")
             print("\n💡 Please set the required environment variables and try again.")
             sys.exit(1)
+
+        # Add OWNER_ID to SUDO_USERS if not already present
+        if cls.OWNER_ID not in cls.SUDO_USERS:
+            cls.SUDO_USERS.append(cls.OWNER_ID)
 
 
 class Production(Config):

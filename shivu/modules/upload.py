@@ -19,10 +19,7 @@ from telegram.ext import CommandHandler, ContextTypes
 from telegram.error import TelegramError, NetworkError, TimedOut
 from motor.motor_asyncio import AsyncIOMotorCollection
 
-from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
-
-
-sudo_users = 5147822244
+from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT, sudo_users
 
 
 class MediaType(Enum):

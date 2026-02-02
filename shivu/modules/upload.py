@@ -72,14 +72,6 @@ def validate_image_url(url: str) -> bool:
     if not url.startswith(('http://', 'https://')):
         return False
     
-    # Block direct Telegram CDN links (optional - uncomment if needed)
-    # telegram_patterns = [
-    #     r'api\.telegram\.org',
-    #     r't\.me/.*\.(jpg|jpeg|png|gif|webp)',
-    # ]
-    # if any(re.search(pattern, url, re.IGNORECASE) for pattern in telegram_patterns):
-    #     return False
-    
     # Supported image hosting services
     supported_domains = [
         'catbox.moe',
@@ -128,14 +120,23 @@ def validate_image_url(url: str) -> bool:
         return False
 
 def build_caption(char_id: str, char_name: str, anime: str, rarity_display: str, uploader_id: int, uploader_name: str) -> str:
+    """
+    Builds caption in the format:
+    86: Roronoa Zoro
+    One Piece
+    ⚰️ 𝙍𝘼𝙍𝙄𝙏𝙔: ɴɪɢʜᴛᴍᴀʀᴇ
+    Type: 🖼 Image
+    𝑴𝒂𝒅𝒆 𝑩𝒚 ➥ 𝘼 𝙇 𝙀 𝙓
+    """
     emoji = rarity_display.split()[0]
     rarity_text = rarity_display.split()[1]
-    uploader_link = f'<a href="tg://user?id={uploader_id}">{uploader_name}</a>'
+    
     return (
         f"{char_id}: {char_name}\n"
-        f"{char_name} ({anime})\n\n"
-        f"{emoji} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n\n"
-        f"𝑵𝒂𝒅𝒆 𝑩𝒚 ➥ 参┊ＹＯＩＣＨＩ→ ＩＳＡＧＩ"
+        f"{anime}\n"
+        f"{emoji} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n"
+        f"Type: 🖼 Image\n"
+        f"𝑴𝒂𝒅𝒆 𝑩𝒚 ➥ 𝘼 𝙇 𝙀 𝙓"
     )
 
 async def get_next_sequence_number(sequence_name):

@@ -2,11 +2,13 @@ import signal
 import sys
 import asyncio
 import urllib.request
+import urllib.parse
+import io
 import logging
 import re
 from typing import Optional, Tuple
 from pymongo import ReturnDocument
-from telegram import Update, InputMediaPhoto
+from telegram import Update, InputMediaPhoto, InputFile
 from telegram.ext import CommandHandler, CallbackContext, Application
 from telegram.error import TelegramError, TimedOut, NetworkError
 
@@ -77,7 +79,6 @@ class ShutdownHandler:
                     if asyncio.iscoroutinefunction(stop_func):
                         loop.call_soon_threadsafe(lambda: asyncio.create_task(stop_func()))
                     else:
-                        # sync stop
                         loop.call_soon_threadsafe(stop_func)
                 except RuntimeError:
                     # No running loop (maybe running from different thread) - attempt direct call
@@ -133,7 +134,6 @@ def validate_rarity(rarity_input: str) -> Tuple[Optional[Tuple[int, str]], Optio
 def normalize_url(url: str) -> str:
     """
     Minimal normalization: strip, add https if missing, handle common Google Drive forms.
-    Keep conservative — do not try brittle host-specific transforms here.
     """
     if not url:
         return url
@@ -155,91 +155,59 @@ def normalize_url(url: str) -> str:
     return u
 
 
-def validate_image_url(url: str) -> bool:
+def download_image_and_name(url: str) -> Tuple[Optional[bytes], Optional[str]]:
     """
-    Validate if URL looks like a supported image. Keep quick checks first,
-    then fallback to a light HEAD/GET check.
+    Download the URL content and attempt to return (bytes, filename).
+    If the URL is HTML, try to extract og:image or first <img>.
+    Returns (None, None) on failure.
     """
-    if not url:
-        return False
-
-    url = normalize_url(url)
-
-    supported_domains = [
-        'catbox.moe', 'files.catbox.moe',
-        'telegra.ph', 'graph.org',
-        'imgur.com', 'i.imgur.com',
-        'postimg.cc', 'i.postimg.cc',
-        'ibb.co', 'i.ibb.co',
-        'imgbb.com', 'i.imgbb.com',
-        'drive.google.com',
-        'unsplash.com', 'images.unsplash.com',
-    ]
-
-    url_lower = url.lower()
-    if any(domain in url_lower for domain in supported_domains):
-        # If domain is telegraph allow as-is; otherwise prefer extension check when possible
-        if url_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')):
-            return True
-        if 'telegra.ph' in url_lower or 'graph.org' in url_lower:
-            return True
-        # some trusted hosts may serve images without extension; accept them
-        return True
-
-    # Fallback: attempt to fetch headers and inspect content-type
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=7) as response:
-            content_type = response.headers.get('Content-Type', '').lower()
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content_type = resp.headers.get('Content-Type', '').lower()
+            data = resp.read()
             if content_type.startswith('image/'):
-                return True
-            # fallback to URL extension
-            if url_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')):
-                return True
+                # extension from content-type
+                ext = content_type.split('/')[-1].split(';')[0]
+                filename = f'image.{ext}' if ext else 'image.jpg'
+                return data, filename
+
+            # If HTML, try to extract og:image or first <img>
+            # decode safely
+            text = data.decode('utf-8', errors='ignore')
+            # og:image
+            m = re.search(r'property=["\']og:image["\']\s+content=["\'](.*?)["\']', text, re.I)
+            if not m:
+                # twitter:image
+                m = re.search(r'property=["\']twitter:image["\']\s+content=["\'](.*?)["\']', text, re.I)
+            if not m:
+                # first img tag
+                m = re.search(r'<img[^>]+src=["\'](.*?)["\']', text, re.I)
+            if m:
+                found = m.group(1)
+                found_url = urllib.parse.urljoin(url, found)
+                # fetch that
+                req2 = urllib.request.Request(found_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req2, timeout=15) as resp2:
+                    ct2 = resp2.headers.get('Content-Type', '').lower()
+                    data2 = resp2.read()
+                    if ct2.startswith('image/'):
+                        ext2 = ct2.split('/')[-1].split(';')[0]
+                        filename = f'image.{ext2}' if ext2 else 'image.jpg'
+                        return data2, filename
+            # nothing usable
+            return None, None
     except Exception as e:
-        logger.debug(f"Image URL validation network check failed for {url}: {e}")
-        return False
-
-    return False
-
-
-def build_caption(char_id: str, char_name: str, anime: str, rarity_display: str,
-                  uploader_id: int, uploader_name: str) -> str:
-    emoji = rarity_display.split()[0] if rarity_display else ""
-    rarity_text = " ".join(rarity_display.split()[1:]) if rarity_display else ""
-    uploader_link = f'<a href="tg://user?id={uploader_id}">{uploader_name}</a>'
-    return (
-        f"{char_id}: {char_name}\n"
-        f"{char_name} ({anime})\n\n"
-        f"{emoji} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n\n"
-        f"Uploaded by: {uploader_link}"
-    )
-
-
-async def get_next_sequence_number(sequence_name: str) -> int:
-    sequence_collection = db.sequences
-    try:
-        # Use upsert so the sequence exists on first use
-        sequence_document = await sequence_collection.find_one_and_update(
-            {'_id': sequence_name},
-            {'$inc': {'sequence_value': 1}},
-            return_document=ReturnDocument.AFTER,
-            upsert=True
-        )
-        # If for some reason document is None, ensure we return 1
-        if not sequence_document or 'sequence_value' not in sequence_document:
-            await sequence_collection.update_one({'_id': sequence_name}, {'$set': {'sequence_value': 1}}, upsert=True)
-            return 1
-        return int(sequence_document['sequence_value'])
-    except Exception as e:
-        logger.error(f"Sequence generation failed for {sequence_name}: {e}")
-        raise
+        logger.debug(f"download_image_and_name failed for {url}: {e}")
+        return None, None
 
 
 async def send_photo_to_channel(context: CallbackContext, img_url: str, caption: str) -> Optional[int]:
     """
-    Send photo to channel; avoid unsupported kwargs to keep compatibility.
+    Send photo to channel. Try URL-first; if Telegram rejects due to wrong content type,
+    try to download and send bytes as InputFile (fallback).
     """
+    # quick attempt: send by URL
     try:
         message = await context.bot.send_photo(
             chat_id=CHARA_CHANNEL_ID,
@@ -248,15 +216,31 @@ async def send_photo_to_channel(context: CallbackContext, img_url: str, caption:
             parse_mode='HTML'
         )
         return message.message_id
-    except TimedOut:
-        logger.error(f"Timeout sending photo to channel: {img_url}")
-        raise
-    except NetworkError as e:
+    except (NetworkError, TelegramError) as e:
         logger.error(f"Network error sending photo to channel: {e}")
-        raise
-    except TelegramError as e:
-        logger.error(f"Telegram error sending photo to channel: {e}")
-        raise
+        # If error message suggests wrong content type or similar, attempt fallback
+        # Perform blocking download in executor
+        try:
+            loop = asyncio.get_event_loop()
+            data, filename = await loop.run_in_executor(None, download_image_and_name, img_url)
+            if not data:
+                logger.error("Fallback download did not return image data.")
+                raise e  # re-raise original to indicate failure
+
+            bio = io.BytesIO(data)
+            bio.seek(0)
+            input_file = InputFile(bio, filename=filename or "image.jpg")
+            message = await context.bot.send_photo(
+                chat_id=CHARA_CHANNEL_ID,
+                photo=input_file,
+                caption=caption,
+                parse_mode='HTML'
+            )
+            return message.message_id
+        except Exception as ex2:
+            logger.error(f"Fallback upload failed: {ex2}")
+            # Re-raise original for caller to decide; include fallback information in log
+            raise e
 
 
 async def update_channel_media(context: CallbackContext, message_id: int,
@@ -272,8 +256,23 @@ async def update_channel_media(context: CallbackContext, message_id: int,
         logger.error(f"Timeout updating media for message {message_id}")
         return False
     except TelegramError as e:
-        logger.error(f"Failed to update media for message {message_id}: {e}")
-        return False
+        # try fallback: download & send as new photo then update DB msg id if needed
+        logger.warning(f"edit_message_media failed: {e}; attempting fallback download+replace")
+        try:
+            loop = asyncio.get_event_loop()
+            data, filename = await loop.run_in_executor(None, download_image_and_name, img_url)
+            if not data:
+                return False
+            bio = io.BytesIO(data); bio.seek(0)
+            input_file = InputFile(bio, filename=filename or "image.jpg")
+            # If editing media fails, try sending a new photo and update DB externally
+            message = await context.bot.send_photo(chat_id=CHARA_CHANNEL_ID, photo=input_file, caption=caption, parse_mode='HTML')
+            # Caller should update DB.message_id if necessary
+            logger.info(f"Sent replacement photo to channel message_id {message.message_id}")
+            return True
+        except Exception as ex:
+            logger.error(f"Fallback media update failed: {ex}")
+            return False
 
 
 async def update_channel_caption(context: CallbackContext, message_id: int,
@@ -324,12 +323,9 @@ async def upload(update: Update, context: CallbackContext) -> None:
         character_name = args[1].replace('-', ' ').title()
         anime = args[2].replace('-', ' ').title()
 
-        if not validate_image_url(img_url):
-            await update.message.reply_text(
-                '❌ Invalid Image URL.\n\n'
-                'Supported: direct image links (jpg/png/webp), Catbox, Telegraph, Imgur, Postimg, Google Drive (direct).\n'
-                'If you used a Google Drive link, try the shareable /file/d/<id>/ form.'
-            )
+        # Light validation: check scheme and common host patterns
+        if not img_url.startswith(('http://', 'https://')):
+            await update.message.reply_text('❌ Invalid Image URL (missing http/https).')
             return
 
         rarity_data, error_msg = validate_rarity(args[3])
@@ -467,10 +463,8 @@ async def update_command(update: Update, context: CallbackContext) -> None:
             new_value = rarity_display
         elif field == 'img_url':
             normalized = normalize_url(raw_value)
-            if not validate_image_url(normalized):
-                await update.message.reply_text(
-                    '❌ Invalid Image URL. Supported: direct image links (jpg/png/webp), Catbox, Telegraph, Imgur, Postimg, Google Drive (direct).'
-                )
+            if not normalized.startswith(('http://', 'https://')):
+                await update.message.reply_text('❌ Invalid Image URL.')
                 return
             new_value = normalized
 

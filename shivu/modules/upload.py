@@ -1,7 +1,9 @@
 import signal
 import sys
+import asyncio
 import urllib.request
 import logging
+import re
 from typing import Optional, Tuple
 from pymongo import ReturnDocument
 from telegram import Update, InputMediaPhoto
@@ -45,6 +47,10 @@ use rarity number accordingly rarity Map
 
 
 class ShutdownHandler:
+    """
+    Graceful shutdown handler that requests the telegram Application to stop
+    in an asyncio-safe way and closes DB client.
+    """
     def __init__(self, app: Application):
         self.app = app
         self.is_shutting_down = False
@@ -56,22 +62,45 @@ class ShutdownHandler:
     def _handle_signal(self, signum, frame):
         if self.is_shutting_down:
             return
-        
+
         self.is_shutting_down = True
         signal_name = 'SIGINT' if signum == signal.SIGINT else 'SIGTERM'
         logger.info(f"Received {signal_name}, initiating graceful shutdown...")
-        
+
         try:
-            logger.info("Stopping bot...")
-            self.app.stop_running()
-            
-            logger.info("Closing database connection...")
-            if db.client:
-                db.client.close()
-            
-            logger.info("Shutdown complete.")
+            # Stop the telegram Application in an asyncio-safe manner
+            stop_func = getattr(self.app, "stop", None)
+            if callable(stop_func):
+                try:
+                    loop = asyncio.get_event_loop()
+                    # Schedule the coroutine if stop is async
+                    if asyncio.iscoroutinefunction(stop_func):
+                        loop.call_soon_threadsafe(lambda: asyncio.create_task(stop_func()))
+                    else:
+                        # sync stop
+                        loop.call_soon_threadsafe(stop_func)
+                except RuntimeError:
+                    # No running loop (maybe running from different thread) - attempt direct call
+                    try:
+                        stop_func()
+                    except Exception as e:
+                        logger.warning(f"Could not call app.stop() directly: {e}")
+            else:
+                logger.debug("Application has no stop() method; skipping programmatic stop.")
+
+            # Close DB client if available
+            try:
+                if getattr(db, "client", None):
+                    db.client.close()
+                    logger.info("Database client closed.")
+            except Exception as e:
+                logger.warning(f"Error closing DB client: {e}")
+
+            logger.info("Shutdown sequence initiated. Exiting now.")
             sys.exit(0)
-            
+
+        except SystemExit:
+            raise
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
             sys.exit(1)
@@ -101,87 +130,122 @@ def validate_rarity(rarity_input: str) -> Tuple[Optional[Tuple[int, str]], Optio
         return None, error_msg
 
 
+def normalize_url(url: str) -> str:
+    """
+    Minimal normalization: strip, add https if missing, handle common Google Drive forms.
+    Keep conservative — do not try brittle host-specific transforms here.
+    """
+    if not url:
+        return url
+    u = url.strip()
+    if not u.startswith(('http://', 'https://')):
+        u = 'https://' + u
+
+    # Google Drive: convert /file/d/<id>/ to uc?export=download
+    if 'drive.google.com' in u:
+        m = re.search(r'/file/d/([a-zA-Z0-9_-]+)', u)
+        if m:
+            file_id = m.group(1)
+            return f'https://drive.google.com/uc?export=download&id={file_id}'
+        m = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', u)
+        if m:
+            file_id = m.group(1)
+            return f'https://drive.google.com/uc?export=download&id={file_id}'
+
+    return u
+
+
 def validate_image_url(url: str) -> bool:
-    if not url or not url.startswith(('http://', 'https://')):
+    """
+    Validate if URL looks like a supported image. Keep quick checks first,
+    then fallback to a light HEAD/GET check.
+    """
+    if not url:
         return False
-    
+
+    url = normalize_url(url)
+
     supported_domains = [
         'catbox.moe', 'files.catbox.moe',
-        'telegra.ph', 'telegraph',
+        'telegra.ph', 'graph.org',
         'imgur.com', 'i.imgur.com',
         'postimg.cc', 'i.postimg.cc',
         'ibb.co', 'i.ibb.co',
         'imgbb.com', 'i.imgbb.com',
-        'imageban.ru', 'picsum.photos',
+        'drive.google.com',
         'unsplash.com', 'images.unsplash.com',
     ]
-    
+
     url_lower = url.lower()
-    is_supported = any(domain in url_lower for domain in supported_domains)
-    
-    if is_supported:
-        valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
-        has_valid_ext = any(url_lower.endswith(ext) for ext in valid_extensions)
-        is_telegraph = 'telegra.ph' in url_lower
-        
-        if has_valid_ext or is_telegraph:
+    if any(domain in url_lower for domain in supported_domains):
+        # If domain is telegraph allow as-is; otherwise prefer extension check when possible
+        if url_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')):
             return True
-    
+        if 'telegra.ph' in url_lower or 'graph.org' in url_lower:
+            return True
+        # some trusted hosts may serve images without extension; accept them
+        return True
+
+    # Fallback: attempt to fetch headers and inspect content-type
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=7) as response:
             content_type = response.headers.get('Content-Type', '').lower()
-            return content_type.startswith('image/')
+            if content_type.startswith('image/'):
+                return True
+            # fallback to URL extension
+            if url_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')):
+                return True
     except Exception as e:
-        logger.warning(f"URL validation failed for {url}: {e}")
+        logger.debug(f"Image URL validation network check failed for {url}: {e}")
         return False
 
+    return False
 
-def build_caption(char_id: str, char_name: str, anime: str, rarity_display: str, 
+
+def build_caption(char_id: str, char_name: str, anime: str, rarity_display: str,
                   uploader_id: int, uploader_name: str) -> str:
-    emoji = rarity_display.split()[0]
-    rarity_text = rarity_display.split()[1]
-    
+    emoji = rarity_display.split()[0] if rarity_display else ""
+    rarity_text = " ".join(rarity_display.split()[1:]) if rarity_display else ""
+    uploader_link = f'<a href="tg://user?id={uploader_id}">{uploader_name}</a>'
     return (
         f"{char_id}: {char_name}\n"
-        f"{anime}\n"
-        f"{emoji} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n"
-        f"Type: 🖼 Image\n"
-        f"𝑴𝒂𝒅𝒆 𝑩𝒚 ➥ 𝘼 𝙇 𝙀 𝙓"
+        f"{char_name} ({anime})\n\n"
+        f"{emoji} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n\n"
+        f"Uploaded by: {uploader_link}"
     )
 
 
 async def get_next_sequence_number(sequence_name: str) -> int:
     sequence_collection = db.sequences
     try:
+        # Use upsert so the sequence exists on first use
         sequence_document = await sequence_collection.find_one_and_update(
             {'_id': sequence_name},
             {'$inc': {'sequence_value': 1}},
             return_document=ReturnDocument.AFTER,
             upsert=True
         )
-        
-        if not sequence_document:
-            await sequence_collection.insert_one({'_id': sequence_name, 'sequence_value': 1})
+        # If for some reason document is None, ensure we return 1
+        if not sequence_document or 'sequence_value' not in sequence_document:
+            await sequence_collection.update_one({'_id': sequence_name}, {'$set': {'sequence_value': 1}}, upsert=True)
             return 1
-            
-        return sequence_document['sequence_value']
+        return int(sequence_document['sequence_value'])
     except Exception as e:
         logger.error(f"Sequence generation failed for {sequence_name}: {e}")
         raise
 
 
-async def send_photo_to_channel(context: CallbackContext, img_url: str, 
-                                caption: str) -> Optional[int]:
+async def send_photo_to_channel(context: CallbackContext, img_url: str, caption: str) -> Optional[int]:
+    """
+    Send photo to channel; avoid unsupported kwargs to keep compatibility.
+    """
     try:
         message = await context.bot.send_photo(
             chat_id=CHARA_CHANNEL_ID,
             photo=img_url,
             caption=caption,
-            parse_mode='HTML',
-            read_timeout=30,
-            write_timeout=30,
-            connect_timeout=30
+            parse_mode='HTML'
         )
         return message.message_id
     except TimedOut:
@@ -195,15 +259,13 @@ async def send_photo_to_channel(context: CallbackContext, img_url: str,
         raise
 
 
-async def update_channel_media(context: CallbackContext, message_id: int, 
+async def update_channel_media(context: CallbackContext, message_id: int,
                                img_url: str, caption: str) -> bool:
     try:
         await context.bot.edit_message_media(
             chat_id=CHARA_CHANNEL_ID,
             message_id=message_id,
-            media=InputMediaPhoto(media=img_url, caption=caption, parse_mode='HTML'),
-            read_timeout=30,
-            write_timeout=30
+            media=InputMediaPhoto(media=img_url, caption=caption, parse_mode='HTML')
         )
         return True
     except TimedOut:
@@ -214,16 +276,14 @@ async def update_channel_media(context: CallbackContext, message_id: int,
         return False
 
 
-async def update_channel_caption(context: CallbackContext, message_id: int, 
+async def update_channel_caption(context: CallbackContext, message_id: int,
                                  caption: str) -> bool:
     try:
         await context.bot.edit_message_caption(
             chat_id=CHARA_CHANNEL_ID,
             message_id=message_id,
             caption=caption,
-            parse_mode='HTML',
-            read_timeout=30,
-            write_timeout=30
+            parse_mode='HTML'
         )
         return True
     except TimedOut:
@@ -238,9 +298,7 @@ async def delete_channel_message(context: CallbackContext, message_id: int) -> b
     try:
         await context.bot.delete_message(
             chat_id=CHARA_CHANNEL_ID,
-            message_id=message_id,
-            read_timeout=20,
-            write_timeout=20
+            message_id=message_id
         )
         return True
     except TelegramError as e:
@@ -250,7 +308,7 @@ async def delete_channel_message(context: CallbackContext, message_id: int) -> b
 
 async def upload(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
-    
+
     if not is_sudo(user_id):
         await update.message.reply_text('Ask My Owner...')
         return
@@ -261,15 +319,16 @@ async def upload(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(WRONG_FORMAT_TEXT)
             return
 
-        img_url = args[0]
+        raw_url = args[0]
+        img_url = normalize_url(raw_url)
         character_name = args[1].replace('-', ' ').title()
         anime = args[2].replace('-', ' ').title()
 
         if not validate_image_url(img_url):
             await update.message.reply_text(
                 '❌ Invalid Image URL.\n\n'
-                'Supported: Catbox, Telegraph, Imgur, etc.\n'
-                '❌ Telegram File IDs are not supported!'
+                'Supported: direct image links (jpg/png/webp), Catbox, Telegraph, Imgur, Postimg, Google Drive (direct).\n'
+                'If you used a Google Drive link, try the shareable /file/d/<id>/ form.'
             )
             return
 
@@ -291,50 +350,47 @@ async def upload(update: Update, context: CallbackContext) -> None:
 
         caption = build_caption(
             char_id, character_name, anime, rarity_display,
-            user_id, update.effective_user.first_name
+            user_id, update.effective_user.first_name or update.effective_user.username or "Unknown"
         )
 
         message_id = None
         channel_upload_success = False
-        
+
         try:
             message_id = await send_photo_to_channel(context, img_url, caption)
-            character['message_id'] = message_id
-            channel_upload_success = True
-            logger.info(f"Character {char_id} uploaded to channel with message_id {message_id}")
+            if message_id:
+                character['message_id'] = message_id
+                channel_upload_success = True
+                logger.info(f"Character {char_id} uploaded to channel with message_id {message_id}")
         except Exception as channel_error:
             logger.error(f"Channel upload failed for character {char_id}: {channel_error}")
 
         try:
             await collection.insert_one(character)
             logger.info(f"Character {char_id} saved to database")
-            
             if channel_upload_success:
-                await update.message.reply_text('CHARACTER ADDED....')
+                await update.message.reply_text('✅ CHARACTER ADDED.')
             else:
                 await update.message.reply_text(
-                    "Character Added to Database but Channel upload failed. "
-                    "Consider checking bot permissions or channel ID."
+                    'Character added to database, but channel upload failed. '
+                    'Check bot permissions or channel ID; channel upload errors are logged.'
                 )
-                
         except Exception as db_error:
             logger.error(f"Database insert failed for character {char_id}: {db_error}")
             await update.message.reply_text(
-                f'Character Upload Unsuccessful. Database Error.\n'
-                f'Please contact support: {SUPPORT_CHAT}'
+                f'Character Upload Unsuccessful. Database Error.\nPlease contact support: {SUPPORT_CHAT}'
             )
 
     except Exception as e:
-        logger.error(f"Upload command error (user {user_id}): {e}")
+        logger.exception(f"Upload command error (user {user_id})")
         await update.message.reply_text(
-            f'Character Upload Unsuccessful. Error: {str(e)}\n'
-            f'If you think this is a source error, forward to: {SUPPORT_CHAT}'
+            f'Character Upload Unsuccessful. Error: {str(e)}\nIf you think this is a source error, forward to: {SUPPORT_CHAT}'
         )
 
 
 async def delete(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
-    
+
     if not is_sudo(user_id):
         await update.message.reply_text('Ask my Owner to use this Command...')
         return
@@ -353,26 +409,26 @@ async def delete(update: Update, context: CallbackContext) -> None:
             return
 
         logger.info(f"Character {char_id} deleted from database")
-        
+
         if 'message_id' in character:
             channel_deleted = await delete_channel_message(context, character['message_id'])
             if channel_deleted:
-                await update.message.reply_text('DONE')
+                await update.message.reply_text('✅ DONE')
             else:
                 await update.message.reply_text(
                     'Deleted from database, but channel message not found or already deleted.'
                 )
         else:
-            await update.message.reply_text('DONE')
+            await update.message.reply_text('✅ DONE')
 
     except Exception as e:
-        logger.error(f"Delete command error (user {user_id}, char_id {args[0] if args else 'unknown'}): {e}")
+        logger.exception(f"Delete command error (user {user_id}, char_id {args[0] if args else 'unknown'})")
         await update.message.reply_text(f'Error during deletion: {str(e)}')
 
 
 async def update_command(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
-    
+
     if not is_sudo(user_id):
         await update.message.reply_text('You do not have permission to use this command.')
         return
@@ -410,14 +466,13 @@ async def update_command(update: Update, context: CallbackContext) -> None:
             rarity_num, rarity_display = rarity_data
             new_value = rarity_display
         elif field == 'img_url':
-            if not validate_image_url(raw_value):
+            normalized = normalize_url(raw_value)
+            if not validate_image_url(normalized):
                 await update.message.reply_text(
-                    '❌ Invalid Image URL.\n\n'
-                    'Supported: Catbox, Telegraph, Imgur, etc.\n'
-                    '❌ Telegram File IDs are not supported!'
+                    '❌ Invalid Image URL. Supported: direct image links (jpg/png/webp), Catbox, Telegraph, Imgur, Postimg, Google Drive (direct).'
                 )
                 return
-            new_value = raw_value
+            new_value = normalized
 
         await collection.find_one_and_update(
             {'id': char_id},
@@ -432,7 +487,7 @@ async def update_command(update: Update, context: CallbackContext) -> None:
             updated_character['anime'],
             updated_character['rarity'],
             user_id,
-            update.effective_user.first_name
+            update.effective_user.first_name or update.effective_user.username or "Unknown"
         )
 
         channel_update_success = False
@@ -445,7 +500,7 @@ async def update_command(update: Update, context: CallbackContext) -> None:
                 channel_update_success = await update_channel_caption(
                     context, character['message_id'], caption
                 )
-            
+
             if channel_update_success:
                 logger.info(f"Character {char_id} updated in channel (message_id {character['message_id']})")
         else:
@@ -453,23 +508,21 @@ async def update_command(update: Update, context: CallbackContext) -> None:
 
         if channel_update_success:
             await update.message.reply_text(
-                'Updated in Database and Channel. '
-                'Note: Caption edits may take a moment to appear.'
+                'Updated in Database and Channel. Note: Caption edits may take a moment to appear.'
             )
         else:
             await update.message.reply_text(
-                'Updated in Database, but Channel update failed or no message_id found. '
-                'Database remains the source of truth.'
+                'Updated in Database, but Channel update failed or no message_id found. Database remains the source of truth.'
             )
 
     except Exception as e:
-        logger.error(f"Update command error (user {user_id}, char_id {args[0] if args else 'unknown'}): {e}")
+        logger.exception(f"Update command error (user {user_id}, char_id {args[0] if args else 'unknown'})")
         await update.message.reply_text(
             'Update failed. Possible causes:\n'
             '- Bot not added to channel\n'
             '- Character has no channel message\n'
             '- Wrong character ID\n'
-            f'Database update may have succeeded. Check logs.'
+            'Database update may have succeeded. Check logs.'
         )
 
 

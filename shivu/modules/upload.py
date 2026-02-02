@@ -1,29 +1,53 @@
+import urllib.request
+from pymongo import ReturnDocument
 import os
-import asyncio
-import aiohttp
-from typing import Optional
 from telegram import Update
 from telegram.ext import CommandHandler, CallbackContext
-from pyrogram import filters, Client
+import requests
+from pyrogram import filters
+from pyrogram.types import InputMediaPhoto
+import os
+from pyrogram import Client, filters
 from pyrogram.types import Message
-from pymongo import UpdateOne
+from pymongo import ReturnDocument, UpdateOne
+import urllib.request
+import random
+import aiohttp
+import asyncio
+
+# Import from __init__.py
 from shivu import (
-    shivuu,
-    application,
     collection,
     user_collection,
-    user_totals_collection,
-    top_global_groups_collection,
-    db,
+    shivuu as app,
+    application,
     CHARA_CHANNEL_ID,
-    OWNER_ID,
-    SUDO_USERS,
     SUPPORT_CHAT,
     UPDATE_CHAT,
+    OWNER_ID,
+    SUDO_USERS,
 )
 
-IMGBB_API_KEY = os.getenv("IMGBB_API_KEY", "6d52008ec9026912f9f50c8ca96a09c3")
+# Define filters for sudo users
+def sudo_filter_func(_, __, message):
+    """Filter for sudo users (owner and sudo users)"""
+    if not message.from_user:
+        return False
+    return message.from_user.id in SUDO_USERS
 
+def uploader_filter_func(_, __, message):
+    """Filter for uploader users (same as sudo for now)"""
+    if not message.from_user:
+        return False
+    return message.from_user.id in SUDO_USERS
+
+sudo_filter = filters.create(sudo_filter_func)
+uploader_filter = filters.create(uploader_filter_func)
+
+# Your imgBB API Key
+IMGBB_API_KEY = "6d52008ec9026912f9f50c8ca96a09c3"
+
+# Define the wrong format message and rarity map
 WRONG_FORMAT_TEXT = """Wrong ❌ format...  eg. /upload reply to photo muzan-kibutsuji Demon-slayer 3
 
 format:- /upload reply character-name anime-name rarity-number
@@ -35,7 +59,7 @@ RARITY_MAP = {
     2: (2, "🔵 ʀᴀʀᴇ"),
     3: (3, "🟡 ʟᴇɢᴇɴᴅᴀʀʏ"),
     4: (4, "💮 ꜱᴘᴇᴄɪᴀʟ"),
-    5: (5, "👹 ᴀɴᴄɪᴀᴇɴᴛ"),
+    5: (5, "👹 ᴀɴᴄɪᴇɴᴛ"),
     6: (6, "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ"),
     7: (7, "🔮 ᴇᴘɪᴄ"),
     8: (8, "🪐 ᴄᴏꜱᴍɪᴄ"),
@@ -49,10 +73,11 @@ RARITY_MAP = {
 }
 """
 
+# Define the RARITY_MAP
 RARITY_MAP = {
     1: (1, "⚪ ᴄᴏᴍᴍᴏɴ"),
     2: (2, "🔵 ʀᴀʀᴇ"),
-    3: (3, "🟡 ʟᴇɴᴇɴᴅᴀʀʏ"),
+    3: (3, "🟡 ʟᴇɢᴇɴᴅᴀʀʏ"),
     4: (4, "💮 ꜱᴘᴇᴄɪᴀʟ"),
     5: (5, "👹 ᴀɴᴄɪᴇɴᴛ"),
     6: (6, "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ"),
@@ -67,284 +92,344 @@ RARITY_MAP = {
     15: (15, "🧬 ʜʏʙʀɪᴅ"),
 }
 
+
+# Global set to keep track of active IDs and a lock for safe access
 active_ids = set()
 id_lock = asyncio.Lock()
 
-def sudo_filter_func(_, __, message: Message):
-    if not message.from_user:
-        return False
-    return message.from_user.id in ([OWNER_ID] + [u for u in SUDO_USERS if u != OWNER_ID])
-
-def uploader_filter_func(_, __, message: Message):
-    if not message.from_user:
-        return False
-    return message.from_user.id in ([OWNER_ID] + [u for u in SUDO_USERS if u != OWNER_ID])
-
-sudo_filter = filters.create(sudo_filter_func)
-uploader_filter = filters.create(uploader_filter_func)
-
-async def upload_to_imgbb(file_path: str, api_key: Optional[str] = IMGBB_API_KEY) -> str:
+async def upload_to_imgbb(file_path, api_key=IMGBB_API_KEY):
+    """
+    Upload image to imgBB (primary upload service)
+    """
     url = "https://api.imgbb.com/1/upload"
-    with open(file_path, "rb") as f:
-        file_data = f.read()
+    
+    # Read the file
+    with open(file_path, "rb") as file:
+        file_data = file.read()
+    
+    # Create form data
     data = aiohttp.FormData()
-    data.add_field("key", api_key)
-    data.add_field("image", file_data, filename=os.path.basename(file_path))
+    data.add_field('key', api_key)
+    data.add_field('image', file_data, filename=os.path.basename(file_path))
+    
     async with aiohttp.ClientSession() as session:
         async with session.post(url, data=data) as response:
             result = await response.json()
+            
             if response.status == 200 and result.get("success"):
                 return result["data"]["url"]
             else:
-                error_msg = result.get("error", {}).get("message", "Unknown error")
+                error_msg = result.get('error', {}).get('message', 'Unknown error')
                 raise Exception(f"ImgBB upload failed: {error_msg}")
 
-async def upload_to_telegraph(file_path: str) -> str:
+async def upload_to_telegraph(file_path):
+    """
+    Upload image to Telegraph (fallback option)
+    """
     try:
-        from telegraph import upload_file
-    except Exception:
-        raise Exception("Telegraph package not installed. Install it with: pip install telegraph")
-    try:
+        # Use the synchronous telegraph upload function
         result = upload_file(file_path)
         if isinstance(result, list) and len(result) > 0:
             return f"https://telegra.ph{result[0]}"
-        raise Exception("Telegraph upload failed: upload_file returned no URL")
+        else:
+            raise Exception("Telegraph upload failed")
     except Exception as e:
-        raise Exception(f"Telegraph upload error: {e}")
+        raise Exception(f"Telegraph upload error: {str(e)}")
 
-async def upload_to_catbox(file_path: str) -> str:
+async def upload_to_catbox(file_path):
+    """
+    Upload image to Catbox (secondary fallback option)
+    """
     url = "https://catbox.moe/user/api.php"
-    with open(file_path, "rb") as f:
-        file_data = f.read()
+    
+    # Read the file
+    with open(file_path, "rb") as file:
+        file_data = file.read()
+    
+    # Create form data
     data = aiohttp.FormData()
-    data.add_field("reqtype", "fileupload")
-    data.add_field("fileToUpload", file_data, filename=os.path.basename(file_path))
+    data.add_field('reqtype', 'fileupload')
+    data.add_field('fileToUpload', file_data, filename=os.path.basename(file_path))
+    
     async with aiohttp.ClientSession() as session:
         async with session.post(url, data=data) as response:
             if response.status == 200:
                 return (await response.text()).strip()
-            raise Exception(f"Catbox upload failed with status {response.status}")
+            else:
+                raise Exception(f"Catbox upload failed with status {response.status}")
 
-async def upload_image_with_fallback(file_path: str) -> str:
-    services = [upload_to_imgbb, upload_to_telegraph, upload_to_catbox]
+async def upload_image_with_fallback(file_path):
+    """
+    Try multiple image hosting services with fallback - imgBB as primary
+    """
+    services = [
+        upload_to_imgbb,  # Primary - imgBB
+        upload_to_telegraph,  # First fallback - Telegraph
+        upload_to_catbox,  # Second fallback - Catbox
+    ]
+    
     last_error = None
-    for svc in services:
+    for service in services:
         try:
-            url = await svc(file_path)
+            print(f"Trying {service.__name__}...")
+            url = await service(file_path)
+            print(f"Success with {service.__name__}: {url}")
             return url
         except Exception as e:
+            print(f"Failed with {service.__name__}: {str(e)}")
             last_error = e
             continue
-    raise Exception(f"All upload services failed. Last error: {last_error}")
+    
+    raise Exception(f"All image hosting services failed. Last error: {str(last_error)}")
 
-def check_file_size(file_path: str, max_size_mb: int = 30) -> bool:
+
+
+def check_file_size(file_path, max_size_mb=30):
+    """
+    Check if file size is within limits
+    """
     file_size = os.path.getsize(file_path)
     if file_size > max_size_mb * 1024 * 1024:
-        raise Exception(f"File size ({file_size/1024/1024:.2f} MB) exceeds {max_size_mb} MB limit.")
+        raise Exception(f"File size ({file_size/1024/1024:.2f} MB) exceeds the {max_size_mb} MB limit.")
     return True
 
-async def find_available_id() -> str:
+async def find_available_id():
+    """
+    Find the next available ID for a character
+    """
     async with id_lock:
-        cursor = collection.find().sort("id", 1)
-        docs = await cursor.to_list(length=None)
-        ids = [doc["id"] for doc in docs]
+        cursor = collection.find().sort('id', 1)
+        ids = [doc['id'] for doc in await cursor.to_list(length=None)]
+        
+        # Handle case where no documents exist
         if not ids:
             candidate_id = "01"
             active_ids.add(candidate_id)
             return candidate_id
-        int_ids = [int(i) for i in ids]
+        
+        # Convert to integers for proper comparison
+        int_ids = [int(id) for id in ids]
+        
         for i in range(1, max(int_ids) + 2):
             candidate_id = str(i).zfill(2)
             if candidate_id not in ids and candidate_id not in active_ids:
                 active_ids.add(candidate_id)
                 return candidate_id
-        candidate_id = str(max(int_ids) + 1).zfill(2)
-        active_ids.add(candidate_id)
-        return candidate_id
+        return str(max(int_ids) + 1).zfill(2)
 
-async def find_available_ids() -> str:
+async def find_available_ids():
+    """
+    Find available IDs without reserving them
+    """
     async with id_lock:
-        cursor = collection.find().sort("id", 1)
-        docs = await cursor.to_list(length=None)
-        ids = [doc["id"] for doc in docs]
+        cursor = collection.find().sort('id', 1)
+        ids = [doc['id'] for doc in await cursor.to_list(length=None)]
+        
+        # Handle case where no documents exist
         if not ids:
             return "01"
-        int_ids = [int(i) for i in ids]
+        
+        # Convert to integers for proper comparison
+        int_ids = [int(id) for id in ids]
+        
+        available = []
         for i in range(1, max(int_ids) + 2):
             candidate_id = str(i).zfill(2)
             if candidate_id not in ids and candidate_id not in active_ids:
-                return candidate_id
-        return str(max(int_ids) + 1).zfill(2)
+                available.append(candidate_id)
+                if len(available) >= 10:
+                    break
+        
+        if not available:
+            available.append(str(max(int_ids) + 1).zfill(2))
+        
+        return ", ".join(available)
 
-@shivuu.on_message(filters.command(["uid"]) & uploader_filter)
-async def ulo(client: Client, message: Message):
-    available_id = await find_available_ids()
-    await client.send_message(chat_id=message.chat.id, text=f"{available_id}")
-
-@shivuu.on_message(filters.command(["upload"]) & uploader_filter)
-async def ul(client: Client, message: Message):
+@app.on_message(filters.command('upload') & uploader_filter)
+async def upload(client: Client, message: Message):
+    """
+    Upload a new character to the database
+    """
     reply = message.reply_to_message
     if not reply or not (reply.photo or reply.document):
-        await message.reply_text("Please reply to a photo or document.")
+        await message.reply_text("Please reply to a photo or document with this command.")
         return
-    args = message.text.split()
-    if len(args) != 4:
-        await client.send_message(chat_id=message.chat.id, text=WRONG_FORMAT_TEXT)
+
+    args = message.text.split()[1:]
+    if len(args) != 3:
+        await message.reply_text(WRONG_FORMAT_TEXT)
         return
-    character_name = args[1].replace("-", " ").title()
-    anime = args[2].replace("-", " ").title()
+
+    character_name = args[0].replace('-', ' ').title()
+    anime = args[1].replace('-', ' ').title()
+
     try:
-        rarity = int(args[3])
-    except ValueError:
-        await message.reply_text("Rarity must be a number.")
+        rarity_input = int(args[2])
+        if rarity_input not in RARITY_MAP:
+            await message.reply_text(WRONG_FORMAT_TEXT)
+            return
+        rarity = RARITY_MAP[rarity_input][1]
+    except (ValueError, IndexError):
+        await message.reply_text(WRONG_FORMAT_TEXT)
         return
-    if rarity not in RARITY_MAP:
-        await message.reply_text("Invalid rarity value. Use a number between 1 and 15.")
-        return
-    rarity_text = RARITY_MAP[rarity][1]
-    available_id = None
-    path = None
+
+    # Generate the next available ID
+    available_id = await find_available_id()
+
     try:
-        available_id = await find_available_id()
-        processing_message = await message.reply("<ᴘʀᴏᴄᴇꜱꜱɪɴɢ>....")
+        processing_message = await message.reply("<ᴜᴘʟᴏᴀᴅɪɴɢ ʏᴏᴜʀ ᴄʜᴀʀᴀᴄᴛᴇʀ...>")
+
+        # Download the file
         path = await reply.download()
+
+        # Check file size
         check_file_size(path)
-        character = {
-            "name": character_name,
-            "anime": anime,
-            "rarity": rarity_text,
-            "id": available_id,
-            "slock": "false",
-            "added": message.from_user.id,
-        }
+
+        # Upload image with fallback (imgBB as primary)
         image_url = await upload_image_with_fallback(path)
-        character["img_url"] = image_url
+
+        # Create character document
+        character = {
+            'img_url': image_url,
+            'name': character_name,
+            'anime': anime,
+            'rarity': rarity,
+            'id': available_id,
+            'slock': "false",
+            'added': message.from_user.id
+        }
+
+        # Insert into database
         await collection.insert_one(character)
+
+        # Send to character channel using CHARA_CHANNEL_ID from config
         caption = (
-            f"🌟 **Character Detail** 🌟\n"
+            f"✨ **New Character Added** ✨\n"
             f"\n━━━━━━━━━━━━━━━━━━\n"
             f"🔹 **Name:** {character_name}\n"
             f"🔸 **Anime:** {anime}\n"
             f"🔹 **ID:** {available_id}\n"
-            f"🔸 **Rarity:** {rarity_text}\n"
+            f"🔸 **Rarity:** {rarity}\n"
             f"Added by [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n"
             f"\n━━━━━━━━━━━━━━━━━━\n"
         )
-        try:
-            if path.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".gif")):
-                tempo = await client.send_video(chat_id=CHARA_CHANNEL_ID, video=image_url, caption=caption)
-            else:
-                tempo = await client.send_photo(chat_id=CHARA_CHANNEL_ID, photo=image_url, caption=caption)
-        except Exception:
-            if path.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".gif")):
-                tempo = await client.send_video(chat_id=CHARA_CHANNEL_ID, video=path, caption=caption)
-            else:
-                tempo = await client.send_photo(chat_id=CHARA_CHANNEL_ID, photo=path, caption=caption)
-        try:
-            await tempo.pin()
-        except Exception:
-            pass
-        await message.reply_text(f"✅ CHARACTER ADDED SUCCESSFULLY! ID: {available_id}")
-        await client.send_message(chat_id=CHARA_CHANNEL_ID, text=f'@naruto_dev `/sendone {available_id}`')
-    except Exception as e:
-        error_msg = f"❌ Character Upload Unsuccessful. Error: {e}"
-        await message.reply_text(error_msg)
-        print(error_msg)
-    finally:
-        if path and os.path.exists(path):
-            os.remove(path)
-        if available_id:
-            async with id_lock:
-                active_ids.discard(available_id)
 
-@shivuu.on_message(filters.command('delete') & sudo_filter)
-async def delete(client: Client, message: Message):
-    args = message.text.split(maxsplit=1)[1:]
-    if len(args) != 1:
-        await message.reply_text('Incorrect format... Please use: /delete ID')
-        return
-    character_id = args[0]
-    character = await collection.find_one_and_delete({'id': character_id})
-    if character:
-        bulk_operations = []
-        async for user in user_collection.find():
-            if 'characters' in user:
-                user['characters'] = [char for char in user['characters'] if char.get('id') != character_id]
-                bulk_operations.append(
-                    UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
+        # Send to channel
+        try:
+            if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
+                await client.send_video(
+                    chat_id=CHARA_CHANNEL_ID,
+                    video=image_url,
+                    caption=caption,
                 )
-        if bulk_operations:
-            await user_collection.bulk_write(bulk_operations)
-        await message.reply_text('Character deleted from database and all user collections.')
+            else:
+                await client.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=image_url,
+                    caption=caption,
+                )
+        except Exception as channel_error:
+            print(f"Failed to send to channel with URL, trying local file: {channel_error}")
+            # Fallback to local file
+            if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
+                await client.send_video(
+                    chat_id=CHARA_CHANNEL_ID,
+                    video=path,
+                    caption=caption,
+                )
+            else:
+                await client.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=path,
+                    caption=caption,
+                )
+
+        # Update processing message
+        await processing_message.edit_text(f'✅ Character Upload Successful.\nID: {available_id}')
+
+    except Exception as e:
+        error_msg = f"❌ Character Upload Unsuccessful. Error: {str(e)}"
+        await message.reply_text(error_msg)
+        print(error_msg)  # Log the error for debugging
+
+    finally:
+        # Clean up
+        async with id_lock:
+            active_ids.discard(available_id)
+        if 'path' in locals() and os.path.exists(path):
+            os.remove(path)
+
+
+@app.on_message(filters.command('delete') & sudo_filter)
+async def delete(client: Client, message: Message):
+    args = message.text.split()[1:]
+    if len(args) != 1:
+        await message.reply_text('Incorrect format. Please use: /delete id')
+        return
+
+    character_id = args[0]
+
+    character = await collection.find_one({'id': character_id})
+    if not character:
+        await message.reply_text('Character not found.')
+        return
+
+    await collection.delete_one({'id': character_id})
+
+    # Remove from all user collections
+    bulk_operations = []
+    async for user in user_collection.find():
+        if 'characters' in user:
+            user['characters'] = [char for char in user['characters'] if char['id'] != character_id]
+            bulk_operations.append(
+                UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
+            )
+
+    if bulk_operations:
+        await user_collection.bulk_write(bulk_operations)
+
+    await message.reply_text('Done')
+
+
+def check(update: Update, context: CallbackContext) -> None:
+    args = context.args
+    if len(args) != 1:
+        update.message.reply_text('Incorrect format. Please use: /f id')
+        return
+
+    character_id = args[0]
+
+    character = collection.find_one({'id': character_id})
+    if character:
+        update.message.reply_text(f'Character {character["name"]} found with ID {character_id}.')
     else:
-        await message.reply_text('Character not found in database.')
+        update.message.reply_text('Character not found.')
 
-async def check_total_characters(update: Update, context: CallbackContext) -> None:
-    try:
-        total_characters = await collection.count_documents({})
-        await update.message.reply_text(f"Total number of characters: {total_characters}")
-    except Exception as e:
-        await update.message.reply_text(f"Error occurred: {e}")
 
-application.add_handler(CommandHandler("total", check_total_characters))
-
-async def check(update: Update, context: CallbackContext) -> None:
-    try:
-        args = context.args
-        if len(context.args) != 1:
-            await update.message.reply_text('Incorrect format. Please use: /check id')
-            return
-        character_id = context.args[0]
-        character = await collection.find_one({'id': character_id})
-        if character:
-            message_text = f"<b>Character Name:</b> {character['name']}\n" \
-                      f"<b>Anime Name:</b> {character['anime']}\n" \
-                      f"<b>Rarity:</b> {character['rarity']}\n" \
-                      f"<b>ID:</b> {character['id']}\n"
-            if 'img_url' in character:
-                await context.bot.send_photo(chat_id=update.effective_chat.id,
-                                             photo=character['img_url'],
-                                             caption=message_text,
-                                             parse_mode='HTML')
-            elif 'vid_url' in character:
-                await context.bot.send_video(chat_id=update.effective_chat.id,
-                                             video=character['vid_url'],
-                                             caption=message_text,
-                                             parse_mode='HTML')
-        else:
-             await update.message.reply_text("Character not found.")
-    except Exception as e:
-        await update.message.reply_text(f"Error occurred: {e}")
-
-CHECK_HANDLER = CommandHandler('f', check, block=False)
-application.add_handler(CHECK_HANDLER)
-
-@shivuu.on_message(filters.command('update') & uploader_filter)
+@app.on_message(filters.command('update') & sudo_filter)
 async def update(client: Client, message: Message):
     args = message.text.split(maxsplit=3)[1:]
     if len(args) != 3:
         await message.reply_text('Incorrect format. Please use: /update id field new_value')
         return
+
     character_id = args[0]
     field = args[1]
     new_value = args[2]
+
+    valid_fields = ['img_url', 'name', 'anime', 'rarity']
+    if field not in valid_fields:
+        await message.reply_text(f'Invalid field. Valid fields are: {", ".join(valid_fields)}')
+        return
+
     character = await collection.find_one({'id': character_id})
     if not character:
         await message.reply_text('Character not found.')
         return
-    valid_fields = ['img_url', 'name', 'anime', 'rarity']
-    if field not in valid_fields:
-        await message.reply_text(f'Invalid field. Please use one of the following: {", ".join(valid_fields)}')
-        return
-    if field in ['name', 'anime']:
-        new_value = new_value.replace('-', ' ').title()
-    elif field == 'rarity':
-        try:
-            new_value = RARITY_MAP[int(new_value)][1]
-        except Exception:
-            await message.reply_text('Invalid rarity. Please use a number between 1 and 15.')
-            return
+
     await collection.update_one({'id': character_id}, {'$set': {field: new_value}})
+
+    # Update all user collections
     bulk_operations = []
     async for user in user_collection.find():
         if 'characters' in user:
@@ -354,28 +439,36 @@ async def update(client: Client, message: Message):
             bulk_operations.append(
                 UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
             )
+
     if bulk_operations:
         await user_collection.bulk_write(bulk_operations)
-    await message.reply_text('Update done in Database and all user collections.')
 
-@shivuu.on_message(filters.command('r') & sudo_filter)
+    await message.reply_text(f'Updated {field} for character {character_id}')
+
+
+@app.on_message(filters.command('r') & sudo_filter)
 async def update_rarity(client: Client, message: Message):
     args = message.text.split(maxsplit=2)[1:]
     if len(args) != 2:
         await message.reply_text('Incorrect format. Please use: /r id rarity')
         return
+
     character_id = args[0]
     new_rarity = args[1]
+
     character = await collection.find_one({'id': character_id})
     if not character:
         await message.reply_text('Character not found.')
         return
+
     try:
-        new_rarity_value = RARITY_MAP[int(new_rarity)][1]
-    except Exception:
+        new_rarity_value = RARITY_MAP[int(new_rarity)][1]  # Get the text from tuple
+    except KeyError:
         await message.reply_text('Invalid rarity. Please use a number between 1 and 15.')
         return
+
     await collection.update_one({'id': character_id}, {'$set': {'rarity': new_rarity_value}})
+
     bulk_operations = []
     async for user in user_collection.find():
         if 'characters' in user:
@@ -385,30 +478,37 @@ async def update_rarity(client: Client, message: Message):
             bulk_operations.append(
                 UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
             )
+
     if bulk_operations:
         await user_collection.bulk_write(bulk_operations)
+
     await message.reply_text('Rarity updated in Database and all user collections.')
 
-@shivuu.on_message(filters.command('arrange') & sudo_filter)
+@app.on_message(filters.command('arrange') & sudo_filter)
 async def arrange_characters(client: Client, message: Message):
     characters = await collection.find().sort('id', 1).to_list(length=None)
     if not characters:
         await message.reply_text('No characters found in the database.')
         return
+
     old_to_new_id_map = {}
     new_id_counter = 1
+
     bulk_operations = []
     for character in characters:
         old_id = character['id']
         new_id = str(new_id_counter).zfill(2)
         old_to_new_id_map[old_id] = new_id
+
         if old_id != new_id:
             bulk_operations.append(
                 UpdateOne({'_id': character['_id']}, {'$set': {'id': new_id}})
             )
         new_id_counter += 1
+
     if bulk_operations:
         await collection.bulk_write(bulk_operations)
+
     user_bulk_operations = []
     async for user in user_collection.find():
         if 'characters' in user:
@@ -418,20 +518,29 @@ async def arrange_characters(client: Client, message: Message):
             user_bulk_operations.append(
                 UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
             )
+
     if user_bulk_operations:
         await user_collection.bulk_write(user_bulk_operations)
+
     await message.reply_text('Characters have been rearranged and IDs updated successfully.')
 
-@shivuu.on_message(filters.command("vadd") & uploader_filter)
-async def upload_video_character(client: Client, message: Message):
+CHECK_HANDLER = CommandHandler('f', check, block=False)
+application.add_handler(CHECK_HANDLER)
+
+@app.on_message(filters.command("vadd") & uploader_filter)
+async def upload_video_character(client, message):
     args = message.text.split(maxsplit=3)
     if len(args) != 4:
         await message.reply_text("Wrong format. Use: /vadd character-name anime-name video-url")
         return
+
     character_name = args[1].replace('-', ' ').title()
     anime = args[2].replace('-', ' ').title()
     vid_url = args[3]
+
+    # Generate the next available ID
     available_id = await find_available_id()
+
     character = {
         'name': character_name,
         'anime': anime,
@@ -441,7 +550,9 @@ async def upload_video_character(client: Client, message: Message):
         'slock': "false",
         'added': message.from_user.id
     }
+
     try:
+        # Send the video to the character channel using CHARA_CHANNEL_ID from config
         await client.send_video(
             chat_id=CHARA_CHANNEL_ID,
             video=vid_url,
@@ -454,35 +565,59 @@ async def upload_video_character(client: Client, message: Message):
                 f"Added by [{message.from_user.first_name}](tg://user?id={message.from_user.id})"
             ),
         )
+
+        # Insert the character data into MongoDB
         await collection.insert_one(character)
+
         await message.reply_text("✅ Video character added successfully.")
     except Exception as e:
         await message.reply_text(f"❌ Failed to upload character. Error: {e}")
 
-@shivuu.on_message(filters.command(["updateimg"]) & uploader_filter)
-async def update_image(client: Client, message: Message):
+
+
+@app.on_message(filters.command(["updateimg"]) & uploader_filter)
+async def update_image(client, message):
+    """
+    Command to update character image by replying to a photo with the character ID
+    Format: /updateimg [character_id]
+    """
     reply = message.reply_to_message
     if not reply or not (reply.photo or reply.document):
         await message.reply_text("Please reply to a photo or document with this command.")
         return
+        
     args = message.text.split()
     if len(args) != 2:
         await message.reply_text("Wrong format. Use: /updateimg [character_id] (reply to image)")
         return
+    
     character_id = args[1]
+    
+    # Check if character exists
     character = await collection.find_one({'id': character_id})
     if not character:
         await message.reply_text(f"Character with ID {character_id} not found.")
         return
+    
     try:
         processing_message = await message.reply("<ᴜᴘᴅᴀᴛɪɴɢ ɪᴍᴀɢᴇ...>")
+        
+        # Download the new image
         path = await reply.download()
+        
+        # Check file size
         check_file_size(path)
+        
+        # Upload image with fallback (imgBB as primary)
         image_url = await upload_image_with_fallback(path)
+        
+        # Update character in the database
         await collection.update_one(
-            {'id': character_id},
+            {'id': character_id}, 
             {'$set': {'img_url': image_url}}
         )
+        
+        # Update all user collections that have this character
         bulk_operations = []
         async for user in user_collection.find():
             if 'characters' in user:
@@ -492,9 +627,14 @@ async def update_image(client: Client, message: Message):
                 bulk_operations.append(
                     UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
                 )
+
         if bulk_operations:
             await user_collection.bulk_write(bulk_operations)
+        
+        # Send confirmation message
         await message.reply_text(f'✅ Image updated successfully for character ID: {character_id}')
+        
+        # Send updated character info to channel using CHARA_CHANNEL_ID from config
         caption = (
             f"🔄 **Character Image Updated** 🔄\n"
             f"\n━━━━━━━━━━━━━━━━━━\n"
@@ -505,20 +645,42 @@ async def update_image(client: Client, message: Message):
             f"Image updated by [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n"
             f"\n━━━━━━━━━━━━━━━━━━\n"
         )
+        
+        # Try to send with the uploaded URL
         try:
             if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
-                await client.send_video(chat_id=CHARA_CHANNEL_ID, video=image_url, caption=caption)
+                await client.send_video(
+                    chat_id=CHARA_CHANNEL_ID,
+                    video=image_url,
+                    caption=caption,
+                )
             else:
-                await client.send_photo(chat_id=CHARA_CHANNEL_ID, photo=image_url, caption=caption)
-        except Exception:
+                await client.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=image_url,
+                    caption=caption,
+                )
+        except:
+            # Fallback to sending the local file if URL doesn't work
             if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
-                await client.send_video(chat_id=CHARA_CHANNEL_ID, video=path, caption=caption)
+                await client.send_video(
+                    chat_id=CHARA_CHANNEL_ID,
+                    video=path,
+                    caption=caption,
+                )
             else:
-                await client.send_photo(chat_id=CHARA_CHANNEL_ID, photo=path, caption=caption)
+                await client.send_photo(
+                    chat_id=CHARA_CHANNEL_ID,
+                    photo=path,
+                    caption=caption,
+                )
+                
     except Exception as e:
         error_msg = f"❌ Image update failed. Error: {str(e)}"
         await message.reply_text(error_msg)
-        print(error_msg)
+        print(error_msg)  # Log the error for debugging
+    
     finally:
+        # Clean up
         if 'path' in locals() and os.path.exists(path):
             os.remove(path)

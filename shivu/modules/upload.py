@@ -429,8 +429,8 @@ async def update_character(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(f'❌ Update failed: {str(e)}')
 
 
-async def close_session(app) -> None:
-    """Close aiohttp session on shutdown"""
+async def on_shutdown(application) -> None:
+    """Close aiohttp session on bot shutdown"""
     await AioHttpSessionManager.close_session()
 
 
@@ -442,6 +442,3 @@ UPDATE_HANDLER = CommandHandler('update', update_character, block=False)
 application.add_handler(UPLOAD_HANDLER)
 application.add_handler(DELETE_HANDLER)
 application.add_handler(UPDATE_HANDLER)
-
-# Register shutdown handler
-application.add_handler(close_session, group=-1)

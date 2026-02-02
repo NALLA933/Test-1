@@ -35,7 +35,7 @@ from shivu import (
 )
 
 # Channel ID for posting character information
-CHARA_CHANNEL_ID = -1003046490021
+CHARA_CHANNEL_ID = -1003749495721
 
 # Your imgBB API Key
 IMGBB_API_KEY = "6d52008ec9026912f9f50c8ca96a09c3"

@@ -155,6 +155,22 @@ def normalize_url(url: str) -> str:
     return u
 
 
+def build_caption(char_id: str, char_name: str, anime: str, rarity_display: str,
+                  uploader_id: int, uploader_name: str) -> str:
+    """
+    Build the caption used when sending/uploading a character.
+    """
+    emoji = rarity_display.split()[0] if rarity_display else ""
+    rarity_text = " ".join(rarity_display.split()[1:]) if rarity_display else ""
+    uploader_link = f'<a href="tg://user?id={uploader_id}">{uploader_name}</a>'
+    return (
+        f"{char_id}: {char_name}\n"
+        f"{char_name} ({anime})\n\n"
+        f"{emoji} 𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n\n"
+        f"Uploaded by: {uploader_link}"
+    )
+
+
 async def get_next_sequence_number(sequence_name: str) -> int:
     """
     Generate a numeric sequence for IDs using the 'sequences' collection.

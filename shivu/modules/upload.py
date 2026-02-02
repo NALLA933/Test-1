@@ -123,9 +123,9 @@ async def upload(update: Update, context: CallbackContext) -> None:
             rarity_text = ' '.join(rarity_name.split()[1:])
             
             caption = (
-                f"<b>𝙄𝙙</b>: {id} {character_name}\n"
-                f"<b>𝘼𝙣𝙞𝙢𝙚</b>: {anime}\n"
-                f"{rarity_emoji}<b>𝙍𝘼𝙍𝙄𝙏𝙔</b>: {rarity_text}\n\n"
+                f"{id}: {character_name}\n"
+                f"{anime}\n"
+                f"{rarity_emoji}𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n\n"
                 f"𝑴𝒂𝒅𝒆 𝑩𝒚 ➥ <a href='tg://user?id={update.effective_user.id}'>{update.effective_user.first_name}</a>"
             )
             
@@ -236,9 +236,9 @@ async def update_character(update: Update, context: CallbackContext) -> None:
         rarity_text = ' '.join(updated_char['rarity'].split()[1:])
         
         caption = (
-            f"<b>𝙄𝙙</b>: {updated_char['id']} {updated_char['name']}\n"
-            f"<b>𝘼𝙣𝙞𝙢𝙚</b>: {updated_char['anime']}\n"
-            f"{rarity_emoji}<b>𝙍𝘼𝙍𝙄𝙏𝙔</b>: {rarity_text}\n\n"
+            f"{updated_char['id']}: {updated_char['name']}\n"
+            f"{updated_char['anime']}\n"
+            f"{rarity_emoji}𝙍𝘼𝙍𝙄𝙏𝙔: {rarity_text}\n\n"
             f"𝑴𝒂𝒅𝒆 𝑩𝒚 ➥ <a href='tg://user?id={update.effective_user.id}'>{update.effective_user.first_name}</a>"
         )
 

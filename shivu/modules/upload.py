@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 from pymongo import ReturnDocument
 from telegram import Update
@@ -50,7 +51,7 @@ async def get_next_sequence_number(sequence_name):
         return 0
     return sequence_document['sequence_value']
 
-async def validate_url(url):
+async def validate_and_check_url(url):
     if not url.startswith(('http://', 'https://')):
         return False, "Invalid URL format"
     
@@ -58,27 +59,35 @@ async def validate_url(url):
         return False, "Telegraph and Telegram file IDs are not supported"
     
     try:
-        connector = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            try:
-                async with session.head(url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as response:
-                    content_length = response.headers.get('Content-Length')
-                    if content_length and int(content_length) > MAX_FILE_SIZE:
-                        return False, f"Image size ({int(content_length) / (1024*1024):.2f} MB) exceeds 10 MB limit"
-                    return True, None
-            except:
-                try:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=25), allow_redirects=True) as response:
-                        if response.status == 200:
-                            content = await response.read()
-                            if len(content) > MAX_FILE_SIZE:
-                                return False, f"Image size ({len(content) / (1024*1024):.2f} MB) exceeds 10 MB limit"
-                            return True, None
-                except:
-                    pass
-        return True, None
-    except Exception:
-        return True, None
+        connector = aiohttp.TCPConnector(ssl=False, limit=10)
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            async with session.get(url, allow_redirects=True) as response:
+                if response.status != 200:
+                    return False, f"URL not accessible (Status: {response.status})"
+                
+                content_type = response.headers.get('Content-Type', '').lower()
+                if not any(img_type in content_type for img_type in ['image/', 'jpeg', 'jpg', 'png', 'gif', 'webp']):
+                    return False, "URL does not point to a valid image"
+                
+                content = await response.read()
+                size = len(content)
+                
+                if size > MAX_FILE_SIZE:
+                    return False, f"Image size ({size / (1024*1024):.2f} MB) exceeds 10 MB limit"
+                
+                if size < 1024:
+                    return False, "File too small to be a valid image"
+                
+                return True, None
+                
+    except asyncio.TimeoutError:
+        return False, "URL request timed out - try a faster server"
+    except aiohttp.ClientError as e:
+        return False, f"Network error: {str(e)}"
+    except Exception as e:
+        return False, f"Validation failed: {str(e)}"
 
 async def upload(update: Update, context: CallbackContext) -> None:
     user_id = str(update.effective_user.id)
@@ -111,7 +120,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(f'❌ This image URL already exists in database!\nCharacter: {existing["name"]}\nID: {existing["id"]}')
             return
 
-        is_valid, error_msg = await validate_url(img_url)
+        is_valid, error_msg = await validate_and_check_url(img_url)
         if not is_valid:
             await update.message.reply_text(f'❌ URL Validation Failed: {error_msg}')
             return
@@ -218,7 +227,7 @@ async def update_character(update: Update, context: CallbackContext) -> None:
             new_value = args[2]
 
         if args[1] == 'img_url':
-            is_valid, error_msg = await validate_url(new_value)
+            is_valid, error_msg = await validate_and_check_url(new_value)
             if not is_valid:
                 await update.message.reply_text(f'❌ URL Validation Failed: {error_msg}')
                 return

@@ -5,7 +5,8 @@ from telegram import Update, InputMediaPhoto
 from telegram.ext import CommandHandler, CallbackContext
 from telegram.error import TelegramError
 
-from shivu import application, sudo_users, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
+from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
+from shivu.config import Config
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -40,7 +41,12 @@ use rarity number accordingly rarity Map
 """ + "\n".join([f"{k}: {v[1]}" for k, v in RARITY_MAP.items()])
 
 def is_sudo(user_id: int) -> bool:
-    return str(user_id) in sudo_users
+    # Use Config values (integers) directly
+    try:
+        return user_id == Config.OWNER_ID or user_id in Config.SUDO_USERS
+    except Exception:
+        # Fallback to deny if config is not present or malformed
+        return False
 
 def validate_rarity(rarity_input: str) -> tuple:
     try:
@@ -99,7 +105,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
         img_url = args[0]
         character_name = args[1].replace('-', ' ').title()
         anime = args[2].replace('-', ' ').title()
-        
+
         if not validate_image_url(img_url):
             await update.message.reply_text('Invalid URL.')
             return

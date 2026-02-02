@@ -28,6 +28,9 @@ from shivu import (
     SUDO_USERS,
 )
 
+# Log the channel ID for debugging
+print(f"📢 Using CHARA_CHANNEL_ID: {CHARA_CHANNEL_ID}")
+
 # Define filters for sudo users
 def sudo_filter_func(_, __, message):
     """Filter for sudo users (owner and sudo users)"""
@@ -245,6 +248,25 @@ async def find_available_ids():
         
         return ", ".join(available)
 
+async def verify_channel_access(client: Client):
+    """
+    Verify if bot has access to the channel
+    """
+    try:
+        chat = await client.get_chat(CHARA_CHANNEL_ID)
+        print(f"✅ Channel access verified!")
+        print(f"   Title: {chat.title}")
+        print(f"   Type: {chat.type}")
+        return True
+    except Exception as e:
+        print(f"❌ Cannot access channel {CHARA_CHANNEL_ID}")
+        print(f"   Error: {str(e)}")
+        print(f"\n⚠️  SOLUTION:")
+        print(f"   1. Add bot as admin in channel")
+        print(f"   2. Give 'Post Messages' permission")
+        print(f"   3. Verify channel ID is correct")
+        return False
+
 @app.on_message(filters.command('upload') & uploader_filter)
 async def upload(client: Client, message: Message):
     """
@@ -301,6 +323,8 @@ async def upload(client: Client, message: Message):
 
         # Insert into database
         await collection.insert_one(character)
+        
+        await processing_message.edit_text("<ᴜᴘʟᴏᴀᴅɪɴɢ ᴛᴏ ᴄʜᴀɴɴᴇʟ...>")
 
         # Send to character channel using CHARA_CHANNEL_ID from config
         caption = (
@@ -314,8 +338,17 @@ async def upload(client: Client, message: Message):
             f"\n━━━━━━━━━━━━━━━━━━\n"
         )
 
-        # Send to channel
+        # Send to channel with better error handling
         try:
+            print(f"📤 Attempting to send to channel: {CHARA_CHANNEL_ID}")
+            
+            # First verify channel access
+            if not await verify_channel_access(client):
+                raise Exception(
+                    f"Bot doesn't have access to channel {CHARA_CHANNEL_ID}. "
+                    f"Please add bot as admin with 'Post Messages' permission."
+                )
+            
             if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
                 await client.send_video(
                     chat_id=CHARA_CHANNEL_ID,
@@ -328,8 +361,12 @@ async def upload(client: Client, message: Message):
                     photo=image_url,
                     caption=caption,
                 )
+            print(f"✅ Successfully sent to channel")
+            
         except Exception as channel_error:
-            print(f"Failed to send to channel with URL, trying local file: {channel_error}")
+            print(f"❌ Failed to send to channel with URL: {channel_error}")
+            print(f"🔄 Trying with local file...")
+            
             # Fallback to local file
             if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
                 await client.send_video(
@@ -343,14 +380,23 @@ async def upload(client: Client, message: Message):
                     photo=path,
                     caption=caption,
                 )
+            print(f"✅ Successfully sent with local file")
 
         # Update processing message
-        await processing_message.edit_text(f'✅ Character Upload Successful.\nID: {available_id}')
+        await processing_message.edit_text(
+            f'✅ Character Upload Successful.\n'
+            f'ID: {available_id}\n'
+            f'Channel: {CHARA_CHANNEL_ID}'
+        )
 
     except Exception as e:
         error_msg = f"❌ Character Upload Unsuccessful. Error: {str(e)}"
         await message.reply_text(error_msg)
         print(error_msg)  # Log the error for debugging
+        print(f"\n🔍 Debug Info:")
+        print(f"   Channel ID: {CHARA_CHANNEL_ID}")
+        print(f"   User ID: {message.from_user.id}")
+        print(f"   Is in SUDO_USERS: {message.from_user.id in SUDO_USERS}")
 
     finally:
         # Clean up
@@ -360,6 +406,74 @@ async def upload(client: Client, message: Message):
             os.remove(path)
 
 
+# Test command to verify channel access
+@app.on_message(filters.command('testchannel') & sudo_filter)
+async def test_channel(client: Client, message: Message):
+    """Test if bot can access the channel"""
+    try:
+        chat = await client.get_chat(CHARA_CHANNEL_ID)
+        
+        # Get bot's status in the channel
+        bot_member = await client.get_chat_member(CHARA_CHANNEL_ID, "me")
+        
+        response = (
+            f"✅ **Channel Access Test**\n\n"
+            f"📢 **Channel Info:**\n"
+            f"   • Title: {chat.title}\n"
+            f"   • ID: {CHARA_CHANNEL_ID}\n"
+            f"   • Type: {chat.type}\n\n"
+            f"🤖 **Bot Status:**\n"
+            f"   • Status: {bot_member.status}\n"
+            f"   • Can post: {bot_member.privileges.can_post_messages if hasattr(bot_member, 'privileges') else 'Unknown'}\n"
+        )
+        
+        await message.reply_text(response)
+        
+        # Try sending a test message
+        test_msg = await client.send_message(
+            chat_id=CHARA_CHANNEL_ID,
+            text="🧪 Test message from bot - access verified!"
+        )
+        await message.reply_text("✅ Test message sent successfully to channel!")
+        
+    except Exception as e:
+        error_response = (
+            f"❌ **Channel Access Failed**\n\n"
+            f"**Error:** {str(e)}\n\n"
+            f"**Channel ID:** {CHARA_CHANNEL_ID}\n\n"
+            f"**Solutions:**\n"
+            f"1. Add bot as admin in channel\n"
+            f"2. Give 'Post Messages' permission\n"
+            f"3. Verify channel ID is correct\n"
+            f"4. Use /getchannelid command"
+        )
+        await message.reply_text(error_response)
+
+
+# Command to get channel ID
+@app.on_message(filters.command('getchannelid') & sudo_filter)
+async def get_channel_id_cmd(client: Client, message: Message):
+    """Get channel ID by forwarding a message from the channel"""
+    
+    if message.reply_to_message and message.reply_to_message.forward_from_chat:
+        chat = message.reply_to_message.forward_from_chat
+        response = (
+            f"📢 **Channel Information**\n\n"
+            f"**Title:** {chat.title}\n"
+            f"**ID:** `{chat.id}`\n"
+            f"**Type:** {chat.type}\n"
+            f"**Username:** @{chat.username if chat.username else 'Private'}\n\n"
+            f"Copy this ID to your config.py:\n"
+            f"`CHARA_CHANNEL_ID = {chat.id}`"
+        )
+        await message.reply_text(response)
+    else:
+        await message.reply_text(
+            "❌ Please forward a message from your channel and reply to it with /getchannelid"
+        )
+
+
+# Rest of the commands remain the same...
 @app.on_message(filters.command('delete') & sudo_filter)
 async def delete(client: Client, message: Message):
     args = message.text.split()[1:]
@@ -406,281 +520,5 @@ def check(update: Update, context: CallbackContext) -> None:
         update.message.reply_text('Character not found.')
 
 
-@app.on_message(filters.command('update') & sudo_filter)
-async def update(client: Client, message: Message):
-    args = message.text.split(maxsplit=3)[1:]
-    if len(args) != 3:
-        await message.reply_text('Incorrect format. Please use: /update id field new_value')
-        return
-
-    character_id = args[0]
-    field = args[1]
-    new_value = args[2]
-
-    valid_fields = ['img_url', 'name', 'anime', 'rarity']
-    if field not in valid_fields:
-        await message.reply_text(f'Invalid field. Valid fields are: {", ".join(valid_fields)}')
-        return
-
-    character = await collection.find_one({'id': character_id})
-    if not character:
-        await message.reply_text('Character not found.')
-        return
-
-    await collection.update_one({'id': character_id}, {'$set': {field: new_value}})
-
-    # Update all user collections
-    bulk_operations = []
-    async for user in user_collection.find():
-        if 'characters' in user:
-            for char in user['characters']:
-                if char['id'] == character_id:
-                    char[field] = new_value
-            bulk_operations.append(
-                UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
-            )
-
-    if bulk_operations:
-        await user_collection.bulk_write(bulk_operations)
-
-    await message.reply_text(f'Updated {field} for character {character_id}')
-
-
-@app.on_message(filters.command('r') & sudo_filter)
-async def update_rarity(client: Client, message: Message):
-    args = message.text.split(maxsplit=2)[1:]
-    if len(args) != 2:
-        await message.reply_text('Incorrect format. Please use: /r id rarity')
-        return
-
-    character_id = args[0]
-    new_rarity = args[1]
-
-    character = await collection.find_one({'id': character_id})
-    if not character:
-        await message.reply_text('Character not found.')
-        return
-
-    try:
-        new_rarity_value = RARITY_MAP[int(new_rarity)][1]  # Get the text from tuple
-    except KeyError:
-        await message.reply_text('Invalid rarity. Please use a number between 1 and 15.')
-        return
-
-    await collection.update_one({'id': character_id}, {'$set': {'rarity': new_rarity_value}})
-
-    bulk_operations = []
-    async for user in user_collection.find():
-        if 'characters' in user:
-            for char in user['characters']:
-                if char['id'] == character_id:
-                    char['rarity'] = new_rarity_value
-            bulk_operations.append(
-                UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
-            )
-
-    if bulk_operations:
-        await user_collection.bulk_write(bulk_operations)
-
-    await message.reply_text('Rarity updated in Database and all user collections.')
-
-@app.on_message(filters.command('arrange') & sudo_filter)
-async def arrange_characters(client: Client, message: Message):
-    characters = await collection.find().sort('id', 1).to_list(length=None)
-    if not characters:
-        await message.reply_text('No characters found in the database.')
-        return
-
-    old_to_new_id_map = {}
-    new_id_counter = 1
-
-    bulk_operations = []
-    for character in characters:
-        old_id = character['id']
-        new_id = str(new_id_counter).zfill(2)
-        old_to_new_id_map[old_id] = new_id
-
-        if old_id != new_id:
-            bulk_operations.append(
-                UpdateOne({'_id': character['_id']}, {'$set': {'id': new_id}})
-            )
-        new_id_counter += 1
-
-    if bulk_operations:
-        await collection.bulk_write(bulk_operations)
-
-    user_bulk_operations = []
-    async for user in user_collection.find():
-        if 'characters' in user:
-            for char in user['characters']:
-                if char['id'] in old_to_new_id_map:
-                    char['id'] = old_to_new_id_map[char['id']]
-            user_bulk_operations.append(
-                UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
-            )
-
-    if user_bulk_operations:
-        await user_collection.bulk_write(user_bulk_operations)
-
-    await message.reply_text('Characters have been rearranged and IDs updated successfully.')
-
 CHECK_HANDLER = CommandHandler('f', check, block=False)
 application.add_handler(CHECK_HANDLER)
-
-@app.on_message(filters.command("vadd") & uploader_filter)
-async def upload_video_character(client, message):
-    args = message.text.split(maxsplit=3)
-    if len(args) != 4:
-        await message.reply_text("Wrong format. Use: /vadd character-name anime-name video-url")
-        return
-
-    character_name = args[1].replace('-', ' ').title()
-    anime = args[2].replace('-', ' ').title()
-    vid_url = args[3]
-
-    # Generate the next available ID
-    available_id = await find_available_id()
-
-    character = {
-        'name': character_name,
-        'anime': anime,
-        'rarity': "🎗️ 𝘼𝙈𝙑 𝙀𝙙𝙞𝙩𝙞𝙤𝙣",
-        'id': available_id,
-        'vid_url': vid_url,
-        'slock': "false",
-        'added': message.from_user.id
-    }
-
-    try:
-        # Send the video to the character channel using CHARA_CHANNEL_ID from config
-        await client.send_video(
-            chat_id=CHARA_CHANNEL_ID,
-            video=vid_url,
-            caption=(
-                f"🎥 **New Character Added** 🎥\n\n"
-                f"Character Name: {character_name}\n"
-                f"Anime Name: {anime}\n"
-                f"Rarity: '🎗️ 𝘼𝙈𝙑 𝙀𝙙𝙞𝙩𝙞𝙤𝙣'\n"
-                f"ID: {available_id}\n"
-                f"Added by [{message.from_user.first_name}](tg://user?id={message.from_user.id})"
-            ),
-        )
-
-        # Insert the character data into MongoDB
-        await collection.insert_one(character)
-
-        await message.reply_text("✅ Video character added successfully.")
-    except Exception as e:
-        await message.reply_text(f"❌ Failed to upload character. Error: {e}")
-
-
-
-@app.on_message(filters.command(["updateimg"]) & uploader_filter)
-async def update_image(client, message):
-    """
-    Command to update character image by replying to a photo with the character ID
-    Format: /updateimg [character_id]
-    """
-    reply = message.reply_to_message
-    if not reply or not (reply.photo or reply.document):
-        await message.reply_text("Please reply to a photo or document with this command.")
-        return
-        
-    args = message.text.split()
-    if len(args) != 2:
-        await message.reply_text("Wrong format. Use: /updateimg [character_id] (reply to image)")
-        return
-    
-    character_id = args[1]
-    
-    # Check if character exists
-    character = await collection.find_one({'id': character_id})
-    if not character:
-        await message.reply_text(f"Character with ID {character_id} not found.")
-        return
-    
-    try:
-        processing_message = await message.reply("<ᴜᴘᴅᴀᴛɪɴɢ ɪᴍᴀɢᴇ...>")
-        
-        # Download the new image
-        path = await reply.download()
-        
-        # Check file size
-        check_file_size(path)
-        
-        # Upload image with fallback (imgBB as primary)
-        image_url = await upload_image_with_fallback(path)
-        
-        # Update character in the database
-        await collection.update_one(
-            {'id': character_id}, 
-            {'$set': {'img_url': image_url}}
-        )
-        
-        # Update all user collections that have this character
-        bulk_operations = []
-        async for user in user_collection.find():
-            if 'characters' in user:
-                for char in user['characters']:
-                    if char['id'] == character_id:
-                        char['img_url'] = image_url
-                bulk_operations.append(
-                    UpdateOne({'_id': user['_id']}, {'$set': {'characters': user['characters']}})
-                )
-
-        if bulk_operations:
-            await user_collection.bulk_write(bulk_operations)
-        
-        # Send confirmation message
-        await message.reply_text(f'✅ Image updated successfully for character ID: {character_id}')
-        
-        # Send updated character info to channel using CHARA_CHANNEL_ID from config
-        caption = (
-            f"🔄 **Character Image Updated** 🔄\n"
-            f"\n━━━━━━━━━━━━━━━━━━\n"
-            f"🔹 **Name:** {character['name']}\n"
-            f"🔸 **Anime:** {character['anime']}\n"
-            f"🔹 **ID:** {character_id}\n"
-            f"🔸 **Rarity:** {character['rarity']}\n"
-            f"Image updated by [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n"
-            f"\n━━━━━━━━━━━━━━━━━━\n"
-        )
-        
-        # Try to send with the uploaded URL
-        try:
-            if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
-                await client.send_video(
-                    chat_id=CHARA_CHANNEL_ID,
-                    video=image_url,
-                    caption=caption,
-                )
-            else:
-                await client.send_photo(
-                    chat_id=CHARA_CHANNEL_ID,
-                    photo=image_url,
-                    caption=caption,
-                )
-        except:
-            # Fallback to sending the local file if URL doesn't work
-            if path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.gif')):
-                await client.send_video(
-                    chat_id=CHARA_CHANNEL_ID,
-                    video=path,
-                    caption=caption,
-                )
-            else:
-                await client.send_photo(
-                    chat_id=CHARA_CHANNEL_ID,
-                    photo=path,
-                    caption=caption,
-                )
-                
-    except Exception as e:
-        error_msg = f"❌ Image update failed. Error: {str(e)}"
-        await message.reply_text(error_msg)
-        print(error_msg)  # Log the error for debugging
-    
-    finally:
-        # Clean up
-        if 'path' in locals() and os.path.exists(path):
-            os.remove(path)

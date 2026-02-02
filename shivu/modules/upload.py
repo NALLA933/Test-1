@@ -155,6 +155,29 @@ def normalize_url(url: str) -> str:
     return u
 
 
+async def get_next_sequence_number(sequence_name: str) -> int:
+    """
+    Generate a numeric sequence for IDs using the 'sequences' collection.
+    Creates the sequence document if it doesn't exist (upsert).
+    """
+    sequence_collection = db.sequences
+    try:
+        sequence_document = await sequence_collection.find_one_and_update(
+            {'_id': sequence_name},
+            {'$inc': {'sequence_value': 1}},
+            return_document=ReturnDocument.AFTER,
+            upsert=True
+        )
+        if not sequence_document or 'sequence_value' not in sequence_document:
+            # Ensure the document exists with value 1
+            await sequence_collection.update_one({'_id': sequence_name}, {'$set': {'sequence_value': 1}}, upsert=True)
+            return 1
+        return int(sequence_document['sequence_value'])
+    except Exception as e:
+        logger.error(f"Sequence generation failed for {sequence_name}: {e}")
+        raise
+
+
 def download_image_and_name(url: str) -> Tuple[Optional[bytes], Optional[str]]:
     """
     Download the URL content and attempt to return (bytes, filename).

@@ -26,10 +26,8 @@ class Config:
     ]
 
     # Group and Channel IDs
-    GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003727098465"))
-    
-    # IMPORTANT: Make sure your bot is admin in this channel with "Post Messages" permission
-    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003749495721"))
+    GROUP_ID: int = int(os.getenv("GROUP_ID", "-1003129952280"))
+    CHARA_CHANNEL_ID: int = int(os.getenv("CHARA_CHANNEL_ID", "-1003150808065"))
 
     # Database
     MONGO_URL: str = os.getenv(
@@ -55,7 +53,6 @@ class Config:
     def validate(cls) -> None:
         """Validate critical configuration values."""
         errors = []
-        warnings = []
 
         if not cls.TOKEN:
             errors.append("BOT_TOKEN is required")
@@ -77,15 +74,6 @@ class Config:
 
         if not cls.CHARA_CHANNEL_ID or cls.CHARA_CHANNEL_ID == 0:
             errors.append("CHARA_CHANNEL_ID is required")
-        
-        # Validate Channel ID format
-        chara_id_str = str(cls.CHARA_CHANNEL_ID)
-        if not chara_id_str.startswith("-100"):
-            warnings.append(f"CHARA_CHANNEL_ID ({cls.CHARA_CHANNEL_ID}) format seems incorrect. Should start with -100")
-        
-        # Check if ID length is correct (typically 13 digits: -100 + 10 digits)
-        if len(chara_id_str) != 14:  # Including the minus sign
-            warnings.append(f"CHARA_CHANNEL_ID length is {len(chara_id_str)}, expected 14 characters (including minus sign)")
 
         if errors:
             print("❌ Configuration Error(s):")
@@ -93,15 +81,6 @@ class Config:
                 print(f"   - {error}")
             print("\n💡 Please set the required environment variables and try again.")
             sys.exit(1)
-        
-        if warnings:
-            print("⚠️  Configuration Warning(s):")
-            for warning in warnings:
-                print(f"   - {warning}")
-            print("\n💡 IMPORTANT: Make sure your bot is added as ADMIN in the channel!")
-            print(f"   Channel ID: {cls.CHARA_CHANNEL_ID}")
-            print("   Required permissions: Post Messages, Edit Messages")
-            print()
 
         # Add OWNER_ID to SUDO_USERS if not already present
         if cls.OWNER_ID not in cls.SUDO_USERS:

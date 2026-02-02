@@ -58,26 +58,27 @@ async def validate_url(url):
         return False, "Telegraph and Telegram file IDs are not supported"
     
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.head(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    return False, f"URL returned status code {response.status}"
-                
-                content_type = response.headers.get('Content-Type', '')
-                if not content_type.startswith('image/'):
-                    return False, "URL does not point to an image"
-                
-                content_length = response.headers.get('Content-Length')
-                if content_length:
-                    size = int(content_length)
-                    if size > MAX_FILE_SIZE:
-                        return False, f"Image size ({size / (1024*1024):.2f} MB) exceeds 10 MB limit"
-                
-                return True, None
-    except aiohttp.ClientError:
-        return False, "Failed to validate URL"
-    except Exception as e:
-        return False, f"Validation error: {str(e)}"
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            try:
+                async with session.head(url, timeout=aiohttp.ClientTimeout(total=20), allow_redirects=True) as response:
+                    content_length = response.headers.get('Content-Length')
+                    if content_length and int(content_length) > MAX_FILE_SIZE:
+                        return False, f"Image size ({int(content_length) / (1024*1024):.2f} MB) exceeds 10 MB limit"
+                    return True, None
+            except:
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=25), allow_redirects=True) as response:
+                        if response.status == 200:
+                            content = await response.read()
+                            if len(content) > MAX_FILE_SIZE:
+                                return False, f"Image size ({len(content) / (1024*1024):.2f} MB) exceeds 10 MB limit"
+                            return True, None
+                except:
+                    pass
+        return True, None
+    except Exception:
+        return True, None
 
 async def upload(update: Update, context: CallbackContext) -> None:
     user_id = str(update.effective_user.id)

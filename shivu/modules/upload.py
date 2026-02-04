@@ -5,7 +5,6 @@ import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import Message, InputMediaPhoto
 from pymongo import ReturnDocument, UpdateOne
-from telegraph.aio import Telegraph
 
 # Import from __init__.py
 from shivu import (
@@ -88,9 +87,6 @@ RARITY_MAP = {
 active_ids = set()
 id_lock = asyncio.Lock()
 
-# Telegraph client initialization
-telegraph_client = Telegraph()
-
 async def upload_to_imgbb(file_path, api_key=IMGBB_API_KEY):
     """
     Upload image to imgBB (primary upload service)
@@ -118,21 +114,28 @@ async def upload_to_imgbb(file_path, api_key=IMGBB_API_KEY):
 
 async def upload_to_telegraph(file_path):
     """
-    Upload image to Telegraph (fallback option)
+    Upload image to Telegraph using API directly (no library needed)
     """
     try:
-        # Ensure telegraph client is created
-        if not hasattr(telegraph_client, 'token'):
-            await telegraph_client.create_account(short_name='CharacterBot')
+        url = "https://telegra.ph/upload"
         
-        # Upload file
-        with open(file_path, 'rb') as f:
-            result = await telegraph_client.upload_file(f)
+        with open(file_path, "rb") as file:
+            file_data = file.read()
         
-        if isinstance(result, list) and len(result) > 0:
-            return f"https://telegra.ph{result[0]['src']}"
-        else:
-            raise Exception("Telegraph upload failed")
+        # Create form data
+        data = aiohttp.FormData()
+        data.add_field('file', file_data, filename=os.path.basename(file_path))
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=data) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if isinstance(result, list) and len(result) > 0:
+                        return f"https://telegra.ph{result[0]['src']}"
+                    else:
+                        raise Exception("Telegraph upload failed - invalid response")
+                else:
+                    raise Exception(f"Telegraph upload failed with status {response.status}")
     except Exception as e:
         raise Exception(f"Telegraph upload error: {str(e)}")
 

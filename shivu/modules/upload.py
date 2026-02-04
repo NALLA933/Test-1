@@ -78,7 +78,7 @@ async def upload_to_imgbb(image_data):
             data = aiohttp.FormData()
             data.add_field('image', image_data)
             data.add_field('key', IMGBB_API_KEY)
-            
+
             async with session.post(IMGBB_API, data=data) as response:
                 if response.status == 200:
                     result = await response.json()
@@ -92,7 +92,7 @@ async def upload_to_telegraph(image_data):
         async with aiohttp.ClientSession() as session:
             data = aiohttp.FormData()
             data.add_field('file', image_data, filename='image.jpg')
-            
+
             async with session.post(TELEGRAPH_API, data=data) as response:
                 if response.status == 200:
                     result = await response.json()
@@ -107,7 +107,7 @@ async def upload_to_catbox(image_data):
             data = aiohttp.FormData()
             data.add_field('reqtype', 'fileupload')
             data.add_field('fileToUpload', image_data, filename='image.jpg')
-            
+
             async with session.post(CATBOX_API, data=data) as response:
                 if response.status == 200:
                     url = await response.text()
@@ -120,20 +120,22 @@ async def upload_image_with_failover(image_data):
     url = await upload_to_imgbb(image_data)
     if url:
         return url
-    
+
+    image_data.seek(0)
     url = await upload_to_telegraph(image_data)
     if url:
         return url
-    
+
+    image_data.seek(0)
     url = await upload_to_catbox(image_data)
     if url:
         return url
-    
+
     return None
 
 async def upload(update: Update, context: CallbackContext) -> None:
     user_id = str(update.effective_user.id)
-    
+
     if user_id != str(Config.OWNER_ID) and user_id not in [str(uid) for uid in Config.SUDO_USERS]:
         await update.message.reply_text('Ask My Owner...')
         return
@@ -171,16 +173,17 @@ async def upload(update: Update, context: CallbackContext) -> None:
         image_bytes = await file.download_as_bytearray()
 
         await status_msg.edit_text('⏳ Uploading image to hosting service...')
-        
+
         img_url = await upload_image_with_failover(io.BytesIO(image_bytes))
-        
+
         if not img_url:
             await status_msg.edit_text('❌ Failed to upload image. All hosting services failed. Please try again.')
             return
 
         await status_msg.edit_text('⏳ Creating character entry...')
 
-        id = str(await get_next_sequence_number('character_id')).zfill(2)
+        sequence_num = await get_next_sequence_number('character_id')
+        id = str(sequence_num).zfill(2) if sequence_num < 100 else str(sequence_num)
 
         character = {
             'img_url': img_url,
@@ -208,7 +211,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
 
 async def delete(update: Update, context: CallbackContext) -> None:
     user_id = str(update.effective_user.id)
-    
+
     if user_id != str(Config.OWNER_ID) and user_id not in [str(uid) for uid in Config.SUDO_USERS]:
         await update.message.reply_text('Ask my Owner to use this Command...')
         return
@@ -231,7 +234,7 @@ async def delete(update: Update, context: CallbackContext) -> None:
 
 async def update(update: Update, context: CallbackContext) -> None:
     user_id = str(update.effective_user.id)
-    
+
     if user_id != str(Config.OWNER_ID) and user_id not in [str(uid) for uid in Config.SUDO_USERS]:
         await update.message.reply_text('You do not have permission to use this command.')
         return
@@ -255,12 +258,18 @@ async def update(update: Update, context: CallbackContext) -> None:
         if args[1] in ['name', 'anime']:
             new_value = args[2].replace('-', ' ').title()
         elif args[1] == 'rarity':
-            rarity_map = {1: "⚪ Common", 2: "🟣 Rare", 3: "🟡 Legendary", 4: "🟢 Medium", 5: "💮 Special edition"}
             try:
-                new_value = rarity_map[int(args[2])]
-            except KeyError:
-                await update.message.reply_text('Invalid rarity. Please use 1, 2, 3, 4, or 5.')
+                rarity_number = int(args[2])
+            except ValueError:
+                await update.message.reply_text('❌ Rarity must be a number between 1-15.')
                 return
+            
+            rarity_level = RarityLevel.get_by_number(rarity_number)
+            if not rarity_level:
+                await update.message.reply_text('❌ Invalid rarity. Please use 1-15.')
+                return
+            
+            new_value = rarity_level.value[1]
         else:
             new_value = args[2]
 

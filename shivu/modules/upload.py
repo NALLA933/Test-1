@@ -18,7 +18,11 @@ from telegram.ext import CommandHandler, ContextTypes
 from telegram.error import TelegramError, NetworkError, TimedOut
 from motor.motor_asyncio import AsyncIOMotorCollection
 
-from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT, sudo_users
+from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
+from shivu.config import Config
+
+sudo_users = [str(user_id) for user_id in Config.SUDO_USERS]
+OWNER_ID = Config.OWNER_ID
 
 
 class MediaType(Enum):

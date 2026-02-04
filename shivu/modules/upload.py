@@ -208,7 +208,26 @@ async def upload(update: Update, context: CallbackContext) -> None:
             await collection.insert_one(character)
             await status_msg.edit_text('✅ CHARACTER ADDED....')
         except Exception as e:
-            await status_msg.edit_text(f'❌ Failed to post to channel. Character not added to database.\nError: {str(e)}')
+            if 'Failed to get http url content' in str(e) or 'Wrong file identifier' in str(e):
+                try:
+                    await status_msg.edit_text('⏳ URL failed, sending image directly...')
+                    message = await context.bot.send_photo(
+                        chat_id=CHARA_CHANNEL_ID,
+                        photo=io.BytesIO(image_bytes),
+                        caption=f'<b>Character Name:</b> {character_name}\n<b>Anime Name:</b> {anime}\n<b>Rarity:</b> {rarity}\n<b>ID:</b> {id}\nAdded by <a href="tg://user?id={update.effective_user.id}">{update.effective_user.first_name}</a>',
+                        parse_mode='HTML',
+                        read_timeout=60,
+                        write_timeout=60,
+                        connect_timeout=60,
+                        pool_timeout=60
+                    )
+                    character['message_id'] = message.message_id
+                    await collection.insert_one(character)
+                    await status_msg.edit_text('✅ CHARACTER ADDED....')
+                except Exception as fallback_error:
+                    await status_msg.edit_text(f'❌ Failed to post to channel. Character not added to database.\nError: {str(fallback_error)}')
+            else:
+                await status_msg.edit_text(f'❌ Failed to post to channel. Character not added to database.\nError: {str(e)}')
 
     except Exception as e:
         await update.message.reply_text(f'Character Upload Unsuccessful. Error: {str(e)}\nIf you think this is a source error, forward to: {SUPPORT_CHAT}')

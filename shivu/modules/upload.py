@@ -12,12 +12,14 @@ from shivu import (
     user_collection,
     shivuu as app,
     application,
-    CHARA_CHANNEL_ID,
     SUPPORT_CHAT,
     UPDATE_CHAT,
     OWNER_ID,
     SUDO_USERS,
 )
+
+# Hardcoded Channel ID
+CHARA_CHANNEL_ID = -1003749495721
 
 # Define filters for sudo users
 def sudo_filter_func(_, __, message):

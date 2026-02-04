@@ -19,10 +19,10 @@ from telegram.error import TelegramError, NetworkError, TimedOut
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
-from shivu.config import Config
+from shivu.config import Config as BotConfig
 
-sudo_users = [str(user_id) for user_id in Config.SUDO_USERS]
-OWNER_ID = Config.OWNER_ID
+sudo_users = [str(user_id) for user_id in BotConfig.SUDO_USERS]
+OWNER_ID = BotConfig.OWNER_ID
 
 
 class MediaType(Enum):
@@ -90,7 +90,7 @@ class RarityLevel(Enum):
 
 
 @dataclass(frozen=True)
-class Config:
+class UploadConfig:
     MAX_FILE_SIZE: int = 50 * 1024 * 1024
     DOWNLOAD_TIMEOUT: int = 300
     UPLOAD_TIMEOUT: int = 300
@@ -169,7 +169,7 @@ class MediaFile:
 
     @property
     def is_valid_size(self) -> bool:
-        return self.size <= Config.MAX_FILE_SIZE
+        return self.size <= UploadConfig.MAX_FILE_SIZE
 
 
 @dataclass
@@ -243,7 +243,7 @@ class SessionManager:
         async with cls._lock:
             if cls._session is None or cls._session.closed:
                 connector = TCPConnector(
-                    limit=Config.CONNECTION_LIMIT,
+                    limit=UploadConfig.CONNECTION_LIMIT,
                     limit_per_host=30,
                     ttl_dns_cache=300,
                     enable_cleanup_closed=True
@@ -251,7 +251,7 @@ class SessionManager:
                 cls._session = ClientSession(
                     connector=connector,
                     timeout=aiohttp.ClientTimeout(
-                        total=Config.DOWNLOAD_TIMEOUT,
+                        total=UploadConfig.DOWNLOAD_TIMEOUT,
                         connect=30,
                         sock_read=30
                     )
@@ -311,8 +311,9 @@ class TextFormatter:
 
     @staticmethod
     def generate_character_id(name: str, anime: str) -> str:
+        import time
         base = f"{name[:3]}{anime[:3]}".upper().replace(' ', '')
-        suffix = hashlib.md5(f"{name}{anime}".encode()).hexdigest()[:4].upper()
+        suffix = hashlib.md5(f"{name}{anime}{time.time()}".encode()).hexdigest()[:4].upper()
         return f"{base}{suffix}"
 
 
@@ -332,7 +333,7 @@ class FileDownloader:
                     downloaded = 0
                     chunks = []
 
-                    async for chunk in response.content.iter_chunked(Config.CHUNK_SIZE):
+                    async for chunk in response.content.iter_chunked(UploadConfig.CHUNK_SIZE):
                         chunks.append(chunk)
                         downloaded += len(chunk)
 
@@ -349,11 +350,9 @@ class FileDownloader:
         file,
         progress_callback=None
     ) -> Optional[bytes]:
-        """Download file from Telegram (photo/video/document)"""
         try:
             file_obj = await file.get_file()
             
-            # Download file to BytesIO
             bio = io.BytesIO()
             await file_obj.download_to_memory(bio)
             
@@ -401,10 +400,10 @@ class MultiServiceUploader:
         try:
             async with SessionManager.get_session() as session:
                 data = aiohttp.FormData()
-                data.add_field('key', Config.IMGBB_API_KEY)
+                data.add_field('key', UploadConfig.IMGBB_API_KEY)
                 data.add_field('image', base64.b64encode(file_bytes).decode())
 
-                async with session.post(Config.IMGBB_API, data=data, timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)) as response:
+                async with session.post(UploadConfig.IMGBB_API, data=data, timeout=aiohttp.ClientTimeout(total=UploadConfig.UPLOAD_TIMEOUT)) as response:
                     if response.status == 200:
                         result = await response.json()
                         return result.get('data', {}).get('url')
@@ -419,7 +418,7 @@ class MultiServiceUploader:
                 data = aiohttp.FormData()
                 data.add_field('file', file_bytes, filename=filename)
 
-                async with session.post(Config.TELEGRAPH_API, data=data, timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)) as response:
+                async with session.post(UploadConfig.TELEGRAPH_API, data=data, timeout=aiohttp.ClientTimeout(total=UploadConfig.UPLOAD_TIMEOUT)) as response:
                     if response.status == 200:
                         result = await response.json()
                         if isinstance(result, list) and len(result) > 0:
@@ -436,7 +435,7 @@ class MultiServiceUploader:
                 data.add_field('reqtype', 'fileupload')
                 data.add_field('fileToUpload', file_bytes, filename=filename)
 
-                async with session.post(Config.CATBOX_API, data=data, timeout=aiohttp.ClientTimeout(total=Config.UPLOAD_TIMEOUT)) as response:
+                async with session.post(UploadConfig.CATBOX_API, data=data, timeout=aiohttp.ClientTimeout(total=UploadConfig.UPLOAD_TIMEOUT)) as response:
                     if response.status == 200:
                         url = await response.text()
                         return url.strip() if url else None
@@ -473,21 +472,34 @@ class TelegramUploader:
         caption: str,
         context: ContextTypes.DEFAULT_TYPE
     ) -> Message:
-        send_methods = {
-            MediaType.VIDEO: context.bot.send_video,
-            MediaType.ANIMATION: context.bot.send_animation,
-            MediaType.DOCUMENT: context.bot.send_document,
-            MediaType.IMAGE: context.bot.send_photo
-        }
-
-        send_method = send_methods.get(media_type, context.bot.send_photo)
-
-        return await send_method(
-            chat_id=CHARA_CHANNEL_ID,
-            **{media_type.value: url},
-            caption=caption,
-            parse_mode='HTML'
-        )
+        if media_type == MediaType.VIDEO:
+            return await context.bot.send_video(
+                chat_id=CHARA_CHANNEL_ID,
+                video=url,
+                caption=caption,
+                parse_mode='HTML'
+            )
+        elif media_type == MediaType.ANIMATION:
+            return await context.bot.send_animation(
+                chat_id=CHARA_CHANNEL_ID,
+                animation=url,
+                caption=caption,
+                parse_mode='HTML'
+            )
+        elif media_type == MediaType.DOCUMENT:
+            return await context.bot.send_document(
+                chat_id=CHARA_CHANNEL_ID,
+                document=url,
+                caption=caption,
+                parse_mode='HTML'
+            )
+        else:
+            return await context.bot.send_photo(
+                chat_id=CHARA_CHANNEL_ID,
+                photo=url,
+                caption=caption,
+                parse_mode='HTML'
+            )
 
 
 class DatabaseManager:
@@ -522,14 +534,8 @@ class DatabaseManager:
 class CharacterUploadHandler:
     @staticmethod
     async def handle_reply_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        New handler for reply-based upload
-        Format: /upload <character-name> <anime-name> <rarity-number>
-        Must be used as reply to an image/video/document
-        """
         reply_msg = update.message.reply_to_message
         
-        # Check if message is a reply
         if not reply_msg:
             await update.message.reply_text(
                 '❌ Usage Error\n\n'
@@ -541,7 +547,6 @@ class CharacterUploadHandler:
             )
             return
 
-        # Check if reply has media
         if not any([reply_msg.photo, reply_msg.video, reply_msg.animation, reply_msg.document]):
             await update.message.reply_text(
                 '❌ No media found!\n\n'
@@ -549,7 +554,6 @@ class CharacterUploadHandler:
             )
             return
 
-        # Parse arguments
         args = context.args
         if len(args) < 3:
             await update.message.reply_text(
@@ -561,12 +565,10 @@ class CharacterUploadHandler:
             )
             return
 
-        # Extract parameters
-        rarity_num = args[-1]  # Last argument is rarity
-        anime_name = args[-2]  # Second last is anime name
-        char_name = ' '.join(args[:-2])  # Everything else is character name
+        rarity_num = args[-1]
+        anime_name = args[-2]
+        char_name = ' '.join(args[:-2])
 
-        # Validate rarity
         try:
             rarity_int = int(rarity_num)
             rarity = RarityLevel.from_number(rarity_int)
@@ -587,12 +589,11 @@ class CharacterUploadHandler:
         processing_msg = await update.message.reply_text('⏳ Processing your upload...')
 
         try:
-            # Detect media type and get file
             media_file_obj = None
             media_type = None
             
             if reply_msg.photo:
-                media_file_obj = reply_msg.photo[-1]  # Get largest photo
+                media_file_obj = reply_msg.photo[-1]
                 media_type = MediaType.IMAGE
             elif reply_msg.video:
                 media_file_obj = reply_msg.video
@@ -604,7 +605,6 @@ class CharacterUploadHandler:
                 media_file_obj = reply_msg.document
                 media_type = MediaType.DOCUMENT
 
-            # Download from Telegram
             await processing_msg.edit_text('⏳ Downloading media from Telegram...')
             progress = ProgressTracker(processing_msg)
             
@@ -617,7 +617,6 @@ class CharacterUploadHandler:
                 await processing_msg.edit_text('❌ Failed to download media from Telegram.')
                 return
 
-            # Create MediaFile object with temporary URL
             temp_url = f"telegram_{hashlib.md5(file_bytes).hexdigest()[:8]}.jpg"
             media_file = MediaFile(
                 url=temp_url,
@@ -628,11 +627,10 @@ class CharacterUploadHandler:
             if not media_file.is_valid_size:
                 await processing_msg.edit_text(
                     f'❌ File too large: {media_file.size / (1024*1024):.2f} MB\n'
-                    f'Maximum allowed: {Config.MAX_FILE_SIZE / (1024*1024):.2f} MB'
+                    f'Maximum allowed: {UploadConfig.MAX_FILE_SIZE / (1024*1024):.2f} MB'
                 )
                 return
 
-            # Upload to external services
             await processing_msg.edit_text('⏳ Uploading to ImgBB → Telegraph → Catbox...')
 
             uploaded_url = await MultiServiceUploader.upload_with_progress(
@@ -649,19 +647,16 @@ class CharacterUploadHandler:
                 )
                 return
 
-            # Update media file with actual URL
             media_file = MediaFile(
                 url=uploaded_url,
                 file_bytes=file_bytes,
                 media_type=media_type
             )
 
-            # Create character
             formatted_name = TextFormatter.format_name(char_name)
             formatted_anime = TextFormatter.format_name(anime_name)
             character_id = TextFormatter.generate_character_id(formatted_name, formatted_anime)
 
-            # Check for duplicates
             if await DatabaseManager.character_exists(character_id):
                 await processing_msg.edit_text(
                     f'❌ Character already exists!\n\n'
@@ -681,7 +676,6 @@ class CharacterUploadHandler:
                 uploader_name=update.effective_user.first_name
             )
 
-            # Send to channel
             await processing_msg.edit_text('⏳ Sending to channel...')
 
             channel_msg = await TelegramUploader.send_to_channel(character, context)
@@ -690,7 +684,6 @@ class CharacterUploadHandler:
                 await processing_msg.edit_text('❌ Failed to send to channel.')
                 return
 
-            # Update character with message info
             character.message_id = channel_msg.message_id
 
             if channel_msg.video:
@@ -706,7 +699,6 @@ class CharacterUploadHandler:
                 character.file_id = channel_msg.document.file_id
                 character.file_unique_id = channel_msg.document.file_unique_id
 
-            # Save to database
             if await DatabaseManager.save_character(character):
                 await processing_msg.edit_text(
                     f'✅ Character uploaded successfully!\n\n'
@@ -728,7 +720,6 @@ class CharacterUploadHandler:
 
     @staticmethod
     async def handle_url_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Old URL-based upload (kept for backward compatibility)"""
         await update.message.reply_text(
             '❌ URL upload is deprecated!\n\n'
             'Please use the new reply-based upload:\n'
@@ -803,8 +794,7 @@ class CharacterUpdateHandler:
 
         char_id = context.args[0].upper()
         field = context.args[1].lower()
-        new_value = ' '.join(context.args[2:])
-
+        
         valid_fields = ['name', 'anime', 'rarity', 'img_url']
         if field not in valid_fields:
             await update.message.reply_text(
@@ -812,6 +802,8 @@ class CharacterUpdateHandler:
                 f'Valid fields: {", ".join(valid_fields)}'
             )
             return
+
+        new_value = ' '.join(context.args[2:])
 
         character_data = await collection.find_one({'id': char_id})
 
@@ -1002,7 +994,16 @@ class CharacterUpdateHandler:
             pass
 
         new_url = character_data['img_url']
-        media_type = MediaType(character_data.get('media_type', 'image'))
+        media_type_str = character_data.get('media_type', 'image')
+        
+        if media_type_str == 'video':
+            media_type = MediaType.VIDEO
+        elif media_type_str == 'animation':
+            media_type = MediaType.ANIMATION
+        elif media_type_str == 'document':
+            media_type = MediaType.DOCUMENT
+        else:
+            media_type = MediaType.IMAGE
 
         message = await TelegramUploader._send_media_url(
             new_url,
@@ -1050,7 +1051,6 @@ def require_sudo(func):
 @require_sudo
 async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        # New system: only reply-based upload
         if update.message.reply_to_message:
             await CharacterUploadHandler.handle_reply_upload(update, context)
         else:

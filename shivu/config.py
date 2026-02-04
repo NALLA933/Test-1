@@ -21,7 +21,7 @@ class Config:
     OWNER_ID: int = int(os.getenv("OWNER_ID", "7818323042"))
     SUDO_USERS: List[int] = [
         int(user_id.strip())
-        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527").split(",")
+        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527,6024289634,8420981179,8555362860").split(",")
         if user_id.strip().isdigit()
     ]
 
@@ -32,7 +32,7 @@ class Config:
     # Database
     MONGO_URL: str = os.getenv(
         "MONGO_URL",
-        "mongodb+srv://Sarkar123:GAUTAMMISHRA@sarkar.1uiwqkd.mongodb.net/?retryWrites=true&w=majority"
+        "mongodb+srv://Alisha:Alisha123@cluster0.yqcpftw.mongodb.net/?retryWrites=true&w=majority"
     )
 
     # Media

@@ -515,21 +515,36 @@ class CharacterUploadHandler:
         reply_msg = update.message.reply_to_message
         args = context.args
 
-        if len(args) < 2:
+        if len(args) < 1:
             await update.message.reply_text(
-                '❌ Usage: /upload <name> <anime> [rarity]\n'
-                'Reply to a photo/video/GIF'
+                '❌ Usage: /upload <character_name>\n<anime name>\n'
+                'Reply to a photo/video/GIF\n'
+                'Rarity will be auto-detected as Common (1)'
             )
             return
 
         name = TextFormatter.format_name(args[0])
-        anime = TextFormatter.format_name(args[1])
-        rarity_num = int(args[2]) if len(args) > 2 else 1
-
+        
+        anime_parts = []
+        rarity_num = 1
+        
+        for i in range(1, len(args)):
+            arg = args[i].strip()
+            if arg.isdigit() and 1 <= int(arg) <= 15:
+                rarity_num = int(arg)
+                break
+            else:
+                anime_parts.append(arg)
+        
+        if not anime_parts:
+            await update.message.reply_text('❌ Please provide anime name')
+            return
+        
+        anime = TextFormatter.format_name(' '.join(anime_parts))
+        
         rarity = RarityLevel.from_number(rarity_num)
         if not rarity:
-            await update.message.reply_text('❌ Invalid rarity number (1-15)')
-            return
+            rarity = RarityLevel.from_number(1)
 
         file_id = None
         mime_type = None
@@ -569,19 +584,24 @@ class CharacterUploadHandler:
 
         if len(args) < 3:
             await update.message.reply_text(
-                '❌ Usage: /upload <name> <anime> <url> [rarity]'
+                '❌ Usage: /upload <character_name> <anime_name> <url> [rarity]'
             )
             return
 
         name = TextFormatter.format_name(args[0])
         anime = TextFormatter.format_name(args[1])
         url = args[2]
-        rarity_num = int(args[3]) if len(args) > 3 else 1
+        
+        rarity_num = 1
+        if len(args) > 3:
+            try:
+                rarity_num = int(args[3])
+            except ValueError:
+                rarity_num = 1
 
         rarity = RarityLevel.from_number(rarity_num)
         if not rarity:
-            await update.message.reply_text('❌ Invalid rarity number (1-15)')
-            return
+            rarity = RarityLevel.from_number(1)
 
         processing_msg = await update.message.reply_text('⏳ Downloading...')
 

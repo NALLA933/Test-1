@@ -307,14 +307,11 @@ class ProgressTracker:
 class TextFormatter:
     @staticmethod
     def format_name(name: str) -> str:
-        return ' '.join(word.capitalize() for word in name.split())
+        return name.replace('-', ' ').title()
 
     @staticmethod
-    def generate_character_id(name: str, anime: str) -> str:
-        import time
-        base = f"{name[:3]}{anime[:3]}".upper().replace(' ', '')
-        suffix = hashlib.md5(f"{name}{anime}{time.time()}".encode()).hexdigest()[:4].upper()
-        return f"{base}{suffix}"
+    def validate_hyphenated_format(value: str) -> bool:
+        return bool(value and '-' in value and not value.startswith('-') and not value.endswith('-'))
 
 
 class FileDownloader:
@@ -521,14 +518,14 @@ class DatabaseManager:
         return result is not None
 
     @staticmethod
-    async def get_next_id() -> int:
+    async def get_next_id() -> str:
         counter = await db.counters.find_one_and_update(
             {'_id': 'character_id'},
             {'$inc': {'sequence_value': 1}},
             upsert=True,
             return_document=ReturnDocument.AFTER
         )
-        return counter['sequence_value']
+        return str(counter['sequence_value']).zfill(2)
 
 
 class CharacterUploadHandler:
@@ -540,9 +537,9 @@ class CharacterUploadHandler:
             await update.message.reply_text(
                 '❌ Usage Error\n\n'
                 'Please reply to an image/video with:\n'
-                '<code>/upload character-name anime-name rarity-number</code>\n\n'
+                '<code>/upload Character-Name Anime-Name rarity-number</code>\n\n'
                 'Example:\n'
-                '<code>/upload Naruto Uzumaki Naruto 3</code>',
+                '<code>/upload Rimuru-Tempest That-Time-I-Got-Reincarnated-as-a-Slime 3</code>',
                 parse_mode='HTML'
             )
             return
@@ -558,16 +555,36 @@ class CharacterUploadHandler:
         if len(args) < 3:
             await update.message.reply_text(
                 '❌ Invalid Format\n\n'
-                'Usage: <code>/upload character-name anime-name rarity-number</code>\n\n'
+                'Usage: <code>/upload Character-Name Anime-Name rarity-number</code>\n\n'
                 'Example:\n'
-                '<code>/upload Naruto Uzumaki Naruto 3</code>',
+                '<code>/upload Rimuru-Tempest That-Time-I-Got-Reincarnated-as-a-Slime 3</code>',
                 parse_mode='HTML'
             )
             return
 
         rarity_num = args[-1]
         anime_name = args[-2]
-        char_name = ' '.join(args[:-2])
+        char_name = args[-3]
+
+        if not TextFormatter.validate_hyphenated_format(char_name):
+            await update.message.reply_text(
+                '❌ Invalid character name format!\n\n'
+                'Character name must be in hyphenated format.\n'
+                'Example: Rimuru-Tempest\n\n'
+                'Usage: <code>/upload Character-Name Anime-Name rarity-number</code>',
+                parse_mode='HTML'
+            )
+            return
+
+        if not TextFormatter.validate_hyphenated_format(anime_name):
+            await update.message.reply_text(
+                '❌ Invalid anime name format!\n\n'
+                'Anime name must be in hyphenated format.\n'
+                'Example: That-Time-I-Got-Reincarnated-as-a-Slime\n\n'
+                'Usage: <code>/upload Character-Name Anime-Name rarity-number</code>',
+                parse_mode='HTML'
+            )
+            return
 
         try:
             rarity_int = int(rarity_num)
@@ -655,16 +672,7 @@ class CharacterUploadHandler:
 
             formatted_name = TextFormatter.format_name(char_name)
             formatted_anime = TextFormatter.format_name(anime_name)
-            character_id = TextFormatter.generate_character_id(formatted_name, formatted_anime)
-
-            if await DatabaseManager.character_exists(character_id):
-                await processing_msg.edit_text(
-                    f'❌ Character already exists!\n\n'
-                    f'ID: {character_id}\n'
-                    f'Name: {formatted_name}\n'
-                    f'Anime: {formatted_anime}'
-                )
-                return
+            character_id = await DatabaseManager.get_next_id()
 
             character = Character(
                 character_id=character_id,
@@ -725,7 +733,7 @@ class CharacterUploadHandler:
             'Please use the new reply-based upload:\n'
             '1. Send/forward the image/video\n'
             '2. Reply to it with:\n'
-            '<code>/upload character-name anime-name rarity-number</code>',
+            '<code>/upload Character-Name Anime-Name rarity-number</code>',
             parse_mode='HTML'
         )
 
@@ -736,11 +744,11 @@ class CharacterDeletionHandler:
         if len(context.args) != 1:
             await update.message.reply_text(
                 '❌ Usage: /delete <character_id>\n\n'
-                'Example: /delete NARNAR1A2B'
+                'Example: /delete 01'
             )
             return
 
-        char_id = context.args[0].upper()
+        char_id = context.args[0]
 
         processing_msg = await update.message.reply_text(f'⏳ Deleting character {char_id}...')
 
@@ -786,13 +794,14 @@ class CharacterUpdateHandler:
                 '❌ Usage: /update <character_id> <field> <new_value>\n\n'
                 'Fields: name, anime, rarity, img_url\n\n'
                 'Examples:\n'
-                '/update NARNAR1A2B name Naruto Uzumaki\n'
-                '/update NARNAR1A2B rarity 5\n'
-                '/update NARNAR1A2B img_url https://...'
+                '/update 01 name Rimuru-Tempest\n'
+                '/update 01 anime That-Time-I-Got-Reincarnated-as-a-Slime\n'
+                '/update 01 rarity 5\n'
+                '/update 01 img_url https://...'
             )
             return
 
-        char_id = context.args[0].upper()
+        char_id = context.args[0]
         field = context.args[1].lower()
         
         valid_fields = ['name', 'anime', 'rarity', 'img_url']
@@ -803,7 +812,7 @@ class CharacterUpdateHandler:
             )
             return
 
-        new_value = ' '.join(context.args[2:])
+        new_value = context.args[2]
 
         character_data = await collection.find_one({'id': char_id})
 
@@ -851,7 +860,24 @@ class CharacterUpdateHandler:
         processing_msg: Message,
         update: Update
     ) -> Optional[Dict[str, Any]]:
-        if field in ['name', 'anime']:
+        if field == 'name':
+            if not TextFormatter.validate_hyphenated_format(new_value):
+                await processing_msg.edit_text(
+                    '❌ Invalid name format!\n\n'
+                    'Name must be in hyphenated format.\n'
+                    'Example: Rimuru-Tempest'
+                )
+                return None
+            return {field: TextFormatter.format_name(new_value)}
+
+        elif field == 'anime':
+            if not TextFormatter.validate_hyphenated_format(new_value):
+                await processing_msg.edit_text(
+                    '❌ Invalid anime name format!\n\n'
+                    'Anime name must be in hyphenated format.\n'
+                    'Example: That-Time-I-Got-Reincarnated-as-a-Slime'
+                )
+                return None
             return {field: TextFormatter.format_name(new_value)}
 
         elif field == 'rarity':
@@ -1059,9 +1085,9 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 'Usage:\n'
                 '1. Send or forward an image/video/animation\n'
                 '2. Reply to it with:\n'
-                '<code>/upload character-name anime-name rarity-number</code>\n\n'
+                '<code>/upload Character-Name Anime-Name rarity-number</code>\n\n'
                 'Example:\n'
-                '<code>/upload Naruto Uzumaki Naruto 3</code>',
+                '<code>/upload Rimuru-Tempest That-Time-I-Got-Reincarnated-as-a-Slime 3</code>',
                 parse_mode='HTML'
             )
     except Exception as e:

@@ -50,7 +50,7 @@ SMALL_CAPS_MAP = {
     'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
     'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
     'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ',
-    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': '': 'ʏ', 'Z': 'ᴢ',
+    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
     ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
     '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5',
     '6': '6', '7': '7', '8': '8', '9': '9'
@@ -131,7 +131,7 @@ def to_small_caps(text: str) -> str:
 
 
 def get_rarity_display(rarity: int) -> str:
-    return RARITY_MAP.get(rarity, f"({rarity})")
+    return RARITY_MAP.get(rarity, f"⚪ ᴜɴᴋɴᴏᴡɴ ({rarity})")
 
 
 def get_rarity_from_string(rarity_value) -> int:
@@ -541,7 +541,7 @@ async def credeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "user_id": user_id,
                 "is_redeemed": False
             },
-            {"$set":set": {"is_redeemed": True, "redeemed_at": now}}
+            {"$set": {"is_redeemed": True, "redeemed_at": now}}
         )
 
         if redeem_result.matched_count == 0:

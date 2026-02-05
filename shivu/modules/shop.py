@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from html import escape
 from typing import List, Dict, Optional, Tuple
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
 
 from shivu import collection, user_collection, application
@@ -167,50 +167,6 @@ async def add_character_to_user(user_id: int, character: dict) -> bool:
         return False
 
 
-async def debug_characters(update: Update, context: CallbackContext):
-    all_chars = []
-    rarity_counts = {}
-    
-    async for char in collection.find({}):
-        rarity = char.get('rarity', 'NONE')
-        rarity_int = get_rarity_from_string(rarity)
-        
-        all_chars.append({
-            'id': char.get('id', 'NO_ID'),
-            'name': char.get('name', 'NO_NAME'),
-            'rarity_raw': rarity,
-            'rarity_int': rarity_int
-        })
-        
-        key = f"{rarity} -> {rarity_int}"
-        rarity_counts[key] = rarity_counts.get(key, 0) + 1
-    
-    message = f"Total Characters: {len(all_chars)}\n\n"
-    message += "Rarity Distribution:\n"
-    for rarity_key, count in sorted(rarity_counts.items()):
-        message += f"{rarity_key}: {count}\n"
-    
-    message += f"\n\nShop Rarities ({SHOP_RARITIES}):\n"
-    shop_available = [c for c in all_chars if c['rarity_int'] in SHOP_RARITIES]
-    message += f"Available for shop: {len(shop_available)}\n"
-    
-    for char in shop_available[:5]:
-        message += f"- {char['name']} (Rarity: {char['rarity_raw']})\n"
-    
-    await update.message.reply_text(message[:4000])
-
-
-async def reset_shop_command(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    
-    await user_collection.update_one(
-        {'id': user_id},
-        {'$unset': {'shop_data': ''}}
-    )
-    
-    await update.message.reply_text(to_small_caps("✅ Shop reset! Use /shop again."))
-
-
 async def get_shop_data(user_id: int, force_reset: bool = False) -> dict:
     user = await user_collection.find_one({'id': user_id})
     
@@ -370,7 +326,7 @@ async def shop_command(update: Update, context: CallbackContext) -> None:
     
     if not shop_data.get('characters'):
         await update.message.reply_text(
-            to_small_caps("⚠️ Shop is empty! Use /resetshop to fix.")
+            to_small_caps("⚠️ Shop is empty! Please try again later.")
         )
         return
     
@@ -383,7 +339,7 @@ async def display_shop_character(update: Update, context: CallbackContext,
     characters = shop_data.get('characters', [])
     
     if not characters:
-        message = to_small_caps("⚠️ Shop is empty! Use /resetshop to fix.")
+        message = to_small_caps("⚠️ Shop is empty! Please try again later.")
         if update.message:
             await update.message.reply_text(message)
         else:
@@ -483,25 +439,62 @@ async def display_shop_character(update: Update, context: CallbackContext,
             )
     else:
         query = update.callback_query
+        
         if photo_url:
             try:
-                await query.edit_message_caption(
-                    caption=message,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
+                current_photo = query.message.photo
+                if current_photo:
+                    current_file_id = current_photo[-1].file_id
+                    
+                    async with application.bot.get_file(current_file_id) as file:
+                        pass
+                    
+                    new_media = InputMediaPhoto(media=photo_url, caption=message, parse_mode='HTML')
+                    await query.edit_message_media(media=new_media, reply_markup=reply_markup)
+                else:
+                    await query.delete_message()
+                    await query.message.reply_photo(
+                        photo=photo_url,
+                        caption=message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+            except Exception as e:
+                try:
+                    await query.delete_message()
+                    await query.message.reply_photo(
+                        photo=photo_url,
+                        caption=message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                except:
+                    await query.edit_message_text(
+                        message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+        else:
+            try:
+                if query.message.photo:
+                    await query.delete_message()
+                    await query.message.reply_text(
+                        message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await query.edit_message_text(
+                        message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
             except:
                 await query.edit_message_text(
                     message,
                     parse_mode='HTML',
                     reply_markup=reply_markup
                 )
-        else:
-            await query.edit_message_text(
-                message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
 
 
 async def shop_callback(update: Update, context: CallbackContext) -> None:
@@ -674,23 +667,44 @@ async def show_purchase_confirmation(update: Update, context: CallbackContext,
     
     if photo_url:
         try:
-            await query.edit_message_caption(
-                caption=message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
+            new_media = InputMediaPhoto(media=photo_url, caption=message, parse_mode='HTML')
+            await query.edit_message_media(media=new_media, reply_markup=reply_markup)
+        except:
+            try:
+                await query.delete_message()
+                await query.message.reply_photo(
+                    photo=photo_url,
+                    caption=message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            except:
+                await query.edit_message_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+    else:
+        try:
+            if query.message.photo:
+                await query.delete_message()
+                await query.message.reply_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+            else:
+                await query.edit_message_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
         except:
             await query.edit_message_text(
                 message,
                 parse_mode='HTML',
                 reply_markup=reply_markup
             )
-    else:
-        await query.edit_message_text(
-            message,
-            parse_mode='HTML',
-            reply_markup=reply_markup
-        )
 
 
 async def process_purchase(update: Update, context: CallbackContext,
@@ -781,6 +795,4 @@ async def process_purchase(update: Update, context: CallbackContext,
 
 
 application.add_handler(CommandHandler("shop", shop_command, block=False))
-application.add_handler(CommandHandler("debugshop", debug_characters, block=False))
-application.add_handler(CommandHandler("resetshop", reset_shop_command, block=False))
 application.add_handler(CallbackQueryHandler(shop_callback, pattern='^shop_', block=False))

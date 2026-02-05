@@ -473,11 +473,7 @@ async def display_shop_character(update: Update, context: CallbackContext,
         if photo_url:
             try:
                 await query.edit_message_media(
-                    media=InputMediaPhoto(
-                        media=photo_url,
-                        caption=message,
-                        parse_mode='HTML'
-                    ),
+                    media=InputMediaPhoto(media=photo_url, caption=message, parse_mode="HTML"),
                     reply_markup=reply_markup
                 )
             except:

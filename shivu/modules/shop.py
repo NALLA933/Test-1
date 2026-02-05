@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from html import escape
 from typing import List, Dict, Optional, Tuple
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
 
 from shivu import collection, user_collection, application
@@ -74,6 +74,55 @@ REFRESH_COST = 20000
 IST_OFFSET = timedelta(hours=5, minutes=30)
 
 
+def get_rarity_from_string(rarity_value) -> int:
+    """Convert any rarity format (int, string, emoji) to integer."""
+    if isinstance(rarity_value, int):
+        return rarity_value
+    
+    if isinstance(rarity_value, str):
+        rarity_str = rarity_value.strip().lower()
+        
+        # Check if it's a digit string
+        if rarity_str.isdigit():
+            return int(rarity_str)
+        
+        # Check for emoji
+        emoji_to_int = {
+            '⚪': 1, '🔵': 2, '🟡': 3, '💮': 4, '👹': 5,
+            '🎐': 6, '🔮': 7, '🪐': 8, '⚰️': 9, '🌬️': 10,
+            '💝': 11, '🌸': 12, '🏖️': 13, '🍭': 14, '🧬': 15
+        }
+        
+        for emoji, num in emoji_to_int.items():
+            if emoji in rarity_str:
+                return num
+        
+        # Check for name
+        name_to_int = {
+            'common': 1, 'rare': 2, 'legendary': 3, 'special': 4, 'ancient': 5,
+            'celestial': 6, 'epic': 7, 'cosmic': 8, 'nightmare': 9, 'frostborn': 10,
+            'valentine': 11, 'spring': 12, 'tropical': 13, 'kawaii': 14, 'hybrid': 15,
+            'ᴄᴏᴍᴍᴏɴ': 1, 'ʀᴀʀᴇ': 2, 'ʟᴇɢᴇɴᴅᴀʀʏ': 3, 'ꜱᴘᴇᴄɪᴀʟ': 4, 'ᴀɴᴄɪᴇɴᴛ': 5,
+            'ᴄᴇʟᴇꜱᴛɪᴀʟ': 6, 'ᴇᴘɪᴄ': 7, 'ᴄᴏꜱᴍɪᴄ': 8, 'ɴɪɢʜᴛᴍᴀʀᴇ': 9, 'ꜰʀᴏꜱᴛʙᴏʀɴ': 10,
+            'ᴠᴀʟᴇɴᴛɪɴᴇ': 11, 'ꜱᴘʀɪɴɢ': 12, 'ᴛʀᴏᴘɪᴄᴀʟ': 13, 'ᴋᴀᴡᴀɪɪ': 14, 'ʜʏʙʀɪᴅ': 15
+        }
+        
+        if rarity_str in name_to_int:
+            return name_to_int[rarity_str]
+        
+        # Clean string and try again
+        clean_str = ''.join(c for c in rarity_str if c.isalnum() or c.isspace()).strip()
+        if clean_str in name_to_int:
+            return name_to_int[clean_str]
+        
+        # Partial match
+        for name, num in name_to_int.items():
+            if name in rarity_str or rarity_str in name:
+                return num
+    
+    return 1
+
+
 def get_ist_midnight() -> datetime:
     """Get the next midnight in IST timezone."""
     now_utc = datetime.now(timezone.utc)
@@ -87,50 +136,6 @@ def get_ist_midnight() -> datetime:
     # Convert back to UTC
     next_midnight_utc = next_midnight_ist - IST_OFFSET
     return next_midnight_utc
-
-
-def get_rarity_from_string(rarity_value) -> int:
-    """Convert any rarity format (int, string, emoji) to integer."""
-    if isinstance(rarity_value, int):
-        return rarity_value
-    
-    if isinstance(rarity_value, str):
-        rarity_str = rarity_value.strip().lower()
-        
-        if rarity_str.isdigit():
-            return int(rarity_str)
-        
-        emoji_to_int = {
-            '⚪': 1, '🔵': 2, '🟡': 3, '💮': 4, '👹': 5,
-            '🎐': 6, '🔮': 7, '🪐': 8, '⚰️': 9, '🌬️': 10,
-            '💝': 11, '🌸': 12, '🏖️': 13, '🍭': 14, '🧬': 15
-        }
-        
-        for emoji, num in emoji_to_int.items():
-            if emoji in rarity_str:
-                return num
-        
-        name_to_int = {
-            'common': 1, 'rare': 2, 'legendary': 3, 'special': 4, 'ancient': 5,
-            'celestial': 6, 'epic': 7, 'cosmic': 8, 'nightmare': 9, 'frostborn': 10,
-            'valentine': 11, 'spring': 12, 'tropical': 13, 'kawaii': 14, 'hybrid': 15,
-            'ᴄᴏᴍᴍᴏɴ': 1, 'ʀᴀʀᴇ': 2, 'ʟᴇɢᴇɴᴅᴀʀʏ': 3, 'ꜱᴘᴇᴄɪᴀʟ': 4, 'ᴀɴᴄɪᴇɴᴛ': 5,
-            'ᴄᴇʟᴇꜱᴛɪᴀʟ': 6, 'ᴇᴘɪᴄ': 7, 'ᴄᴏꜱᴍɪᴄ': 8, 'ɴɪɢʜᴛᴍᴀʀᴇ': 9, 'ꜰʀᴏꜱᴛʙᴏʀɴ': 10,
-            'ᴠᴀʟᴇɴᴛɪɴᴇ': 11, 'ꜱᴘʀɪɴɢ': 12, 'ᴛʀᴏᴘɪᴄᴀʟ': 13, 'ᴋᴀᴡᴀɪɪ': 14, 'ʜʏʙʀɪᴅ': 15
-        }
-        
-        if rarity_str in name_to_int:
-            return name_to_int[rarity_str]
-        
-        clean_str = ''.join(c for c in rarity_str if c.isalnum() or c.isspace()).strip()
-        if clean_str in name_to_int:
-            return name_to_int[clean_str]
-        
-        for name, num in name_to_int.items():
-            if name in rarity_str or rarity_str in name:
-                return num
-    
-    return 1
 
 
 async def get_balance(user_id: int) -> int:
@@ -236,10 +241,9 @@ async def get_shop_data(user_id: int) -> dict:
 
 async def initialize_shop_data(user_id: int) -> dict:
     """Initialize new shop data for user."""
-    # Fetch 3 random characters from allowed rarities
     characters = []
     
-    # Get characters from database using fetch function
+    # Fetch eligible characters using the new function
     eligible_chars = await fetch_shop_characters()
     
     # Select 3 random characters
@@ -299,7 +303,7 @@ async def refresh_shop(user_id: int) -> Tuple[bool, str]:
     
     # Check if already refreshed
     if shop_data.get('refresh_used', False):
-        return False, to_small_caps("⚠️ You have reached daily limit of 1 refresh!")
+        return False, to_small_caps("⚠️ You have already refreshed today!")
     
     # Check balance
     balance = await get_balance(user_id)
@@ -309,162 +313,194 @@ async def refresh_shop(user_id: int) -> Tuple[bool, str]:
     # Deduct refresh cost
     await change_balance(user_id, -REFRESH_COST)
     
-    # Generate new characters
-    characters = []
-    pipeline = [
-        {'$match': {'rarity': {'$in': SHOP_RARITIES}}},
-        {'$sample': {'size': 3}}
-    ]
+    # Generate new shop
+    new_shop_data = await initialize_shop_data(user_id)
+    new_shop_data['refresh_used'] = True
     
-    async for char in collection.aggregate(pipeline):
-        rarity = char.get('rarity', 4)
-        price_range = PRICE_RANGES.get(rarity, (400000, 500000))
-        base_price = random.randint(price_range[0], price_range[1])
-        discount_percent = random.randint(DISCOUNT_MIN, DISCOUNT_MAX)
-        discount_amount = int(base_price * discount_percent / 100)
-        final_price = base_price - discount_amount
-        
-        characters.append({
-            'id': char['id'],
-            'name': char['name'],
-            'anime': char['anime'],
-            'rarity': rarity,
-            'img_url': char.get('img_url', ''),
-            'base_price': base_price,
-            'discount_percent': discount_percent,
-            'final_price': final_price
-        })
-    
-    # Update shop data
-    shop_data['characters'] = characters
-    shop_data['refresh_used'] = True
-    shop_data['current_index'] = 0
-    
+    # Update user document
     await user_collection.update_one(
         {'id': user_id},
-        {'$set': {'shop_data': shop_data}}
+        {'$set': {'shop_data': new_shop_data}}
     )
     
     return True, to_small_caps(f"✅ Shop refreshed! Cost: {REFRESH_COST:,} coins")
 
 
 async def shop_command(update: Update, context: CallbackContext) -> None:
-    """Handle /shop command - Display normal shop."""
+    """Handle /shop command."""
     user_id = update.effective_user.id
     
     # Get shop data
     shop_data = await get_shop_data(user_id)
+    characters = shop_data.get('characters', [])
+    
+    if not characters or len(characters) == 0:
+        await update.message.reply_text(
+            to_small_caps("⚠️ Shop is empty! Please try again later.")
+        )
+        return
     
     # Display first character
     await display_shop_character(update, context, user_id, 0)
 
 
-async def display_shop_character(update: Update, context: CallbackContext, 
+async def display_shop_character(update: Update, context: CallbackContext,
                                  user_id: int, index: int) -> None:
     """Display a specific character from shop."""
     shop_data = await get_shop_data(user_id)
     characters = shop_data.get('characters', [])
     
-    if not characters:
-        message = to_small_caps("⚠️ Shop is empty! Please try again later.")
-        if update.message:
-            await update.message.reply_text(message)
-        else:
-            await update.callback_query.edit_message_text(message)
+    if not characters or index >= len(characters):
         return
     
-    # Ensure index is valid
-    index = max(0, min(index, len(characters) - 1))
-    
-    # Update current index
-    await user_collection.update_one(
-        {'id': user_id},
-        {'$set': {'shop_data.current_index': index}}
-    )
-    
     char = characters[index]
+    
+    # Get character details
+    rarity_emoji = RARITY_EMOJIS.get(char['rarity'], '⚪')
+    rarity_name = RARITY_NAMES.get(char['rarity'], 'ᴜɴᴋɴᴏᴡɴ')
+    
+    # Check if owned
+    owned_chars = await get_user_owned_characters(user_id)
+    is_owned = char['id'] in owned_chars
     
     # Get owner count
     owner_count = await get_character_owner_count(char['id'])
     
-    # Check if user already owns this character
-    owned_chars = await get_user_owned_characters(user_id)
-    status = "Sold" if char['id'] in owned_chars else "Available"
+    # Get balance
+    balance = await get_balance(user_id)
     
-    # Build message
-    rarity_emoji = RARITY_EMOJIS.get(char['rarity'], '⚪')
-    rarity_name = RARITY_NAMES.get(char['rarity'], 'ᴜɴᴋɴᴏᴡɴ')
-    
+    # Escape HTML characters
     safe_name = escape(str(char['name']))
     safe_anime = escape(str(char['anime']))
     
-    message = f"<b>🏪 {to_small_caps(f'Character Shop ({index + 1}/{len(characters)})')}</b>\n\n"
+    # Build message
+    message = f"<b>🏪 {to_small_caps('Character Shop')}</b>\n\n"
     message += f"🎭 {to_small_caps('Name')}: {to_small_caps(safe_name)}\n"
     message += f"📺 {to_small_caps('Anime')}: {to_small_caps(safe_anime)}\n"
     message += f"🆔 {to_small_caps('Id')}: {char['id']}\n"
     message += f"✨ {to_small_caps('Rarity')}: {rarity_emoji} {rarity_name}\n"
-    message += f"💸 {to_small_caps('Price')}: {char['base_price']:,}\n"
+    message += f"👥 {to_small_caps('Owned by')}: {owner_count} {to_small_caps('users')}\n\n"
+    message += f"💸 {to_small_caps('Original Price')}: {char['base_price']:,}\n"
     message += f"🛒 {to_small_caps('Discount')}: {char['discount_percent']}%\n"
-    message += f"🏷️ {to_small_caps('Discount Price')}: {char['final_price']:,}\n"
-    message += f"🎴 {to_small_caps('Owner')}: {owner_count}\n"
-    message += f"📋 {to_small_caps('Stats')}: {to_small_caps(status)}\n"
+    message += f"🏷️ {to_small_caps('Final Price')}: <b>{char['final_price']:,}</b>\n\n"
+    message += f"💰 {to_small_caps('Your Balance')}: {balance:,}\n\n"
+    
+    if is_owned:
+        message += to_small_caps("✅ Already owned!")
+    elif balance >= char['final_price']:
+        message += to_small_caps("💡 Click Buy to purchase!")
+    else:
+        message += to_small_caps("⚠️ Insufficient balance!")
     
     # Build keyboard
     keyboard = []
     
-    # Purchase button
-    if status == "Available":
-        keyboard.append([
-            InlineKeyboardButton(
-                to_small_caps("💰 Purchase"),
-                callback_data=f"shop_purchase:{user_id}:{index}"
-            )
-        ])
-    else:
-        keyboard.append([
-            InlineKeyboardButton(
-                to_small_caps("❌ Already Owned"),
-                callback_data="shop_noop"
-            )
-        ])
-    
-    # Navigation buttons
+    # Navigation row
     nav_row = []
     if index > 0:
-        nav_row.append(InlineKeyboardButton("⬅️", callback_data=f"shop_nav:{user_id}:{index - 1}"))
+        nav_row.append(InlineKeyboardButton(
+            "⬅️",
+            callback_data=f"shop_nav:{user_id}:{index-1}"
+        ))
+    else:
+        nav_row.append(InlineKeyboardButton(
+            "➖",
+            callback_data="shop_noop"
+        ))
     
     nav_row.append(InlineKeyboardButton(
-        f"🍃 {to_small_caps('Refresh')}",
-        callback_data=f"shop_refresh:{user_id}"
+        f"{index + 1}/{len(characters)}",
+        callback_data="shop_noop"
     ))
     
     if index < len(characters) - 1:
-        nav_row.append(InlineKeyboardButton("➡️", callback_data=f"shop_nav:{user_id}:{index + 1}"))
+        nav_row.append(InlineKeyboardButton(
+            "➡️",
+            callback_data=f"shop_nav:{user_id}:{index+1}"
+        ))
+    else:
+        nav_row.append(InlineKeyboardButton(
+            "➖",
+            callback_data="shop_noop"
+        ))
     
     keyboard.append(nav_row)
     
-    # Premium shop button
+    # Action buttons
+    action_row = []
+    
+    if not is_owned and balance >= char['final_price']:
+        action_row.append(InlineKeyboardButton(
+            f"🛒 {to_small_caps('Buy')}",
+            callback_data=f"shop_purchase:{user_id}:{index}"
+        ))
+    
+    # Refresh button (if not used)
+    if not shop_data.get('refresh_used', False):
+        action_row.append(InlineKeyboardButton(
+            f"🔄 {to_small_caps('Refresh')} ({REFRESH_COST:,})",
+            callback_data=f"shop_refresh:{user_id}"
+        ))
+    
+    if action_row:
+        keyboard.append(action_row)
+    
+    # Premium shop button (placeholder)
     keyboard.append([
         InlineKeyboardButton(
-            f"💸 {to_small_caps('Premium Shop')}",
+            f"💎 {to_small_caps('Premium Shop')}",
             callback_data=f"shop_premium:{user_id}"
         )
     ])
     
-    # Cancel button
+    # Close button
     keyboard.append([
         InlineKeyboardButton(
-            to_small_caps("❌ Close"),
+            f"❌ {to_small_caps('Close')}",
             callback_data=f"shop_close:{user_id}"
         )
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Send or edit message with photo
+    # Send or edit message
     photo_url = char.get('img_url')
     
-    if update.message:
+    if hasattr(update, 'callback_query') and update.callback_query:
+        # Edit existing message
+        query = update.callback_query
+        
+        if photo_url:
+            try:
+                await query.edit_message_media(
+                    media=InputMediaPhoto(
+                        media=photo_url,
+                        caption=message,
+                        parse_mode='HTML'
+                    ),
+                    reply_markup=reply_markup
+                )
+            except:
+                try:
+                    await query.edit_message_caption(
+                        caption=message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+                except:
+                    await query.edit_message_text(
+                        message,
+                        parse_mode='HTML',
+                        reply_markup=reply_markup
+                    )
+        else:
+            await query.edit_message_text(
+                message,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+    else:
+        # Send new message
         if photo_url:
             await update.message.reply_photo(
                 photo=photo_url,
@@ -474,27 +510,6 @@ async def display_shop_character(update: Update, context: CallbackContext,
             )
         else:
             await update.message.reply_text(
-                message,
-                parse_mode='HTML',
-                reply_markup=reply_markup
-            )
-    else:
-        query = update.callback_query
-        if photo_url:
-            try:
-                await query.edit_message_caption(
-                    caption=message,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
-            except:
-                await query.edit_message_text(
-                    message,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
-        else:
-            await query.edit_message_text(
                 message,
                 parse_mode='HTML',
                 reply_markup=reply_markup
@@ -510,17 +525,15 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
         await query.answer()
         return
     
-    # Parse callback data
     parts = data.split(':')
     action = parts[0]
     
     if action == "shop_nav":
-        # Navigation
+        # Navigate to character
         _, user_id, index = parts
         user_id = int(user_id)
         index = int(index)
         
-        # Check authorization
         if query.from_user.id != user_id:
             await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
             return
@@ -546,7 +559,7 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
             await query.answer(message, show_alert=True)
             
     elif action == "shop_premium":
-        # Premium shop (coming soon) - just show alert
+        # Premium shop (placeholder)
         _, user_id = parts
         user_id = int(user_id)
         
@@ -554,7 +567,6 @@ async def shop_callback(update: Update, context: CallbackContext) -> None:
             await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
             return
         
-        # Just show alert, don't change page
         await query.answer(
             f"💸 {to_small_caps('Premium Shop')}\n\n✨ {to_small_caps('Coming Soon...')}",
             show_alert=True

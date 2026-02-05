@@ -357,7 +357,10 @@ async def display_shop_character(update: Update, context: CallbackContext,
        if update.message:
            await update.message.reply_text(message)
        else:
-           await update.callback_query.edit_message_text(message)
+           try:
+               await update.callback_query.edit_message_caption(caption=message)
+           except:
+               await update.callback_query.edit_message_text(message)
        return
 
    # Ensure index is valid

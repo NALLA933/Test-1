@@ -55,7 +55,7 @@ PRICE_RANGES = {
     4: (400000, 500000),
     5: (600000, 700000),
     6: (650000, 750000),
-    14: (450000, 550000),
+    14: (450000,, 550000),
 }
 
 DISCOUNT_MIN = 5
@@ -67,18 +67,37 @@ IST_OFFSET = timedelta(hours=5, minutes=30)
 
 
 def get_rarity_from_string(rarity_val) -> int:
+    if rarity_val is None:
+        return 0
+    
     if isinstance(rarity_val, int):
         return rarity_val
+    
     if isinstance(rarity_val, str):
+        rarity_val = rarity_val.strip()
+        
         if rarity_val.isdigit():
             return int(rarity_val)
+        
         rarity_to_int = {
             '⚪ ᴄᴏᴍᴍᴏɴ': 1, '🔵 ʀᴀʀᴇ': 2, '🟡 ʟᴇɢᴇɴᴅᴀʀʏ': 3, '💮 ꜱᴘᴇᴄɪᴀʟ': 4,
             '👹 ᴀɴᴄɪᴇɴᴛ': 5, '🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ': 6, '🔮 ᴇᴘɪᴄ': 7, '🪐 ᴄᴏꜱᴍɪᴄ': 8,
             '⚰️ ɴɪɢʜᴛᴍᴀʀᴇ': 9, '🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ': 10, '💝 ᴠᴀʟᴇɴᴛɪɴᴇ': 11,
-            '🌸 ꜱᴘʀɪɴɢ': 12, '🏖️ ᴛʀᴏᴘɪᴄᴀʟ': 13, '🍭 ᴋᴀᴡᴀɪɪ': 14, '🧬 ʜʏʙʀɪᴅ': 15
+            '🌸 ꜱᴘʀɪɴɢ': 12, '🏖️ ᴛʀᴏᴘɪᴄᴀʟ': 13, '🍭 ᴋᴀᴡᴀɪɪ': 14, '🧬 ʜʏʙʀɪᴅ': 15,
+            'common': 1, 'rare': 2, 'legendary': 3, 'special': 4,
+            'ancient': 5, 'celestial': 6, 'epic': 7, 'cosmic': 8,
+            'nightmare': 9, 'frostborn': 10, 'valentine': 11,
+            'spring': 12, 'tropical': 13, 'kawaii': 14, 'hybrid': 15
         }
-        return rarity_to_int.get(rarity_val, 0)
+        
+        result = rarity_to_int.get(rarity_val.lower(), 0)
+        if result == 0:
+            for key, value in rarity_to_int.items():
+                if rarity_val.lower() in key.lower() or key.lower() in rarity_val.lower():
+                    return value
+        
+        return result
+    
     return 0
 
 
@@ -148,6 +167,39 @@ async def add_character_to_user(user_id: int, character: dict) -> bool:
         return False
 
 
+async def debug_characters(update: Update, context: CallbackContext):
+    all_chars = []
+    rarity_counts = {}
+    
+    async for char in collection.find({}):
+        rarity = char.get('rarity', 'NONE')
+        rarity_int = get_rarity_from_string(rarity)
+        
+        all_chars.append({
+            'id': char.get('id', 'NO_ID'),
+            'name': char.get('name', 'NO_NAME'),
+            'rarity_raw': rarity,
+            'rarity_int': rarity_int
+        })
+        
+        key = f"{rarity} -> {rarity_int}"
+        rarity_counts[key] = rarity_counts.get(key, 0) + 1
+    
+    message = f"Total Characters: {len(all_chars)}\n\n"
+    message += "Rarity Distribution:\n"
+    for rarity_key, count in sorted(rarity_counts.items()):
+        message += f"{rarity_key}: {count}\n"
+    
+    message += f"\n\nShop Rarities ({SHOP_RARITIES}):\n"
+    shop_available = [c for c in all_chars if c['rarity_int'] in SHOP_RARITIES]
+    message += f"Available for shop: {len(shop_available)}\n"
+    
+    for char in shop_available[:5]:
+        message += f"- {char['name']} (Rarity: {char['rarity_raw']})\n"
+    
+    await update.message.reply_text(message[:4000])
+
+
 async def get_shop_data(user_id: int) -> dict:
     user = await user_collection.find_one({'id': user_id})
     if not user:
@@ -175,7 +227,10 @@ async def initialize_shop_data(user_id: int) -> dict:
         if rarity in SHOP_RARITIES:
             shop_rarity_chars.append(char)
     
-    if len(shop_rarity_chars) < 3:
+    if len(shop_rarity_chars) == 0:
+        return {'characters': [], 'last_reset': time.time(), 'refresh_used': False, 'current_index': 0}
+    
+    if len(shop_rarity_chars) <= 3:
         selected_chars = shop_rarity_chars
     else:
         selected_chars = random.sample(shop_rarity_chars, 3)
@@ -244,7 +299,10 @@ async def refresh_shop(user_id: int) -> Tuple[bool, str]:
         if rarity in SHOP_RARITIES:
             shop_rarity_chars.append(char)
     
-    if len(shop_rarity_chars) < 3:
+    if len(shop_rarity_chars) == 0:
+        return False, to_small_caps("No characters available for shop!")
+    
+    if len(shop_rarity_chars) <= 3:
         selected_chars = shop_rarity_chars
     else:
         selected_chars = random.sample(shop_rarity_chars, 3)
@@ -284,6 +342,13 @@ async def refresh_shop(user_id: int) -> Tuple[bool, str]:
 async def shop_command(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     shop_data = await get_shop_data(user_id)
+    
+    if not shop_data.get('characters'):
+        await update.message.reply_text(
+            to_small_caps("⚠️ Shop is empty! No characters available.\n\nUse /debugshop to check database.")
+        )
+        return
+    
     await display_shop_character(update, context, user_id, 0)
 
 
@@ -293,7 +358,7 @@ async def display_shop_character(update: Update, context: CallbackContext,
     characters = shop_data.get('characters', [])
     
     if not characters:
-        message = to_small_caps("⚠️ Shop is empty! No characters available for shop rarities.")
+        message = to_small_caps("⚠️ Shop is empty! No characters available.")
         if update.message:
             await update.message.reply_text(message)
         else:
@@ -691,4 +756,5 @@ async def process_purchase(update: Update, context: CallbackContext,
 
 
 application.add_handler(CommandHandler("shop", shop_command, block=False))
+application.add_handler(CommandHandler("debugshop", debug_characters, block=False))
 application.add_handler(CallbackQueryHandler(shop_callback, pattern='^shop_', block=False))

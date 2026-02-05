@@ -50,7 +50,7 @@ SMALL_CAPS_MAP = {
     'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
     'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
     'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ',
-    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
+    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': '': 'ʏ', 'Z': 'ᴢ',
     ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
     '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5',
     '6': '6', '7': '7', '8': '8', '9': '9'
@@ -73,6 +73,8 @@ NAME_TO_INT = {
     'celestial': 6, 'epic': 7, 'cosmic': 8, 'nightmare': 9, 'frostborn': 10,
     'valentine': 11, 'spring': 12, 'tropical': 13, 'kawaii': 14, 'hybrid': 15,
 }
+
+IST_OFFSET = timedelta(hours=5, minutes=30)
 
 
 def _get_lock(user_id: int, command_type: str):
@@ -99,12 +101,37 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+def get_ist_now():
+    return _utcnow() + IST_OFFSET
+
+
+def get_next_midnight_ist():
+    ist_now = get_ist_now()
+    next_midnight = ist_now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return next_midnight
+
+
+def get_time_until_midnight():
+    ist_now = get_ist_now()
+    next_midnight = get_next_midnight_ist()
+    remaining = next_midnight - ist_now
+    hours = int(remaining.total_seconds() // 3600)
+    minutes = int((remaining.total_seconds() % 3600) // 60)
+    return hours, minutes
+
+
+def format_countdown(hours, minutes):
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
 def to_small_caps(text: str) -> str:
     return ''.join(SMALL_CAPS_MAP.get(char, char) for char in str(text))
 
 
 def get_rarity_display(rarity: int) -> str:
-    return RARITY_MAP.get(rarity, f"⚪ ᴜɴᴋɴᴏᴡɴ ({rarity})")
+    return RARITY_MAP.get(rarity, f"({rarity})")
 
 
 def get_rarity_from_string(rarity_value) -> int:
@@ -198,54 +225,77 @@ async def show_join_buttons(update: Update):
     )
 
 
+async def show_wrong_group_message(update: Update):
+    keyboard = [
+        [InlineKeyboardButton("👥 Support Group", url=SUPPORT_GROUP)]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"<b>⚠️ Wrong Group!</b>\n\n"
+        f"This command can only be used in the main group.\n\n"
+        f"Join our support group to use this command:",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+
+
+def get_last_claim_date(user_data, command_type):
+    last_claim = user_data.get(f"last_{command_type}", None)
+    if last_claim is None:
+        return None
+    last_claim = _normalize_datetime(last_claim)
+    if last_claim is None:
+        return None
+    ist_time = last_claim + IST_OFFSET
+    return ist_time.date()
+
+
+def can_claim_today(user_data, command_type):
+    last_date = get_last_claim_date(user_data, command_type)
+    if last_date is None:
+        return True
+    today_ist = get_ist_now().date()
+    return last_date < today_ist
+
+
 async def check_cooldown(user_id: int, command_type: str) -> bool:
     user = await user_collection.find_one(
         {"id": user_id},
         {f"last_{command_type}": 1}
     )
-
+    
     if not user:
         return True
-
-    last_claim_time = user.get(f"last_{command_type}", None)
-
-    if last_claim_time is None:
-        return True
-
-    last_claim_time = _normalize_datetime(last_claim_time)
-    if last_claim_time is None:
-        return True
-
-    time_diff = _utcnow() - last_claim_time
-    if time_diff >= timedelta(hours=24):
-        return True
-
-    return False
+    
+    return can_claim_today(user, command_type)
 
 
-async def get_cooldown_time(user_id: int, command_type: str) -> Optional[str]:
+async def get_cooldown_status(user_id: int, command_type: str):
     user = await user_collection.find_one(
         {"id": user_id},
         {f"last_{command_type}": 1}
     )
+    
+    if not user:
+        return None, True
+    
+    last_date = get_last_claim_date(user, command_type)
+    today = get_ist_now().date()
+    
+    if last_date is None or last_date < today:
+        return None, True
+    
+    hours, minutes = get_time_until_midnight()
+    return format_countdown(hours, minutes), False
 
-    if not user or not user.get(f"last_{command_type}"):
-        return None
 
-    last_claim_time = _normalize_datetime(user[f"last_{command_type}"])
-    if last_claim_time is None:
-        return None
-
-    next_claim_time = last_claim_time + timedelta(hours=24)
-    remaining = next_claim_time - _utcnow()
-
-    if remaining.total_seconds() <= 0:
-        return None
-
-    hours = int(remaining.total_seconds() // 3600)
-    minutes = int((remaining.total_seconds() % 3600) // 60)
-
-    return f"{hours}h {minutes}m"
+def get_claim_type_name(command_type):
+    if command_type == "sclaim":
+        return "waifu"
+    elif command_type == "claim":
+        return "coin"
+    return "reward"
 
 
 async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -253,7 +303,7 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
 
     if chat_id != ALLOWED_GROUP_ID:
-        await show_join_buttons(update)
+        await show_wrong_group_message(update)
         return
 
     if ENABLE_MEMBERSHIP_CHECK:
@@ -264,13 +314,17 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     lock = _get_lock(user_id, "sclaim")
     async with lock:
-        can_claim = await check_cooldown(user_id, "sclaim")
-        if not can_claim:
-            remaining_time = await get_cooldown_time(user_id, "sclaim")
+        can_claim_now = await check_cooldown(user_id, "sclaim")
+        if not can_claim_now:
+            time_remaining, _ = await get_cooldown_status(user_id, "sclaim")
+            hours, minutes = get_time_until_midnight()
+            midnight_str = "12:00 AM IST"
+            
             await update.message.reply_text(
-                f"<b>⏰ {to_small_caps('COOLDOWN ACTIVE')}</b>\n\n"
-                f"⏳ {to_small_caps(f'You can use /sclaim again in:')} <b>{remaining_time}</b>\n\n"
-                f"💡 {to_small_caps('Come back later!')}",
+                f"<b>You have already claimed your {get_claim_type_name('sclaim')} today!</b>\n\n"
+                f"⏳ Your next claim available in: <b>{time_remaining}</b>\n"
+                f"🕛 Daily reset at: <b>{midnight_str}</b>\n\n"
+                f"Come back tomorrow for your next claim!",
                 parse_mode="HTML"
             )
             return
@@ -291,14 +345,11 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         img_url = character.get("img_url", "")
 
         now = _utcnow()
+        today_ist = get_ist_now().date()
+        ist_midnight = datetime.combine(today_ist, datetime.min.time()).replace(tzinfo=timezone.utc) - IST_OFFSET
+        
         result = await user_collection.update_one(
-            {
-                "id": user_id,
-                "$or": [
-                    {f"last_sclaim": {"$exists": False}},
-                    {f"last_sclaim": {"$lte": now - timedelta(hours=24)}}
-                ]
-            },
+            {"id": user_id},
             {
                 "$push": {
                     "characters": {
@@ -314,12 +365,16 @@ async def sclaim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             upsert=True
         )
 
-        if result.matched_count == 0 and result.upserted_id is None:
-            remaining_time = await get_cooldown_time(user_id, "sclaim")
+        if not can_claim_today({"last_sclaim": now}, "sclaim"):
+            time_remaining, _ = await get_cooldown_status(user_id, "sclaim")
+            hours, minutes = get_time_until_midnight()
+            midnight_str = "12:00 AM IST"
+            
             await update.message.reply_text(
-                f"<b>⏰ {to_small_caps('COOLDOWN ACTIVE')}</b>\n\n"
-                f"⏳ {to_small_caps(f'You can use /sclaim again in:')} <b>{remaining_time}</b>\n\n"
-                f"💡 {to_small_caps('Come back later!')}",
+                f"<b>You have already claimed your {get_claim_type_name('sclaim')} today!</b>\n\n"
+                f"⏳ Your next claim available in: <b>{time_remaining}</b>\n"
+                f"🕛 Daily reset at: <b>{midnight_str}</b>\n\n"
+                f"Come back tomorrow for your next claim!",
                 parse_mode="HTML"
             )
             return
@@ -356,7 +411,7 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = update.effective_user.id
 
     if chat_id != ALLOWED_GROUP_ID:
-        await show_join_buttons(update)
+        await show_wrong_group_message(update)
         return
 
     if ENABLE_MEMBERSHIP_CHECK:
@@ -367,13 +422,17 @@ async def claim_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     lock = _get_lock(user_id, "claim")
     async with lock:
-        can_claim = await check_cooldown(user_id, "claim")
-        if not can_claim:
-            remaining_time = await get_cooldown_time(user_id, "claim")
+        can_claim_now = await check_cooldown(user_id, "claim")
+        if not can_claim_now:
+            time_remaining, _ = await get_cooldown_status(user_id, "claim")
+            hours, minutes = get_time_until_midnight()
+            midnight_str = "12:00 AM IST"
+            
             await update.message.reply_text(
-                f"<b>⏰ {to_small_caps('COOLDOWN ACTIVE')}</b>\n\n"
-                f"⏳ {to_small_caps(f'You can use /claim again in:')} <b>{remaining_time}</b>\n\n"
-                f"💡 {to_small_caps('Come back later!')}",
+                f"<b>You have already claimed your {get_claim_type_name('claim')} today!</b>\n\n"
+                f"⏳ Your next claim available in: <b>{time_remaining}</b>\n"
+                f"🕛 Daily reset at: <b>{midnight_str}</b>\n\n"
+                f"Come back tomorrow for your next claim!",
                 parse_mode="HTML"
             )
             return
@@ -482,7 +541,7 @@ async def credeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "user_id": user_id,
                 "is_redeemed": False
             },
-            {"$set": {"is_redeemed": True, "redeemed_at": now}}
+            {"$set":set": {"is_redeemed": True, "redeemed_at": now}}
         )
 
         if redeem_result.matched_count == 0:

@@ -68,23 +68,23 @@ IST_OFFSET = timedelta(hours=5, minutes=30)
 def get_rarity_from_string(rarity_value) -> int:
    if isinstance(rarity_value, int):
        return rarity_value
-   
+
    if isinstance(rarity_value, str):
        rarity_str = rarity_value.strip().lower()
-       
+
        if rarity_str.isdigit():
            return int(rarity_str)
-       
+
        emoji_to_int = {
            '⚪': 1, '🔵': 2, '🟡': 3, '💮': 4, '👹': 5,
            '🎐': 6, '🔮': 7, '🪐': 8, '⚰️': 9, '🌬️': 10,
            '💝': 11, '🌸': 12, '🏖️': 13, '🍭': 14, '🧬': 15
        }
-       
+
        for emoji, num in emoji_to_int.items():
            if emoji in rarity_str:
                return num
-       
+
        name_to_int = {
            'common': 1, 'rare': 2, 'legendary': 3, 'special': 4, 'ancient': 5,
            'celestial': 6, 'epic': 7, 'cosmic': 8, 'nightmare': 9, 'frostborn': 10,
@@ -93,29 +93,29 @@ def get_rarity_from_string(rarity_value) -> int:
            'ᴄᴇʟᴇꜱᴛɪᴀʟ': 6, 'ᴇᴘɪᴄ': 7, 'ᴄᴏꜱᴍɪᴄ': 8, 'ɴɪɢʜᴛᴍᴀʀᴇ': 9, 'ꜰʀᴏꜱᴛʙᴏʀɴ': 10,
            'ᴠᴀʟᴇɴᴛɪɴᴇ': 11, 'ꜱᴘʀɪɴɢ': 12, 'ᴛʀᴏᴘɪᴄᴀʟ': 13, 'ᴋᴀᴡᴀɪɪ': 14, 'ʜʏʙʀɪᴅ': 15
        }
-       
+
        if rarity_str in name_to_int:
            return name_to_int[rarity_str]
-       
+
        clean_str = ''.join(c for c in rarity_str if c.isalnum() or c.isspace()).strip()
        if clean_str in name_to_int:
            return name_to_int[clean_str]
-       
+
        for name, num in name_to_int.items():
            if name in rarity_str or rarity_str in name:
                return num
-   
+
    return 1
 
 
 def get_ist_midnight() -> datetime:
    now_utc = datetime.now(timezone.utc)
    now_ist = now_utc + IST_OFFSET
-   
+
    next_midnight_ist = (now_ist + timedelta(days=1)).replace(
        hour=0, minute=0, second=0, microsecond=0
    )
-   
+
    next_midnight_utc = next_midnight_ist - IST_OFFSET
    return next_midnight_utc
 
@@ -141,7 +141,7 @@ async def get_user_owned_characters(user_id: int) -> List[str]:
    user = await user_collection.find_one({'id': user_id})
    if not user:
        return []
-   
+
    characters = user.get('characters', [])
    owned_ids = [char.get('id') for char in characters if char.get('id')]
    return list(set(owned_ids))
@@ -163,7 +163,7 @@ async def add_character_to_user(user_id: int, character: dict) -> bool:
            'rarity': character.get('rarity', 1),
            'img_url': character.get('img_url', '')
        }
-       
+
        await user_collection.update_one(
            {'id': user_id},
            {
@@ -183,42 +183,42 @@ async def fetch_shop_characters() -> List[dict]:
    async for char in collection.find({}):
        rarity_val = char.get('rarity', 1)
        rarity_int = get_rarity_from_string(rarity_val)
-       
+
        if rarity_int in SHOP_RARITIES:
            char['rarity'] = rarity_int
            all_chars.append(char)
-   
+
    return all_chars
 
 
 async def get_shop_data(user_id: int) -> dict:
    user = await user_collection.find_one({'id': user_id})
-   
+
    if not user:
        shop_data = await initialize_shop_data(user_id)
        return shop_data
-   
+
    shop_data = user.get('shop_data', {})
-   
+
    last_reset = shop_data.get('last_reset', 0)
    current_time = time.time()
-   
+
    if last_reset < (current_time - 86400):
        shop_data = await initialize_shop_data(user_id)
-   
+
    return shop_data
 
 
 async def initialize_shop_data(user_id: int) -> dict:
    characters = []
-   
+
    eligible_chars = await fetch_shop_characters()
-   
+
    if len(eligible_chars) >= 3:
        selected_chars = random.sample(eligible_chars, 3)
    else:
        selected_chars = eligible_chars
-   
+
    for char in selected_chars:
        rarity = char.get('rarity', 4)
        price_range = PRICE_RANGES.get(rarity, (400000, 500000))
@@ -226,7 +226,7 @@ async def initialize_shop_data(user_id: int) -> dict:
        discount_percent = random.randint(DISCOUNT_MIN, DISCOUNT_MAX)
        discount_amount = int(base_price * discount_percent / 100)
        final_price = base_price - discount_amount
-       
+
        characters.append({
            'id': char['id'],
            'name': char['name'],
@@ -237,14 +237,14 @@ async def initialize_shop_data(user_id: int) -> dict:
            'discount_percent': discount_percent,
            'final_price': final_price
        })
-   
+
    shop_data = {
        'characters': characters,
        'last_reset': time.time(),
        'refresh_used': False,
        'current_index': 0
    }
-   
+
    await user_collection.update_one(
        {'id': user_id},
        {
@@ -253,168 +253,155 @@ async def initialize_shop_data(user_id: int) -> dict:
        },
        upsert=True
    )
-   
+
    return shop_data
 
 
 async def refresh_shop(user_id: int) -> Tuple[bool, str]:
    user = await user_collection.find_one({'id': user_id})
-   
    if not user:
-       return False, to_small_caps("Error: User not found")
-   
+       return False, to_small_caps("⚠️ User not found!")
+
    shop_data = user.get('shop_data', {})
-   
-   if shop_data.get('refresh_used', False):
-       return False, to_small_caps("⚠️ You have reached daily limit of 1 refresh!")
-   
+   refresh_used = shop_data.get('refresh_used', False)
+
+   if refresh_used:
+       return False, to_small_caps("⚠️ You've already used your refresh for today!")
+
    balance = await get_balance(user_id)
    if balance < REFRESH_COST:
-       return False, to_small_caps(f"⚠️ Insufficient balance! Need {REFRESH_COST:,} coins")
-   
+       return False, to_small_caps(f"⚠️ Insufficient balance! Need {REFRESH_COST:,} coins.")
+
    await change_balance(user_id, -REFRESH_COST)
-   
-   characters = []
-   eligible_chars = await fetch_shop_characters()
-   
-   if len(eligible_chars) >= 3:
-       selected_chars = random.sample(eligible_chars, 3)
-   else:
-       selected_chars = eligible_chars
-   
-   for char in selected_chars:
-       rarity = char.get('rarity', 4)
-       price_range = PRICE_RANGES.get(rarity, (400000, 500000))
-       base_price = random.randint(price_range[0], price_range[1])
-       discount_percent = random.randint(DISCOUNT_MIN, DISCOUNT_MAX)
-       discount_amount = int(base_price * discount_percent / 100)
-       final_price = base_price - discount_amount
-       
-       characters.append({
-           'id': char['id'],
-           'name': char['name'],
-           'anime': char['anime'],
-           'rarity': rarity,
-           'img_url': char.get('img_url', ''),
-           'base_price': base_price,
-           'discount_percent': discount_percent,
-           'final_price': final_price
-       })
-   
-   shop_data['characters'] = characters
-   shop_data['refresh_used'] = True
-   shop_data['current_index'] = 0
-   
+
+   new_shop_data = await initialize_shop_data(user_id)
+   new_shop_data['refresh_used'] = True
+
    await user_collection.update_one(
        {'id': user_id},
-       {'$set': {'shop_data': shop_data}}
+       {'$set': {'shop_data': new_shop_data}}
    )
-   
-   return True, to_small_caps(f"✅ Shop refreshed! Cost: {REFRESH_COST:,} coins")
+
+   return True, to_small_caps(f"✅ Shop refreshed! {REFRESH_COST:,} coins deducted.")
 
 
 async def shop_command(update: Update, context: CallbackContext) -> None:
    user_id = update.effective_user.id
-   
-   shop_data = await get_shop_data(user_id)
-   
    await display_shop_character(update, context, user_id, 0)
 
 
-async def display_shop_character(update: Update, context: CallbackContext, 
+async def display_shop_character(update: Update, context: CallbackContext,
                                 user_id: int, index: int) -> None:
    shop_data = await get_shop_data(user_id)
    characters = shop_data.get('characters', [])
-   
+
    if not characters:
-       message = to_small_caps("⚠️ Shop is empty! Please try again later.")
+       message = f"<b>🛒 {to_small_caps('Character Shop')}</b>\n\n"
+       message += to_small_caps("⚠️ No characters available in the shop right now.")
+
+       keyboard = [[
+           InlineKeyboardButton(
+               to_small_caps("❌ Close"),
+               callback_data=f"shop_close:{user_id}"
+           )
+       ]]
+       reply_markup = InlineKeyboardMarkup(keyboard)
+
        if update.message:
-           await update.message.reply_text(message)
+           await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
        else:
-           await update.callback_query.edit_message_text(message)
+           await update.callback_query.edit_message_text(message, parse_mode='HTML', reply_markup=reply_markup)
        return
-   
-   index = max(0, min(index, len(characters) - 1))
-   
-   await user_collection.update_one(
-       {'id': user_id},
-       {'$set': {'shop_data.current_index': index}}
-   )
-   
+
+   if index >= len(characters):
+       index = 0
+   elif index < 0:
+       index = len(characters) - 1
+
    char = characters[index]
-   
-   owner_count = await get_character_owner_count(char['id'])
-   
    owned_chars = await get_user_owned_characters(user_id)
-   status = "Sold" if char['id'] in owned_chars else "Available"
-   
+   is_owned = char['id'] in owned_chars
+
+   balance = await get_balance(user_id)
    rarity_emoji = RARITY_EMOJIS.get(char['rarity'], '⚪')
    rarity_name = RARITY_NAMES.get(char['rarity'], 'ᴜɴᴋɴᴏᴡɴ')
-   
+
    safe_name = escape(str(char['name']))
    safe_anime = escape(str(char['anime']))
-   
-   message = f"<b>🏪 {to_small_caps(f'Character Shop ({index + 1}/{len(characters)})')}</b>\n\n"
+
+   message = f"<b>🛒 {to_small_caps('Character Shop')}</b>\n\n"
    message += f"🎭 {to_small_caps('Name')}: {to_small_caps(safe_name)}\n"
    message += f"📺 {to_small_caps('Anime')}: {to_small_caps(safe_anime)}\n"
    message += f"🆔 {to_small_caps('Id')}: {char['id']}\n"
-   message += f"✨ {to_small_caps('Rarity')}: {rarity_emoji} {rarity_name}\n"
-   message += f"💸 {to_small_caps('Price')}: {char['base_price']:,}\n"
+   message += f"✨ {to_small_caps('Rarity')}: {rarity_emoji} {rarity_name}\n\n"
+   message += f"💸 {to_small_caps('Original Price')}: {char['base_price']:,}\n"
    message += f"🛒 {to_small_caps('Discount')}: {char['discount_percent']}%\n"
-   message += f"🏷️ {to_small_caps('Discount Price')}: {char['final_price']:,}\n"
-   message += f"🎴 {to_small_caps('Owner')}: {owner_count}\n"
-   message += f"📋 {to_small_caps('Stats')}: {to_small_caps(status)}\n"
-   
+   message += f"🏷️ {to_small_caps('Final Price')}: <b>{char['final_price']:,}</b>\n\n"
+   message += f"💰 {to_small_caps('Your Balance')}: {balance:,}\n"
+
+   if is_owned:
+       message += f"\n✅ {to_small_caps('Already Owned')}"
+   elif balance < char['final_price']:
+       message += f"\n⚠️ {to_small_caps('Insufficient Balance')}"
+
+   next_reset = get_ist_midnight()
+   time_remaining = next_reset - datetime.now(timezone.utc)
+   hours = int(time_remaining.total_seconds() // 3600)
+   minutes = int((time_remaining.total_seconds() % 3600) // 60)
+   message += f"\n\n⏰ {to_small_caps('Resets in')}: {hours}h {minutes}m"
+
    keyboard = []
-   
-   if status == "Available":
-       keyboard.append([
-           InlineKeyboardButton(
-               to_small_caps("💰 Purchase"),
-               callback_data=f"shop_purchase:{user_id}:{index}"
-           )
-       ])
-   else:
-       keyboard.append([
-           InlineKeyboardButton(
-               to_small_caps("❌ Already Owned"),
-               callback_data="shop_noop"
-           )
-       ])
-   
-   nav_row = []
-   if index > 0:
-       nav_row.append(InlineKeyboardButton("⬅️", callback_data=f"shop_nav:{user_id}:{index - 1}"))
-   
-   nav_row.append(InlineKeyboardButton(
-       f"🍃 {to_small_caps('Refresh')}",
-       callback_data=f"shop_refresh:{user_id}"
-   ))
-   
-   if index < len(characters) - 1:
-       nav_row.append(InlineKeyboardButton("➡️", callback_data=f"shop_nav:{user_id}:{index + 1}"))
-   
-   keyboard.append(nav_row)
-   
-   keyboard.append([
-       InlineKeyboardButton(
-           f"💸 {to_small_caps('Premium Shop')}",
-           callback_data=f"shop_premium:{user_id}"
-       )
-   ])
-   
-   keyboard.append([
+   nav_buttons = []
+
+   if len(characters) > 1:
+       prev_index = index - 1 if index > 0 else len(characters) - 1
+       next_index = index + 1 if index < len(characters) - 1 else 0
+
+       nav_buttons.append(InlineKeyboardButton(
+           "◀️", callback_data=f"shop_nav:{user_id}:{prev_index}"
+       ))
+       nav_buttons.append(InlineKeyboardButton(
+           f"{index + 1}/{len(characters)}", callback_data="shop_noop"
+       ))
+       nav_buttons.append(InlineKeyboardButton(
+           "▶️", callback_data=f"shop_nav:{user_id}:{next_index}"
+       ))
+
+   if nav_buttons:
+       keyboard.append(nav_buttons)
+
+   action_buttons = []
+
+   if not is_owned and balance >= char['final_price']:
+       action_buttons.append(InlineKeyboardButton(
+           to_small_caps("💳 Buy"),
+           callback_data=f"shop_purchase:{user_id}:{index}"
+       ))
+
+   refresh_used = shop_data.get('refresh_used', False)
+   if not refresh_used:
+       action_buttons.append(InlineKeyboardButton(
+           to_small_caps(f"🔄 Refresh ({REFRESH_COST:,})"),
+           callback_data=f"shop_refresh:{user_id}"
+       ))
+
+   if action_buttons:
+       keyboard.append(action_buttons)
+
+   bottom_buttons = [
        InlineKeyboardButton(
            to_small_caps("❌ Close"),
            callback_data=f"shop_close:{user_id}"
        )
-   ])
-   
+   ]
+   keyboard.append(bottom_buttons)
+
    reply_markup = InlineKeyboardMarkup(keyboard)
-   
    photo_url = char.get('img_url')
-   
+
+   # YE HAI MAIN FIX - Image ko properly update karne ke liye
    if update.message:
+       # Agar ye pehli baar shop open ho raha hai (command se)
        if photo_url:
            await update.message.reply_photo(
                photo=photo_url,
@@ -429,123 +416,166 @@ async def display_shop_character(update: Update, context: CallbackContext,
                reply_markup=reply_markup
            )
    else:
+       # Agar navigation button se aa rahe hain (callback query)
        query = update.callback_query
-       if photo_url:
+       
+       # Current message me photo hai ya nahi check karo
+       current_has_photo = query.message.photo is not None and len(query.message.photo) > 0
+       
+       if photo_url and current_has_photo:
+           # Dono me photo hai to media + caption update karo
            try:
+               await query.edit_message_media(
+                   media=query.message.photo[-1].file_id if photo_url == char.get('img_url') else photo_url,
+                   reply_markup=reply_markup
+               )
                await query.edit_message_caption(
                    caption=message,
                    parse_mode='HTML',
                    reply_markup=reply_markup
                )
+           except Exception as e:
+               # Agar error aaye to message delete karke naya bhejo
+               try:
+                   await query.message.delete()
+                   await query.message.reply_photo(
+                       photo=photo_url,
+                       caption=message,
+                       parse_mode='HTML',
+                       reply_markup=reply_markup
+                   )
+               except:
+                   pass
+       elif photo_url and not current_has_photo:
+           # New message me photo hai but current me nahi - delete karke naya bhejo
+           try:
+               await query.message.delete()
+               await query.message.reply_photo(
+                   photo=photo_url,
+                   caption=message,
+                   parse_mode='HTML',
+                   reply_markup=reply_markup
+               )
            except:
+               pass
+       elif not photo_url and current_has_photo:
+           # Current me photo hai but new me nahi - delete karke text bhejo
+           try:
+               await query.message.delete()
+               await query.message.reply_text(
+                   message,
+                   parse_mode='HTML',
+                   reply_markup=reply_markup
+               )
+           except:
+               pass
+       else:
+           # Dono me photo nahi hai - simple text update
+           try:
                await query.edit_message_text(
                    message,
                    parse_mode='HTML',
                    reply_markup=reply_markup
                )
-       else:
-           await query.edit_message_text(
-               message,
-               parse_mode='HTML',
-               reply_markup=reply_markup
-           )
+           except:
+               pass
 
 
 async def shop_callback(update: Update, context: CallbackContext) -> None:
    query = update.callback_query
    data = query.data
-   
+
    if data == "shop_noop":
        await query.answer()
        return
-   
+
    parts = data.split(':')
    action = parts[0]
-   
+
    if action == "shop_nav":
        _, user_id, index = parts
        user_id = int(user_id)
        index = int(index)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        await display_shop_character(update, context, user_id, index)
        await query.answer()
-       
+
    elif action == "shop_refresh":
        _, user_id = parts
        user_id = int(user_id)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        success, message = await refresh_shop(user_id)
-       
+
        if success:
            await query.answer(message, show_alert=True)
            await display_shop_character(update, context, user_id, 0)
        else:
            await query.answer(message, show_alert=True)
-           
+
    elif action == "shop_premium":
        _, user_id = parts
        user_id = int(user_id)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        await query.answer(
            f"💸 {to_small_caps('Premium Shop')}\n\n✨ {to_small_caps('Coming Soon...')}",
            show_alert=True
        )
-       
+
    elif action == "shop_purchase":
        _, user_id, index = parts
        user_id = int(user_id)
        index = int(index)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        await show_purchase_confirmation(update, context, user_id, index)
        await query.answer()
-       
+
    elif action == "shop_confirm_purchase":
        _, user_id, index = parts
        user_id = int(user_id)
        index = int(index)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        await process_purchase(update, context, user_id, index)
-       
+
    elif action == "shop_cancel_purchase":
        _, user_id, index = parts
        user_id = int(user_id)
        index = int(index)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        await query.answer(to_small_caps("Purchase cancelled"))
        await display_shop_character(update, context, user_id, index)
-       
+
    elif action == "shop_close":
        _, user_id = parts
        user_id = int(user_id)
-       
+
        if query.from_user.id != user_id:
            await query.answer(to_small_caps("This is not your shop!"), show_alert=True)
            return
-       
+
        try:
            await query.message.delete()
        except:
@@ -557,12 +587,12 @@ async def show_purchase_confirmation(update: Update, context: CallbackContext,
                                     user_id: int, index: int) -> None:
    shop_data = await get_shop_data(user_id)
    characters = shop_data.get('characters', [])
-   
+
    if index >= len(characters):
        return
-   
+
    char = characters[index]
-   
+
    owned_chars = await get_user_owned_characters(user_id)
    if char['id'] in owned_chars:
        await update.callback_query.answer(
@@ -570,15 +600,15 @@ async def show_purchase_confirmation(update: Update, context: CallbackContext,
            show_alert=True
        )
        return
-   
+
    balance = await get_balance(user_id)
-   
+
    rarity_emoji = RARITY_EMOJIS.get(char['rarity'], '⚪')
    rarity_name = RARITY_NAMES.get(char['rarity'], 'ᴜɴᴋɴᴏᴡɴ')
-   
+
    safe_name = escape(str(char['name']))
    safe_anime = escape(str(char['anime']))
-   
+
    message = f"<b>💰 {to_small_caps('Purchase Confirmation')}</b>\n\n"
    message += f"🎭 {to_small_caps('Name')}: {to_small_caps(safe_name)}\n"
    message += f"📺 {to_small_caps('Anime')}: {to_small_caps(safe_anime)}\n"
@@ -588,14 +618,14 @@ async def show_purchase_confirmation(update: Update, context: CallbackContext,
    message += f"🛒 {to_small_caps('Discount')}: {char['discount_percent']}%\n"
    message += f"🏷️ {to_small_caps('Final Price')}: <b>{char['final_price']:,}</b>\n\n"
    message += f"💰 {to_small_caps('Your Balance')}: {balance:,}\n\n"
-   
+
    if balance >= char['final_price']:
        message += to_small_caps("✅ Confirm your purchase?")
    else:
        message += to_small_caps("⚠️ Insufficient balance!")
-   
+
    keyboard = []
-   
+
    if balance >= char['final_price']:
        keyboard.append([
            InlineKeyboardButton(
@@ -614,11 +644,11 @@ async def show_purchase_confirmation(update: Update, context: CallbackContext,
                callback_data=f"shop_cancel_purchase:{user_id}:{index}"
            )
        ])
-   
+
    reply_markup = InlineKeyboardMarkup(keyboard)
-   
+
    photo_url = char.get('img_url')
-   
+
    try:
        if photo_url:
            await update.callback_query.edit_message_caption(
@@ -640,16 +670,16 @@ async def process_purchase(update: Update, context: CallbackContext,
                          user_id: int, index: int) -> None:
    shop_data = await get_shop_data(user_id)
    characters = shop_data.get('characters', [])
-   
+
    if index >= len(characters):
        await update.callback_query.answer(
            to_small_caps("⚠️ Invalid character selection!"),
            show_alert=True
        )
        return
-   
+
    char = characters[index]
-   
+
    owned_chars = await get_user_owned_characters(user_id)
    if char['id'] in owned_chars:
        await update.callback_query.answer(
@@ -657,7 +687,7 @@ async def process_purchase(update: Update, context: CallbackContext,
            show_alert=True
        )
        return
-   
+
    balance = await get_balance(user_id)
    if balance < char['final_price']:
        await update.callback_query.answer(
@@ -665,11 +695,11 @@ async def process_purchase(update: Update, context: CallbackContext,
            show_alert=True
        )
        return
-   
+
    await change_balance(user_id, -char['final_price'])
-   
+
    success = await add_character_to_user(user_id, char)
-   
+
    if success:
        await update.callback_query.answer(
            to_small_caps(f"✅ Purchased {char['name']} for {char['final_price']:,} coins!"),

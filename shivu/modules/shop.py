@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from html import escape
 from typing import List, Dict, Optional, Tuple
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
 
 from shivu import collection, user_collection, application
@@ -469,17 +469,23 @@ async def display_shop_character(update: Update, context: CallbackContext,
        query = update.callback_query
        if photo_url:
            try:
-               await query.edit_message_caption(
-                   caption=message,
-                   parse_mode='HTML',
+               await query.edit_message_media(
+                   media=InputMediaPhoto(media=photo_url, caption=message, parse_mode='HTML'),
                    reply_markup=reply_markup
                )
            except:
-               await query.edit_message_text(
-                   message,
-                   parse_mode='HTML',
-                   reply_markup=reply_markup
-               )
+               try:
+                   await query.edit_message_caption(
+                       caption=message,
+                       parse_mode='HTML',
+                       reply_markup=reply_markup
+                   )
+               except:
+                   await query.edit_message_text(
+                       message,
+                       parse_mode='HTML',
+                       reply_markup=reply_markup
+                   )
        else:
            await query.edit_message_text(
                message,

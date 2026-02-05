@@ -275,7 +275,7 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
     total_count = len(characters)
     keyboard = [[
         InlineKeyboardButton(
-            to_small_caps(f"See Collection ({total_count})"), 
+            to_small_caps(f"🔮 See Collection ({total_count})"), 
             switch_inline_query_current_chat=f"collection.{user_id}"
         )
     ]]
@@ -283,7 +283,7 @@ async def harem(update: Update, context: CallbackContext, page: int = 0) -> None
     # Add smode button
     keyboard.append([
         InlineKeyboardButton(
-            "🔮 " + to_small_caps("ᴄᴀɴᴄᴇʟ"),
+            "❌ " + to_small_caps("ᴄᴀɴᴄᴇʟ"),
             callback_data=f"open_smode:{user_id}"
         )
     ])

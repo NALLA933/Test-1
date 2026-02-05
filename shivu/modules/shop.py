@@ -200,16 +200,41 @@ async def debug_characters(update: Update, context: CallbackContext):
     await update.message.reply_text(message[:4000])
 
 
-async def get_shop_data(user_id: int) -> dict:
+async def reset_shop_command(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    
+    await user_collection.update_one(
+        {'id': user_id},
+        {'$unset': {'shop_data': ''}}
+    )
+    
+    await update.message.reply_text(to_small_caps("✅ Shop reset! Use /shop again."))
+
+
+async def get_shop_data(user_id: int, force_reset: bool = False) -> dict:
     user = await user_collection.find_one({'id': user_id})
-    if not user:
+    
+    if not user or force_reset:
         shop_data = await initialize_shop_data(user_id)
         return shop_data
+    
     shop_data = user.get('shop_data', {})
+    
+    if not shop_data or 'characters' not in shop_data:
+        shop_data = await initialize_shop_data(user_id)
+        return shop_data
+    
     last_reset = shop_data.get('last_reset', 0)
     current_time = time.time()
+    
     if last_reset < (current_time - 86400):
         shop_data = await initialize_shop_data(user_id)
+        return shop_data
+    
+    if not shop_data.get('characters'):
+        shop_data = await initialize_shop_data(user_id)
+        return shop_data
+    
     return shop_data
 
 
@@ -345,7 +370,7 @@ async def shop_command(update: Update, context: CallbackContext) -> None:
     
     if not shop_data.get('characters'):
         await update.message.reply_text(
-            to_small_caps("⚠️ Shop is empty! No characters available.\n\nUse /debugshop to check database.")
+            to_small_caps("⚠️ Shop is empty! Use /resetshop to fix.")
         )
         return
     
@@ -358,7 +383,7 @@ async def display_shop_character(update: Update, context: CallbackContext,
     characters = shop_data.get('characters', [])
     
     if not characters:
-        message = to_small_caps("⚠️ Shop is empty! No characters available.")
+        message = to_small_caps("⚠️ Shop is empty! Use /resetshop to fix.")
         if update.message:
             await update.message.reply_text(message)
         else:
@@ -757,4 +782,5 @@ async def process_purchase(update: Update, context: CallbackContext,
 
 application.add_handler(CommandHandler("shop", shop_command, block=False))
 application.add_handler(CommandHandler("debugshop", debug_characters, block=False))
+application.add_handler(CommandHandler("resetshop", reset_shop_command, block=False))
 application.add_handler(CallbackQueryHandler(shop_callback, pattern='^shop_', block=False))

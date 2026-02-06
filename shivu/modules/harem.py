@@ -5,7 +5,6 @@ import math
 import asyncio
 import functools
 from typing import Dict, List, Tuple, Optional
-from datetime import datetime, timedelta
 import hashlib
 
 try:
@@ -16,11 +15,9 @@ except ImportError:
 
 from shivu import collection, user_collection, application
 
-# ============= CONFIGURATION =============
 CACHE_TTL = 300
 PAGE_SIZE = 15
 
-# Redis Client Setup
 redis_client = None
 if REDIS_AVAILABLE:
     try:
@@ -28,7 +25,6 @@ if REDIS_AVAILABLE:
     except:
         pass
 
-# ============= ULTRA-FAST SMALL CAPS =============
 _SMALL_CAPS_MAP = str.maketrans({
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
     'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
@@ -44,19 +40,16 @@ _SMALL_CAPS_MAP = str.maketrans({
 })
 
 def to_small_caps(text: str) -> str:
-    """Ultra-fast translation using str.translate()"""
     if not text:
         return ""
     return str(text).translate(_SMALL_CAPS_MAP)
 
-# ============= RARITY CONFIG =============
 RARITY_EMOJIS = {
     1: '⚪', 2: '🔵', 3: '🟡', 4: '💮', 5: '👹',
     6: '🎐', 7: '🔮', 8: '🪐', 9: '⚰️', 10: '🌬️',
     11: '💝', 12: '🌸', 13: '🏖️', 14: '🍭', 15: '🧬'
 }
 
-# ============= SMART CACHE DECORATOR =============
 def cached(ttl_seconds: int = CACHE_TTL):
     def decorator(func):
         @functools.wraps(func)
@@ -88,12 +81,11 @@ def cached(ttl_seconds: int = CACHE_TTL):
         return wrapper
     return decorator
 
-# ============= HIGH-PERFORMANCE HAREM MANAGER =============
 class HaremManagerV3:
     
     @staticmethod
     @cached(ttl_seconds=60)
-    async def get_user_characters_fast(user_id: int, rarity_filter: Optional[int] = None) -> Tuple[Optional[dict], List[dict]]:
+    async def get_user_characters_fast(user_id: int, rarity_filter: Optional[int] = None):
         pipeline = [
             {"$match": {"id": user_id}},
             {"$project": {
@@ -120,19 +112,17 @@ class HaremManagerV3:
         return user, characters
     
     @staticmethod
-    async def get_character_details_batch(char_ids: List[str]) -> Dict[str, dict]:
-        """🔧 FIX: Explicitly include 'rarity' field in projection"""
+    async def get_character_details_batch(char_ids: List[str]):
         if not char_ids:
             return {}
         
         unique_ids = list(set(char_ids))
         
-        # 🔧 FIX: Ensure 'rarity' is included in projection
         projection = {
             "id": 1, 
             "name": 1, 
             "anime": 1, 
-            "rarity": 1,  # ✅ Yeh ensure karta hai ki rarity aaye
+            "rarity": 1,
             "img_url": 1, 
             "_id": 0
         }
@@ -149,7 +139,7 @@ class HaremManagerV3:
         return char_map
     
     @staticmethod
-    async def get_anime_counts_batch(animes: List[str]) -> Dict[str, int]:
+    async def get_anime_counts_batch(animes: List[str]):
         if not animes:
             return {}
         
@@ -164,18 +154,18 @@ class HaremManagerV3:
         
         return results
 
-# ============= MAIN HANDLER (V3) =============
-async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> None:
+async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     user_id = update.effective_user.id
     
     rarity_filter = None
+    RARITY_OPTIONS = {}
     try:
-        from shivu.modules.smode import get_user_sort_preference, RARITY_OPTIONS
+        from shivu.modules.smode import get_user_sort_preference, RARITY_OPTIONS as RO
         rarity_filter = await get_user_sort_preference(user_id)
+        RARITY_OPTIONS = RO
     except:
-        RARITY_OPTIONS = {}
+        pass
     
-    # Step 1: Get user data
     user, user_chars = await HaremManagerV3.get_user_characters_fast(user_id, rarity_filter)
     
     if not user:
@@ -193,7 +183,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         await _send_message(update, msg)
         return
     
-    # Step 2: Process characters
     char_id_counts = {}
     unique_char_ids = []
     seen = set()
@@ -206,7 +195,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
                 seen.add(cid)
                 unique_char_ids.append(cid)
     
-    # Pagination logic
     total_unique = len(unique_char_ids)
     total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
     page = max(0, min(page, total_pages - 1))
@@ -215,10 +203,8 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     end_idx = start_idx + PAGE_SIZE
     page_ids = unique_char_ids[start_idx:end_idx]
     
-    # Step 3: 🔧 Fetch character details (ab rarity ke saath)
     char_details = await HaremManagerV3.get_character_details_batch(page_ids)
     
-    # Build display list
     display_chars = []
     for cid in page_ids:
         if cid in char_details:
@@ -228,13 +214,11 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     
     display_chars.sort(key=lambda x: x.get('anime', ''))
     
-    # Step 4: Get anime counts
     page_animes = list({c.get('anime') for c in display_chars})
     anime_counts_task = asyncio.create_task(
         HaremManagerV3.get_anime_counts_batch(page_animes)
     )
     
-    # Build message
     safe_name = escape(update.effective_user.first_name)
     header = f"<b>{to_small_caps(f'{safe_name} S HAREM - PAGE {page+1}/{total_pages}')}</b>\n"
     
@@ -243,7 +227,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     
     harem_msg = header + "\n"
     
-    # Group by anime
     from itertools import groupby
     grouped = {k: list(v) for k, v in groupby(display_chars, key=lambda x: x.get('anime', 'Unknown'))}
     anime_counts = await anime_counts_task
@@ -258,18 +241,22 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         for char in chars:
             name = to_small_caps(escape(char.get('name', 'Unknown')))
             
-            # 🔧 FIX: Rarity emoji fetch with fallback
-            rarity = char.get('rarity', 1)  # Default 1 (Common) agar nahi mila
-            emoji = RARITY_EMOJIS.get(rarity, '⚪')
+            rarity = char.get('rarity')
+            if rarity is None:
+                rarity = 1
+            elif isinstance(rarity, str):
+                try:
+                    rarity = int(rarity)
+                except:
+                    rarity = 1
             
+            emoji = RARITY_EMOJIS.get(rarity, '⚪')
             count = char.get('count', 1)
             
-            # 🔧 FORMAT: [emoji] ke andar correct rarity emoji
             harem_msg += f"✶ {char['id']} [{emoji}] {name} x{count}\n"
         
         harem_msg += f"{to_small_caps('--------------------')}\n\n"
     
-    # Build keyboard
     keyboard = []
     keyboard.append([
         InlineKeyboardButton(
@@ -295,7 +282,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     
     markup = InlineKeyboardMarkup(keyboard)
     
-    # Get photo
     photo_url = None
     if user.get('favorites'):
         fav_id = user['favorites'][0]
@@ -305,7 +291,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     if not photo_url and display_chars:
         photo_url = display_chars[0].get('img_url')
     
-    # Send
     try:
         if photo_url:
             if update.message:
@@ -329,8 +314,7 @@ async def _send_message(update: Update, text: str, markup=None):
         except:
             pass
 
-# ============= CALLBACK HANDLER =============
-async def harem_callback_v3(update: Update, context: CallbackContext) -> None:
+async def harem_callback_v3(update: Update, context: CallbackContext):
     query = update.callback_query
     data = query.data
     
@@ -348,6 +332,5 @@ async def harem_callback_v3(update: Update, context: CallbackContext) -> None:
     await query.answer()
     await harem_v3(update, context, page)
 
-# ============= REGISTRATION =============
 application.add_handler(CommandHandler(["harem", "collection"], harem_v3, block=False))
 application.add_handler(CallbackQueryHandler(harem_callback_v3, pattern=r'^harem:', block=False))

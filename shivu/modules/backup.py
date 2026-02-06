@@ -33,6 +33,23 @@ LOGGER = logging.getLogger(__name__)
 BACKUP_CHAT_ID = -1003702395415
 AUTHORIZED_BACKUP_USER = 7818323042
 
+# ---------------- HELPER FUNCTIONS ---------------- #
+
+def convert_to_json_serializable(obj):
+    """
+    Recursively converts ObjectId and datetime to JSON serializable formats.
+    Handles deeply nested structures.
+    """
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [convert_to_json_serializable(item) for item in obj]
+    return obj
+
 # ---------------- BACKUP FUNCTIONS ---------------- #
 
 async def create_database_backup():
@@ -58,22 +75,10 @@ async def create_database_backup():
     for coll_name, coll in collections_to_backup.items():
         try:
             data = await coll.find({}).to_list(length=None)
-            # Convert non-JSON serializable objects to strings
-            for doc in data:
-                for key, value in list(doc.items()):
-                    if isinstance(value, ObjectId):
-                        doc[key] = str(value)
-                    elif isinstance(value, datetime):
-                        doc[key] = value.isoformat()
-                    elif isinstance(value, dict):
-                        # Handle nested dictionaries
-                        for nested_key, nested_value in list(value.items()):
-                            if isinstance(nested_value, ObjectId):
-                                value[nested_key] = str(nested_value)
-                            elif isinstance(nested_value, datetime):
-                                value[nested_key] = nested_value.isoformat()
+            # Convert all non-JSON serializable objects recursively
+            serializable_data = [convert_to_json_serializable(doc) for doc in data]
             
-            backup_data['collections'][coll_name] = data
+            backup_data['collections'][coll_name] = serializable_data
             LOGGER.info(f"Backed up {len(data)} documents from {coll_name}")
         except Exception as e:
             LOGGER.error(f"Error backing up {coll_name}: {e}")
@@ -115,6 +120,8 @@ async def restore_database_backup(backup_data):
                             except:
                                 # If conversion fails, remove _id and let MongoDB create new one
                                 del doc['_id']
+                        # Also convert any nested string datetimes back if needed
+                        # (Usually not needed as MongoDB accepts ISO format strings)
                     
                     await coll.insert_many(data)
                     restored_counts[coll_name] = len(data)
@@ -133,6 +140,7 @@ async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
     Automatic backup job that runs periodically.
     Sends backup file to the specified chat.
     """
+    filepath = None
     try:
         LOGGER.info("Starting automatic database backup...")
         backup_data = await create_database_backup()
@@ -142,7 +150,8 @@ async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
         filepath = f"/tmp/{filename}"
         
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(backup_data, f, indent=2, ensure_ascii=False)
+            # FIX: Added cls=CustomJSONEncoder
+            json.dump(backup_data, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
         
         # Send to backup chat
         total_docs = sum(len(v) if isinstance(v, list) else 0 
@@ -156,17 +165,19 @@ async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
             f"Use /restore to restore this backup."
         )
         
-        await context.bot.send_document(
-            chat_id=BACKUP_CHAT_ID,
-            document=open(filepath, 'rb'),
-            caption=caption,
-            filename=filename
-        )
+        with open(filepath, 'rb') as file_obj:
+            await context.bot.send_document(
+                chat_id=BACKUP_CHAT_ID,
+                document=file_obj,
+                caption=caption,
+                filename=filename
+            )
         
         LOGGER.info(f"Backup sent successfully to {BACKUP_CHAT_ID}")
         
         # Clean up temp file
-        os.remove(filepath)
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
         
     except Exception as e:
         LOGGER.error(f"Error in auto backup job: {e}")
@@ -177,6 +188,9 @@ async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
             )
         except:
             pass
+        # Clean up on error too
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
 
 async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -189,6 +203,7 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ You are not authorized to use this command.")
         return
     
+    filepath = None
     try:
         status_msg = await update.message.reply_text("🔄 Creating database backup...")
         
@@ -199,7 +214,8 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filepath = f"/tmp/{filename}"
         
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(backup_data, f, indent=2, ensure_ascii=False)
+            # FIX: Added cls=CustomJSONEncoder
+            json.dump(backup_data, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
         
         # Calculate stats
         total_docs = sum(len(v) if isinstance(v, list) else 0 
@@ -215,22 +231,26 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Use /restore to restore this backup."
         )
         
-        await update.message.reply_document(
-            document=open(filepath, 'rb'),
-            caption=caption,
-            filename=filename
-        )
+        with open(filepath, 'rb') as file_obj:
+            await update.message.reply_document(
+                document=file_obj,
+                caption=caption,
+                filename=filename
+            )
         
         await status_msg.delete()
         
         # Clean up temp file
-        os.remove(filepath)
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
         
         LOGGER.info(f"Manual backup created by user {user_id}")
         
     except Exception as e:
         LOGGER.error(f"Error in backup command: {e}")
         await update.message.reply_text(f"❌ Backup failed: {str(e)}")
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
 
 async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -251,6 +271,7 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    filepath = None
     try:
         status_msg = await update.message.reply_text("🔄 Downloading backup file...")
         
@@ -268,7 +289,8 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Verify backup structure
         if 'collections' not in backup_data:
             await status_msg.edit_text("❌ Invalid backup file format.")
-            os.remove(filepath)
+            if os.path.exists(filepath):
+                os.remove(filepath)
             return
         
         await status_msg.edit_text("⚠️ Restoring database... This may take a while.")
@@ -293,14 +315,15 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(response)
         
         # Clean up temp file
-        os.remove(filepath)
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
         
         LOGGER.info(f"Database restored by user {user_id}")
         
     except Exception as e:
         LOGGER.error(f"Error in restore command: {e}")
         await update.message.reply_text(f"❌ Restore failed: {str(e)}")
-        if os.path.exists(filepath):
+        if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
 # ---------------- SETUP FUNCTION ---------------- #

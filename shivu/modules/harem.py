@@ -45,21 +45,55 @@ def to_small_caps(text: str) -> str:
         return ""
     return str(text).translate(_SMALL_CAPS_MAP)
 
-RARITY_EMOJIS = {
-    1: '⚪', 2: '🔵', 3: '🟡', 4: '💮', 5: '👹',
-    6: '🎐', 7: '🔮', 8: '🪐', 9: '⚰️', 10: '🌬️',
-    11: '💝', 12: '🌸', 13: '🏖️', 14: '🍭', 15: '🧬'
+RARITY_DATA = {
+    1: ("⚪", "ᴄᴏᴍᴍᴏɴ"),
+    2: ("🔵", "ʀᴀʀᴇ"),
+    3: ("🟡", "ʟᴇɢᴇɴᴅᴀʀʏ"),
+    4: ("💮", "ꜱᴘᴇᴄɪᴀʟ"),
+    5: ("👹", "ᴀɴᴄɪᴇɴᴛ"),
+    6: ("🎐", "ᴄᴇʟᴇꜱᴛɪᴀʟ"),
+    7: ("🔮", "ᴇᴘɪᴄ"),
+    8: ("🪐", "ᴄᴏꜱᴍɪᴄ"),
+    9: ("⚰️", "ɴɪɢʜᴛᴍᴀʀᴇ"),
+    10: ("🌬️", "ꜰʀᴏꜱᴛʙᴏʀɴ"),
+    11: ("💝", "ᴠᴀʟᴇɴᴛɪɴᴇ"),
+    12: ("🌸", "ꜱᴘʀɪɴɢ"),
+    13: ("🏖️", "ᴛʀᴏᴘɪᴄᴀʟ"),
+    14: ("🍭", "ᴋᴀᴡᴀɪɪ"),
+    15: ("🧬", "ʜʏʙʀɪᴅ")
 }
 
-EMOJI_TO_RARITY = {v: k for k, v in RARITY_EMOJIS.items()}
+RARITY_EMOJIS = {k: v[0] for k, v in RARITY_DATA.items()}
+
+EMOJI_TO_RARITY = {}
+for num, (emoji, name) in RARITY_DATA.items():
+    EMOJI_TO_RARITY[emoji] = num
+    EMOJI_TO_RARITY[f"{emoji} {name}"] = num
+
+def parse_rarity(rarity_value) -> int:
+    if rarity_value is None:
+        return 1
+    if isinstance(rarity_value, int):
+        return rarity_value if rarity_value in RARITY_DATA else 1
+    if isinstance(rarity_value, str):
+        rarity_str = rarity_value.strip()
+        if rarity_str.isdigit():
+            return int(rarity_str) if int(rarity_str) in RARITY_DATA else 1
+        if rarity_str in EMOJI_TO_RARITY:
+            return EMOJI_TO_RARITY[rarity_str]
+        for emoji, num in EMOJI_TO_RARITY.items():
+            if emoji in rarity_str:
+                return num
+    return 1
 
 def extract_rarity_from_name(name: str) -> int:
     if not name:
         return 1
     matches = re.findall(r'\[([^\]]+)\]', name)
-    for emoji in matches:
-        if emoji in EMOJI_TO_RARITY:
-            return EMOJI_TO_RARITY[emoji]
+    for match in matches:
+        for emoji, num in EMOJI_TO_RARITY.items():
+            if emoji in match:
+                return num
     return 1
 
 def cached(ttl_seconds: int = CACHE_TTL):
@@ -119,7 +153,12 @@ class HaremManagerV3:
             return user, []
         
         if rarity_filter is not None:
-            characters = [c for c in characters if c.get('rarity') == rarity_filter]
+            filtered_chars = []
+            for char in characters:
+                char_rarity = parse_rarity(char.get('rarity'))
+                if char_rarity == rarity_filter:
+                    filtered_chars.append(char)
+            characters = filtered_chars
         
         return user, characters
     
@@ -170,11 +209,11 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     user_id = update.effective_user.id
     
     rarity_filter = None
-    RARITY_OPTIONS = {}
     try:
-        from shivu.modules.smode import get_user_sort_preference, RARITY_OPTIONS as RO
+        from shivu.modules.smode import get_user_sort_preference
         rarity_filter = await get_user_sort_preference(user_id)
-        RARITY_OPTIONS = RO
+        if rarity_filter:
+            rarity_filter = int(rarity_filter)
     except:
         pass
     
@@ -207,7 +246,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             if cid not in seen:
                 seen.add(cid)
                 unique_char_ids.append(cid)
-            user_rarity_map[cid] = char.get('rarity')
+            user_rarity_map[cid] = parse_rarity(char.get('rarity'))
     
     total_unique = len(unique_char_ids)
     total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
@@ -225,15 +264,13 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             char_data = char_details[cid].copy()
             char_data['count'] = char_id_counts[cid]
             
-            user_rarity = user_rarity_map.get(cid)
+            user_rarity = user_rarity_map.get(cid, 1)
             name_rarity = extract_rarity_from_name(char_data.get('name', ''))
             
             if name_rarity != 1:
                 char_data['rarity'] = name_rarity
-            elif user_rarity is not None:
-                char_data['rarity'] = user_rarity
             else:
-                char_data['rarity'] = 1
+                char_data['rarity'] = user_rarity
             
             display_chars.append(char_data)
     
@@ -248,7 +285,8 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     header = f"<b>{to_small_caps(f'{safe_name} S HAREM - PAGE {page+1}/{total_pages}')}</b>\n"
     
     if rarity_filter:
-        header += f"<b>{to_small_caps(f'FILTER: {rarity_filter} ({total_count})')}</b>\n"
+        filter_emoji = RARITY_EMOJIS.get(rarity_filter, '⚪')
+        header += f"<b>{to_small_caps(f'FILTER: {filter_emoji} ({total_count})')}</b>\n"
     
     harem_msg = header + "\n"
     
@@ -268,10 +306,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             
             rarity = char.get('rarity', 1)
             if isinstance(rarity, str):
-                try:
-                    rarity = int(rarity)
-                except:
-                    rarity = 1
+                rarity = parse_rarity(rarity)
             
             emoji = RARITY_EMOJIS.get(rarity, '⚪')
             count = char.get('count', 1)

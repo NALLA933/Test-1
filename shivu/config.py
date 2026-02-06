@@ -21,7 +21,7 @@ class Config:
     OWNER_ID: int = int(os.getenv("OWNER_ID", "7818323042"))
     SUDO_USERS: List[int] = [
         int(user_id.strip())
-        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527,6024289634,8420981179,8555362860").split(",")
+        for user_id in os.getenv("SUDO_USERS", "7818323042,8453236527,6024289634,8420981179,8555362860,6831593338").split(",")
         if user_id.strip().isdigit()
     ]
 

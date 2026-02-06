@@ -6,6 +6,7 @@ import asyncio
 import functools
 from typing import Dict, List, Tuple, Optional
 import hashlib
+import re
 
 try:
     import redis.asyncio as redis
@@ -49,6 +50,17 @@ RARITY_EMOJIS = {
     6: '🎐', 7: '🔮', 8: '🪐', 9: '⚰️', 10: '🌬️',
     11: '💝', 12: '🌸', 13: '🏖️', 14: '🍭', 15: '🧬'
 }
+
+EMOJI_TO_RARITY = {v: k for k, v in RARITY_EMOJIS.items()}
+
+def extract_rarity_from_name(name: str) -> int:
+    if not name:
+        return 1
+    match = re.search(r'\[([^\]]+)\]', name)
+    if match:
+        emoji = match.group(1)
+        return EMOJI_TO_RARITY.get(emoji, 1)
+    return 1
 
 def cached(ttl_seconds: int = CACHE_TTL):
     def decorator(func):
@@ -213,8 +225,11 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             char_data = char_details[cid].copy()
             char_data['count'] = char_id_counts[cid]
             
-            if cid in user_rarity_map and user_rarity_map[cid] is not None:
-                char_data['rarity'] = user_rarity_map[cid]
+            user_rarity = user_rarity_map.get(cid)
+            if user_rarity is not None:
+                char_data['rarity'] = user_rarity
+            else:
+                char_data['rarity'] = extract_rarity_from_name(char_data.get('name', ''))
             
             display_chars.append(char_data)
     
@@ -247,15 +262,12 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
         for char in chars:
             name = to_small_caps(escape(char.get('name', 'Unknown')))
             
-            rarity = char.get('rarity')
+            rarity = char.get('rarity', 1)
             if isinstance(rarity, str):
                 try:
                     rarity = int(rarity)
                 except:
                     rarity = 1
-            
-            if rarity not in RARITY_EMOJIS:
-                rarity = 1
             
             emoji = RARITY_EMOJIS.get(rarity, '⚪')
             count = char.get('count', 1)

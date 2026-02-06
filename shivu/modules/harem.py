@@ -40,6 +40,8 @@ _thread_pool = ThreadPoolExecutor(max_workers=4)
 
 redis_pool = None
 redis_client = None
+redis_working = False
+
 if REDIS_AVAILABLE:
     try:
         redis_pool = ConnectionPool(
@@ -49,11 +51,14 @@ if REDIS_AVAILABLE:
             decode_responses=False,
             max_connections=20,
             socket_keepalive=True,
-            socket_connect_timeout=5
+            socket_connect_timeout=2,
+            socket_timeout=2
         )
-        redis_client = redis.Redis(connection_pool=redis_pool)
+        redis_client = redis.Redis(connection_pool=redis_pool, socket_connect_timeout=2, socket_timeout=2)
+        redis_working = True
     except Exception:
-        pass
+        redis_client = None
+        redis_working = False
 
 _SMALL_CAPS_MAP = str.maketrans({
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
@@ -70,6 +75,7 @@ _SMALL_CAPS_MAP = str.maketrans({
 })
 
 @functools.lru_cache(maxsize=5000)
+def to_small)
 def to_small_caps(text: str) -> str:
     if not text:
         return ""
@@ -135,27 +141,29 @@ class CacheManager:
         self._pending = {}
     
     async def get(self, key: str):
-        if not redis_client:
+        global redis_working
+        if not redis_working or not redis_client:
             return self._local_cache.get(key)
         
         try:
-            data = await redis_client.get(key)
+            data = await asyncio.wait_for(redis_client.get(key), timeout=1.0)
             if data:
                 return pickle.loads(data)
         except Exception:
-            pass
+            redis_working = False
         return None
     
     async def set(self, key: str, value: Any, ttl: int = CACHE_TTL):
-        if not redis_client:
+        global redis_working
+        if not redis_working or not redis_client:
             self._local_cache[key] = (value, time.time() + ttl)
             return
         
         try:
             serialized = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
-            await redis_client.setex(key, ttl, serialized)
+            await asyncio.wait_for(redis_client.setex(key, ttl, serialized), timeout=1.0)
         except Exception:
-            pass
+            redis_working = False
     
     async def get_or_set(self, key: str, factory, ttl: int = CACHE_TTL):
         cached = await self.get(key)
@@ -177,7 +185,8 @@ class CacheManager:
             future.set_exception(e)
             raise
         finally:
-            del self._pending[key]
+            if key in self._pending:
+                del self._pending[key]
 
 cache_manager = CacheManager()
 
@@ -238,12 +247,12 @@ class HaremManagerV4:
         
         cache_keys = [f"char:{cid}" for cid in unique_ids]
         
-        if redis_client:
+        if redis_working and redis_client:
             try:
                 pipe = redis_client.pipeline()
                 for key in cache_keys:
                     pipe.get(key)
-                results = await pipe.execute()
+                results = await asyncio.wait_for(pipe.execute(), timeout=1.0)
                 
                 for cid, data in zip(unique_ids, results):
                     if data:
@@ -269,18 +278,17 @@ class HaremManagerV4:
         ).batch_size(len(missing_ids))
         
         char_map = {}
-        cache_items = []
         
         async for char in cursor:
             cid = char['id']
             char_map[cid] = char
-            cache_items.append((f"char:{cid}", char))
-        
-        if redis_client and cache_items:
-            pipe = redis_client.pipeline()
-            for key, value in cache_items:
-                pipe.setex(key, CACHE_TTL, pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL))
-            asyncio.create_task(pipe.execute())
+            
+            if redis_working and redis_client:
+                try:
+                    serialized = pickle.dumps(char, protocol=pickle.HIGHEST_PROTOCOL)
+                    await asyncio.wait_for(redis_client.setex(f"char:{cid}", CACHE_TTL, serialized), timeout=0.5)
+                except Exception:
+                    pass
         
         char_map.update(cache_hits)
         return char_map

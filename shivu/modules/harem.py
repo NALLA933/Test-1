@@ -213,7 +213,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             char_data = char_details[cid].copy()
             char_data['count'] = char_id_counts[cid]
             
-            if not char_data.get('rarity') and cid in user_rarity_map:
+            if cid in user_rarity_map and user_rarity_map[cid] is not None:
                 char_data['rarity'] = user_rarity_map[cid]
             
             display_chars.append(char_data)
@@ -248,13 +248,14 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             name = to_small_caps(escape(char.get('name', 'Unknown')))
             
             rarity = char.get('rarity')
-            if rarity is None:
-                rarity = user_rarity_map.get(char['id'], 1)
             if isinstance(rarity, str):
                 try:
                     rarity = int(rarity)
                 except:
                     rarity = 1
+            
+            if rarity not in RARITY_EMOJIS:
+                rarity = 1
             
             emoji = RARITY_EMOJIS.get(rarity, '⚪')
             count = char.get('count', 1)

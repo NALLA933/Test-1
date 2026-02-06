@@ -186,6 +186,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     char_id_counts = {}
     unique_char_ids = []
     seen = set()
+    user_rarity_map = {}
     
     for char in user_chars:
         cid = char.get('id')
@@ -194,6 +195,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             if cid not in seen:
                 seen.add(cid)
                 unique_char_ids.append(cid)
+            user_rarity_map[cid] = char.get('rarity')
     
     total_unique = len(unique_char_ids)
     total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
@@ -208,8 +210,12 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     display_chars = []
     for cid in page_ids:
         if cid in char_details:
-            char_data = char_details[cid]
+            char_data = char_details[cid].copy()
             char_data['count'] = char_id_counts[cid]
+            
+            if not char_data.get('rarity') and cid in user_rarity_map:
+                char_data['rarity'] = user_rarity_map[cid]
+            
             display_chars.append(char_data)
     
     display_chars.sort(key=lambda x: x.get('anime', ''))
@@ -235,7 +241,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
         safe_anime = escape(str(anime))
         total_in_anime = anime_counts.get(anime, len(chars))
         
-        harem_msg += f"<b>𖤍 {to_small_caps(safe_anime)} {{{len(chars)}/{total_in_anime}}}</b>\n"
+        harem_msg += f"<b>𖤍 {to_small_caps(safe_anime)} {{{len(chars)}/{total_anime}}}</b>\n"
         harem_msg += f"{to_small_caps('--------------------')}\n"
         
         for char in chars:
@@ -243,8 +249,8 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             
             rarity = char.get('rarity')
             if rarity is None:
-                rarity = 1
-            elif isinstance(rarity, str):
+                rarity = user_rarity_map.get(char['id'], 1)
+            if isinstance(rarity, str):
                 try:
                     rarity = int(rarity)
                 except:

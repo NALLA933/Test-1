@@ -56,10 +56,10 @@ EMOJI_TO_RARITY = {v: k for k, v in RARITY_EMOJIS.items()}
 def extract_rarity_from_name(name: str) -> int:
     if not name:
         return 1
-    match = re.search(r'\[([^\]]+)\]', name)
-    if match:
-        emoji = match.group(1)
-        return EMOJI_TO_RARITY.get(emoji, 1)
+    matches = re.findall(r'\[([^\]]+)\]', name)
+    for emoji in matches:
+        if emoji in EMOJI_TO_RARITY:
+            return EMOJI_TO_RARITY[emoji]
     return 1
 
 def cached(ttl_seconds: int = CACHE_TTL):
@@ -226,10 +226,14 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
             char_data['count'] = char_id_counts[cid]
             
             user_rarity = user_rarity_map.get(cid)
-            if user_rarity is not None:
+            name_rarity = extract_rarity_from_name(char_data.get('name', ''))
+            
+            if name_rarity != 1:
+                char_data['rarity'] = name_rarity
+            elif user_rarity is not None:
                 char_data['rarity'] = user_rarity
             else:
-                char_data['rarity'] = extract_rarity_from_name(char_data.get('name', ''))
+                char_data['rarity'] = 1
             
             display_chars.append(char_data)
     

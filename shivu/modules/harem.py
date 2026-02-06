@@ -12,13 +12,11 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-# Faster JSON library
 try:
     import orjson as json
 except ImportError:
     import json
 
-# Motor for async MongoDB with connection pooling
 try:
     from motor.motor_asyncio import AsyncIOMotorClient
     MOTOR_AVAILABLE = True
@@ -34,17 +32,12 @@ except ImportError:
 
 from shivu import collection, user_collection, application
 
-# ==========================================
-# CONFIGURATION & CONNECTION POOLING
-# ==========================================
 CACHE_TTL = 300
 PAGE_SIZE = 15
 MAX_CONNECTIONS = 50
 
-# Thread pool for CPU intensive tasks (string processing)
 _thread_pool = ThreadPoolExecutor(max_workers=4)
 
-# Redis Connection Pool
 redis_pool = None
 redis_client = None
 if REDIS_AVAILABLE:
@@ -53,7 +46,7 @@ if REDIS_AVAILABLE:
             host='localhost', 
             port=6379, 
             db=0, 
-            decode_responses=False,  # Binary data support
+            decode_responses=False,
             max_connections=20,
             socket_keepalive=True,
             socket_connect_timeout=5
@@ -62,9 +55,6 @@ if REDIS_AVAILABLE:
     except Exception:
         pass
 
-# ==========================================
-# OPTIMIZED STRING PROCESSING
-# ==========================================
 _SMALL_CAPS_MAP = str.maketrans({
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
     'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
@@ -79,19 +69,14 @@ _SMALL_CAPS_MAP = str.maketrans({
     'Y': 'ʏ', 'Z': 'ᴢ'
 })
 
-# LRU Cache for small caps (frequently repeated names)
 @functools.lru_cache(maxsize=5000)
 def to_small_caps(text: str) -> str:
     if not text:
         return ""
     return str(text).translate(_SMALL_CAPS_MAP)
 
-# Pre-compiled regex for better performance
 _RARITY_EXTRACTOR = re.compile(r'\[([^\]]+)\]')
 
-# ==========================================
-# DATA STRUCTURES (Memory Optimized)
-# ==========================================
 RARITY_DATA = {
     1: ("⚪", "ᴄᴏᴍᴍᴏɴ"),
     2: ("🔵", "ʀᴀʀᴇ"),
@@ -112,7 +97,6 @@ RARITY_DATA = {
 
 RARITY_EMOJIS = {k: v[0] for k, v in RARITY_DATA.items()}
 
-# Fast lookup dictionaries
 EMOJI_TO_RARITY = {}
 RARITY_STRINGS = {}
 for num, (emoji, name) in RARITY_DATA.items():
@@ -122,7 +106,6 @@ for num, (emoji, name) in RARITY_DATA.items():
 
 @functools.lru_cache(maxsize=1000)
 def parse_rarity(rarity_value: tuple) -> int:
-    """Optimized rarity parsing with caching"""
     if not rarity_value:
         return 1
     if isinstance(rarity_value[0], int):
@@ -145,9 +128,6 @@ def extract_rarity_from_name(name: str) -> int:
                 return num
     return 1
 
-# ==========================================
-# ADVANCED CACHING SYSTEM
-# ==========================================
 class CacheManager:
     def __init__(self):
         self._local_cache = {}
@@ -178,17 +158,13 @@ class CacheManager:
             pass
     
     async def get_or_set(self, key: str, factory, ttl: int = CACHE_TTL):
-        """Prevent thundering herd with request coalescing"""
-        # Check cache first
         cached = await self.get(key)
         if cached is not None:
             return cached
         
-        # Check if request is pending
         if key in self._pending:
             return await self._pending[key]
         
-        # Create new request
         future = asyncio.Future()
         self._pending[key] = future
         
@@ -205,18 +181,13 @@ class CacheManager:
 
 cache_manager = CacheManager()
 
-# ==========================================
-# DATABASE OPTIMIZATIONS
-# ==========================================
 class HaremManagerV4:
     
     @staticmethod
     async def get_user_data_optimized(user_id: int, rarity_filter: Optional[int] = None):
-        """Single aggregation pipeline for maximum speed"""
         cache_key = f"user_harem:{user_id}:{rarity_filter}"
         
         async def fetch_data():
-            # Optimized aggregation with projection pushdown
             pipeline = [
                 {"$match": {"id": user_id}},
                 {"$project": {
@@ -227,7 +198,6 @@ class HaremManagerV4:
                 }}
             ]
             
-            # Use hint for index optimization if available
             cursor = user_collection.aggregate(
                 pipeline, 
                 allowDiskUse=False,
@@ -244,11 +214,9 @@ class HaremManagerV4:
             if not characters:
                 return user, []
             
-            # In-memory filtering (faster than DB for small arrays)
             if rarity_filter:
                 filtered = []
                 for char in characters:
-                    # Fast tuple conversion for cache hashability
                     r_val = char.get('rarity')
                     if isinstance(r_val, (int, str)):
                         if parse_rarity((r_val,)) == rarity_filter:
@@ -261,7 +229,6 @@ class HaremManagerV4:
     
     @staticmethod
     async def get_character_details_optimized(char_ids: List[str]):
-        """Batch fetch with projection and caching"""
         if not char_ids:
             return {}
         
@@ -269,7 +236,6 @@ class HaremManagerV4:
         cache_hits = {}
         missing_ids = []
         
-        # Check cache for each ID (parallel)
         cache_keys = [f"char:{cid}" for cid in unique_ids]
         
         if redis_client:
@@ -292,7 +258,6 @@ class HaremManagerV4:
         if not missing_ids:
             return cache_hits
         
-        # Batch fetch from DB
         projection = {
             "id": 1, "name": 1, "anime": 1, 
             "rarity": 1, "img_url": 1, "_id": 0
@@ -311,7 +276,6 @@ class HaremManagerV4:
             char_map[cid] = char
             cache_items.append((f"char:{cid}", char))
         
-        # Parallel cache set
         if redis_client and cache_items:
             pipe = redis_client.pipeline()
             for key, value in cache_items:
@@ -323,11 +287,9 @@ class HaremManagerV4:
     
     @staticmethod
     async def get_anime_counts_optimized(animes: List[str]):
-        """Optimized with caching"""
         if not animes:
             return {}
         
-        # Simple in-memory cache for anime counts (rarely changes)
         cache_key = f"anime_counts:{hash(tuple(sorted(animes)))}"
         cached = await cache_manager.get(cache_key)
         if cached:
@@ -345,9 +307,6 @@ class HaremManagerV4:
         await cache_manager.set(cache_key, results, ttl=300)
         return results
 
-# ==========================================
-# MESSAGE BUILDING (CPU Offloading)
-# ==========================================
 def build_harem_message_sync(
     user_name: str,
     page: int,
@@ -357,7 +316,6 @@ def build_harem_message_sync(
     display_chars: List[dict],
     anime_counts: Dict[str, int]
 ) -> str:
-    """CPU intensive task - runs in thread pool"""
     
     safe_name = escape(user_name)
     header_parts = [f"<b>{to_small_caps(f'{safe_name} S HAREM - PAGE {page+1}/{total_pages}')}</b>"]
@@ -368,7 +326,6 @@ def build_harem_message_sync(
     
     harem_msg = "\n".join(header_parts) + "\n\n"
     
-    # Group by anime (faster than itertools.groupby for this use case)
     anime_groups = defaultdict(list)
     for char in display_chars:
         anime = char.get('anime', 'Unknown')
@@ -393,14 +350,10 @@ def build_harem_message_sync(
     
     return harem_msg
 
-# ==========================================
-# MAIN HANDLER (Ultra Fast)
-# ==========================================
 async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
     start_time = time.time()
     user_id = update.effective_user.id
     
-    # Get rarity filter (with timeout protection)
     rarity_filter = None
     try:
         import asyncio
@@ -414,7 +367,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
     except Exception:
         pass
     
-    # Fetch user data (cached)
     result = await HaremManagerV4.get_user_data_optimized(user_id, rarity_filter)
     if not result:
         await _send_response(update, to_small_caps("You Have Not Guessed any Characters Yet.."))
@@ -429,7 +381,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
     
     total_count = len(user_chars)
     
-    # Fast character ID extraction with count tracking
     char_counts = {}
     unique_ids = []
     seen = set()
@@ -442,7 +393,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
             if cid not in seen:
                 seen.add(cid)
                 unique_ids.append(cid)
-                # Store rarity as int for faster lookup
                 r = char.get('rarity')
                 user_rarity_map[cid] = parse_rarity((r,)) if r else 1
     
@@ -450,21 +400,17 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
     total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
     page = max(0, min(page, total_pages - 1))
     
-    # Pagination slicing
     start_idx = page * PAGE_SIZE
     page_ids = unique_ids[start_idx:start_idx + PAGE_SIZE]
     
-    # Parallel fetch: character details + anime counts
     char_task = asyncio.create_task(
         HaremManagerV4.get_character_details_optimized(page_ids)
     )
     
-    # Prepare display data while DB fetches
     display_chars = []
     
     char_details = await char_task
     
-    # Get animes for count fetching
     page_animes = set()
     
     for cid in page_ids:
@@ -472,7 +418,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
             char_data = char_details[cid]
             page_animes.add(char_data.get('anime'))
             
-            # Determine rarity (name priority > user data)
             name = char_data.get('name', '')
             name_rarity = extract_rarity_from_name(name)
             
@@ -484,15 +429,12 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
                 'count': char_counts[cid]
             })
     
-    # Fetch anime counts in background
     anime_counts_task = asyncio.create_task(
         HaremManagerV4.get_anime_counts_optimized(list(page_animes))
     )
     
-    # Sort by anime name
     display_chars.sort(key=lambda x: x['anime'])
     
-    # Offload CPU intensive message building to thread pool
     anime_counts = await anime_counts_task
     
     loop = asyncio.get_event_loop()
@@ -508,7 +450,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
         anime_counts
     )
     
-    # Build keyboard
     keyboard = [[
         InlineKeyboardButton(
             to_small_caps(f"🔮 See Collection ({total_count})"),
@@ -531,7 +472,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
     
     markup = InlineKeyboardMarkup(keyboard)
     
-    # Image selection (prioritize favorites)
     photo_url = None
     if user.get('favorites'):
         fav_id = user['favorites'][0]
@@ -541,7 +481,6 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
     if not photo_url and display_chars:
         photo_url = display_chars[0].get('img_url')
     
-    # Send response
     try:
         if photo_url:
             if update.message:
@@ -563,16 +502,13 @@ async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
             await _send_response(update, harem_msg, markup)
     except Exception as e:
         if "message is not modified" not in str(e).lower():
-            # Fallback to text if photo fails
             await _send_response(update, harem_msg, markup)
     
-    # Debug: Log response time
     elapsed = time.time() - start_time
     if elapsed > 1.0:
         print(f"[HAREM-V4] Slow response: {elapsed:.2f}s for user {user_id}")
 
 async def _send_response(update: Update, text: str, markup=None):
-    """Unified send method with error handling"""
     try:
         if update.message:
             await update.message.reply_text(
@@ -613,6 +549,5 @@ async def harem_callback_v4(update: Update, context: CallbackContext):
     await query.answer()
     await harem_v4(update, context, page)
 
-# Register handlers
 application.add_handler(CommandHandler(["harem", "collection"], harem_v4, block=False))
 application.add_handler(CallbackQueryHandler(harem_callback_v4, pattern=r'^harem:', block=False))

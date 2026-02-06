@@ -17,9 +17,8 @@ except ImportError:
 from shivu import collection, user_collection, application
 
 # ============= CONFIGURATION =============
-CACHE_TTL = 300  # 5 minutes cache
+CACHE_TTL = 300
 PAGE_SIZE = 15
-MAX_CONCURRENT_DB_OPS = 5
 
 # Redis Client Setup
 redis_client = None
@@ -30,7 +29,6 @@ if REDIS_AVAILABLE:
         pass
 
 # ============= ULTRA-FAST SMALL CAPS =============
-# Pre-compile mapping for speed
 _SMALL_CAPS_MAP = str.maketrans({
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
     'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
@@ -60,18 +58,15 @@ RARITY_EMOJIS = {
 
 # ============= SMART CACHE DECORATOR =============
 def cached(ttl_seconds: int = CACHE_TTL):
-    """Smart cache decorator for async functions"""
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             if not redis_client:
                 return await func(*args, **kwargs)
             
-            # Generate cache key
             key_parts = [func.__name__] + [str(a) for a in args] + [f"{k}={v}" for k, v in kwargs.items()]
             cache_key = hashlib.md5(":".join(key_parts).encode()).hexdigest()
             
-            # Try cache first
             try:
                 cached_data = await redis_client.get(cache_key)
                 if cached_data:
@@ -80,10 +75,8 @@ def cached(ttl_seconds: int = CACHE_TTL):
             except:
                 pass
             
-            # Execute function
             result = await func(*args, **kwargs)
             
-            # Store in cache
             try:
                 if result is not None:
                     import json
@@ -97,19 +90,10 @@ def cached(ttl_seconds: int = CACHE_TTL):
 
 # ============= HIGH-PERFORMANCE HAREM MANAGER =============
 class HaremManagerV3:
-    """Optimized for speed with aggressive caching and projection"""
     
     @staticmethod
-    @cached(ttl_seconds=60)  # Cache user data for 1 minute
+    @cached(ttl_seconds=60)
     async def get_user_characters_fast(user_id: int, rarity_filter: Optional[int] = None) -> Tuple[Optional[dict], List[dict]]:
-        """
-        V3 Optimization: 
-        - Uses MongoDB projection (only fetch needed fields)
-        - Aggregation pipeline for filtering at DB level
-        - Returns only IDs + metadata, full char data fetched in batch
-        """
-        
-        # Build aggregation pipeline (Filter at DB level, not Python)
         pipeline = [
             {"$match": {"id": user_id}},
             {"$project": {
@@ -130,7 +114,6 @@ class HaremManagerV3:
         if not characters:
             return user, []
         
-        # Rarity filter at application level (since characters array is embedded)
         if rarity_filter is not None:
             characters = [c for c in characters if c.get('rarity') == rarity_filter]
         
@@ -138,19 +121,20 @@ class HaremManagerV3:
     
     @staticmethod
     async def get_character_details_batch(char_ids: List[str]) -> Dict[str, dict]:
-        """
-        V3: Fetch only required fields, use lean queries
-        """
+        """🔧 FIX: Explicitly include 'rarity' field in projection"""
         if not char_ids:
             return {}
         
-        # Remove duplicates for query
         unique_ids = list(set(char_ids))
         
-        # Projection: Only get fields we actually display
+        # 🔧 FIX: Ensure 'rarity' is included in projection
         projection = {
-            "id": 1, "name": 1, "anime": 1, "rarity": 1, 
-            "img_url": 1, "_id": 0
+            "id": 1, 
+            "name": 1, 
+            "anime": 1, 
+            "rarity": 1,  # ✅ Yeh ensure karta hai ki rarity aaye
+            "img_url": 1, 
+            "_id": 0
         }
         
         cursor = collection.find(
@@ -166,7 +150,6 @@ class HaremManagerV3:
     
     @staticmethod
     async def get_anime_counts_batch(animes: List[str]) -> Dict[str, int]:
-        """V3: Single aggregation for all anime counts"""
         if not animes:
             return {}
         
@@ -183,10 +166,8 @@ class HaremManagerV3:
 
 # ============= MAIN HANDLER (V3) =============
 async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> None:
-    """High-performance harem with lazy loading and caching"""
     user_id = update.effective_user.id
     
-    # Get filter preference (try/except for speed)
     rarity_filter = None
     try:
         from shivu.modules.smode import get_user_sort_preference, RARITY_OPTIONS
@@ -194,7 +175,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     except:
         RARITY_OPTIONS = {}
     
-    # Step 1: Get user data (cached)
+    # Step 1: Get user data
     user, user_chars = await HaremManagerV3.get_user_characters_fast(user_id, rarity_filter)
     
     if not user:
@@ -212,8 +193,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         await _send_message(update, msg)
         return
     
-    # Step 2: Get unique character IDs for this page only (Lazy Loading)
-    # First, get counts and unique IDs
+    # Step 2: Process characters
     char_id_counts = {}
     unique_char_ids = []
     seen = set()
@@ -226,17 +206,16 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
                 seen.add(cid)
                 unique_char_ids.append(cid)
     
-    # Calculate pagination
+    # Pagination logic
     total_unique = len(unique_char_ids)
     total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
     page = max(0, min(page, total_pages - 1))
     
-    # Get only current page IDs
     start_idx = page * PAGE_SIZE
     end_idx = start_idx + PAGE_SIZE
     page_ids = unique_char_ids[start_idx:end_idx]
     
-    # Step 3: Fetch character details for THIS PAGE only (Major speedup!)
+    # Step 3: 🔧 Fetch character details (ab rarity ke saath)
     char_details = await HaremManagerV3.get_character_details_batch(page_ids)
     
     # Build display list
@@ -247,13 +226,10 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
             char_data['count'] = char_id_counts[cid]
             display_chars.append(char_data)
     
-    # Sort by anime
     display_chars.sort(key=lambda x: x.get('anime', ''))
     
-    # Step 4: Get anime counts for page animes only
+    # Step 4: Get anime counts
     page_animes = list({c.get('anime') for c in display_chars})
-    
-    # Parallel execution: Get anime counts while building message
     anime_counts_task = asyncio.create_task(
         HaremManagerV3.get_anime_counts_batch(page_animes)
     )
@@ -270,11 +246,8 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     # Group by anime
     from itertools import groupby
     grouped = {k: list(v) for k, v in groupby(display_chars, key=lambda x: x.get('anime', 'Unknown'))}
-    
-    # Wait for anime counts
     anime_counts = await anime_counts_task
     
-    # Build display
     for anime, chars in grouped.items():
         safe_anime = escape(str(anime))
         total_in_anime = anime_counts.get(anime, len(chars))
@@ -284,18 +257,20 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         
         for char in chars:
             name = to_small_caps(escape(char.get('name', 'Unknown')))
-            rarity = char.get('rarity', 1)
+            
+            # 🔧 FIX: Rarity emoji fetch with fallback
+            rarity = char.get('rarity', 1)  # Default 1 (Common) agar nahi mila
             emoji = RARITY_EMOJIS.get(rarity, '⚪')
+            
             count = char.get('count', 1)
             
+            # 🔧 FORMAT: [emoji] ke andar correct rarity emoji
             harem_msg += f"✶ {char['id']} [{emoji}] {name} x{count}\n"
         
         harem_msg += f"{to_small_caps('--------------------')}\n\n"
     
     # Build keyboard
     keyboard = []
-    
-    # Collection button
     keyboard.append([
         InlineKeyboardButton(
             to_small_caps(f"🔮 See Collection ({total_count})"),
@@ -303,7 +278,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         )
     ])
     
-    # Smode button
     keyboard.append([
         InlineKeyboardButton(
             "❌ " + to_small_caps("Cancel"),
@@ -311,7 +285,6 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         )
     ])
     
-    # Pagination
     if total_pages > 1:
         nav_buttons = []
         if page > 0:
@@ -322,7 +295,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
     
     markup = InlineKeyboardMarkup(keyboard)
     
-    # Get photo (favorites or first available)
+    # Get photo
     photo_url = None
     if user.get('favorites'):
         fav_id = user['favorites'][0]
@@ -342,14 +315,12 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0) -> N
         else:
             await _send_message(update, harem_msg, markup)
     except Exception as e:
-        # If edit fails (message not modified), ignore
         if "message is not modified" in str(e).lower():
             pass
         else:
             raise
 
 async def _send_message(update: Update, text: str, markup=None):
-    """Helper to send or edit message"""
     if update.message:
         await update.message.reply_text(text, reply_markup=markup, parse_mode='HTML')
     else:
@@ -360,7 +331,6 @@ async def _send_message(update: Update, text: str, markup=None):
 
 # ============= CALLBACK HANDLER =============
 async def harem_callback_v3(update: Update, context: CallbackContext) -> None:
-    """Optimized callback handler"""
     query = update.callback_query
     data = query.data
     
@@ -375,7 +345,7 @@ async def harem_callback_v3(update: Update, context: CallbackContext) -> None:
         await query.answer(to_small_caps("Not Your Harem"), show_alert=True)
         return
     
-    await query.answer()  # Answer immediately for responsiveness
+    await query.answer()
     await harem_v3(update, context, page)
 
 # ============= REGISTRATION =============

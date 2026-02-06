@@ -241,7 +241,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
         safe_anime = escape(str(anime))
         total_in_anime = anime_counts.get(anime, len(chars))
         
-        harem_msg += f"<b>𖤍 {to_small_caps(safe_anime)} {{{len(chars)}/{total_anime}}}</b>\n"
+        harem_msg += f"<b>𖤍 {to_small_caps(safe_anime)} {{{len(chars)}/{total_in_anime}}}</b>\n"
         harem_msg += f"{to_small_caps('--------------------')}\n"
         
         for char in chars:

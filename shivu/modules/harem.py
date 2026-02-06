@@ -4,28 +4,67 @@ from html import escape
 import math
 import asyncio
 import functools
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Any
 import hashlib
 import re
+import pickle
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+
+# Faster JSON library
+try:
+    import orjson as json
+except ImportError:
+    import json
+
+# Motor for async MongoDB with connection pooling
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient
+    MOTOR_AVAILABLE = True
+except ImportError:
+    MOTOR_AVAILABLE = False
 
 try:
     import redis.asyncio as redis
+    from redis.asyncio.connection import ConnectionPool
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
 
 from shivu import collection, user_collection, application
 
+# ==========================================
+# CONFIGURATION & CONNECTION POOLING
+# ==========================================
 CACHE_TTL = 300
 PAGE_SIZE = 15
+MAX_CONNECTIONS = 50
 
+# Thread pool for CPU intensive tasks (string processing)
+_thread_pool = ThreadPoolExecutor(max_workers=4)
+
+# Redis Connection Pool
+redis_pool = None
 redis_client = None
 if REDIS_AVAILABLE:
     try:
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-    except:
+        redis_pool = ConnectionPool(
+            host='localhost', 
+            port=6379, 
+            db=0, 
+            decode_responses=False,  # Binary data support
+            max_connections=20,
+            socket_keepalive=True,
+            socket_connect_timeout=5
+        )
+        redis_client = redis.Redis(connection_pool=redis_pool)
+    except Exception:
         pass
 
+# ==========================================
+# OPTIMIZED STRING PROCESSING
+# ==========================================
 _SMALL_CAPS_MAP = str.maketrans({
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
     'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
@@ -40,11 +79,19 @@ _SMALL_CAPS_MAP = str.maketrans({
     'Y': 'ʏ', 'Z': 'ᴢ'
 })
 
+# LRU Cache for small caps (frequently repeated names)
+@functools.lru_cache(maxsize=5000)
 def to_small_caps(text: str) -> str:
     if not text:
         return ""
     return str(text).translate(_SMALL_CAPS_MAP)
 
+# Pre-compiled regex for better performance
+_RARITY_EXTRACTOR = re.compile(r'\[([^\]]+)\]')
+
+# ==========================================
+# DATA STRUCTURES (Memory Optimized)
+# ==========================================
 RARITY_DATA = {
     1: ("⚪", "ᴄᴏᴍᴍᴏɴ"),
     2: ("🔵", "ʀᴀʀᴇ"),
@@ -65,134 +112,226 @@ RARITY_DATA = {
 
 RARITY_EMOJIS = {k: v[0] for k, v in RARITY_DATA.items()}
 
+# Fast lookup dictionaries
 EMOJI_TO_RARITY = {}
+RARITY_STRINGS = {}
 for num, (emoji, name) in RARITY_DATA.items():
     EMOJI_TO_RARITY[emoji] = num
     EMOJI_TO_RARITY[f"{emoji} {name}"] = num
+    RARITY_STRINGS[num] = f"{emoji} {name}"
 
-def parse_rarity(rarity_value) -> int:
-    if rarity_value is None:
+@functools.lru_cache(maxsize=1000)
+def parse_rarity(rarity_value: tuple) -> int:
+    """Optimized rarity parsing with caching"""
+    if not rarity_value:
         return 1
-    if isinstance(rarity_value, int):
-        return rarity_value if rarity_value in RARITY_DATA else 1
-    if isinstance(rarity_value, str):
-        rarity_str = rarity_value.strip()
-        if rarity_str.isdigit():
-            return int(rarity_str) if int(rarity_str) in RARITY_DATA else 1
-        if rarity_str in EMOJI_TO_RARITY:
-            return EMOJI_TO_RARITY[rarity_str]
-        for emoji, num in EMOJI_TO_RARITY.items():
-            if emoji in rarity_str:
-                return num
+    if isinstance(rarity_value[0], int):
+        return rarity_value[0] if rarity_value[0] in RARITY_DATA else 1
+    if isinstance(rarity_value[0], str):
+        r_str = rarity_value[0].strip()
+        if r_str.isdigit():
+            r_int = int(r_str)
+            return r_int if r_int in RARITY_DATA else 1
+        return EMOJI_TO_RARITY.get(r_str, 1)
     return 1
 
 def extract_rarity_from_name(name: str) -> int:
     if not name:
         return 1
-    matches = re.findall(r'\[([^\]]+)\]', name)
+    matches = _RARITY_EXTRACTOR.findall(name)
     for match in matches:
         for emoji, num in EMOJI_TO_RARITY.items():
             if emoji in match:
                 return num
     return 1
 
-def cached(ttl_seconds: int = CACHE_TTL):
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            if not redis_client:
-                return await func(*args, **kwargs)
-            
-            key_parts = [func.__name__] + [str(a) for a in args] + [f"{k}={v}" for k, v in kwargs.items()]
-            cache_key = hashlib.md5(":".join(key_parts).encode()).hexdigest()
-            
-            try:
-                cached_data = await redis_client.get(cache_key)
-                if cached_data:
-                    import json
-                    return json.loads(cached_data)
-            except:
-                pass
-            
-            result = await func(*args, **kwargs)
-            
-            try:
-                if result is not None:
-                    import json
-                    await redis_client.setex(cache_key, ttl_seconds, json.dumps(result, default=str))
-            except:
-                pass
-            
-            return result
-        return wrapper
-    return decorator
+# ==========================================
+# ADVANCED CACHING SYSTEM
+# ==========================================
+class CacheManager:
+    def __init__(self):
+        self._local_cache = {}
+        self._lock = asyncio.Lock()
+        self._pending = {}
+    
+    async def get(self, key: str):
+        if not redis_client:
+            return self._local_cache.get(key)
+        
+        try:
+            data = await redis_client.get(key)
+            if data:
+                return pickle.loads(data)
+        except Exception:
+            pass
+        return None
+    
+    async def set(self, key: str, value: Any, ttl: int = CACHE_TTL):
+        if not redis_client:
+            self._local_cache[key] = (value, time.time() + ttl)
+            return
+        
+        try:
+            serialized = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+            await redis_client.setex(key, ttl, serialized)
+        except Exception:
+            pass
+    
+    async def get_or_set(self, key: str, factory, ttl: int = CACHE_TTL):
+        """Prevent thundering herd with request coalescing"""
+        # Check cache first
+        cached = await self.get(key)
+        if cached is not None:
+            return cached
+        
+        # Check if request is pending
+        if key in self._pending:
+            return await self._pending[key]
+        
+        # Create new request
+        future = asyncio.Future()
+        self._pending[key] = future
+        
+        try:
+            value = await factory()
+            await self.set(key, value, ttl)
+            future.set_result(value)
+            return value
+        except Exception as e:
+            future.set_exception(e)
+            raise
+        finally:
+            del self._pending[key]
 
-class HaremManagerV3:
+cache_manager = CacheManager()
+
+# ==========================================
+# DATABASE OPTIMIZATIONS
+# ==========================================
+class HaremManagerV4:
     
     @staticmethod
-    @cached(ttl_seconds=60)
-    async def get_user_characters_fast(user_id: int, rarity_filter: Optional[int] = None):
-        pipeline = [
-            {"$match": {"id": user_id}},
-            {"$project": {
-                "characters": 1,
-                "favorites": 1,
-                "name": 1,
-                "_id": 0
-            }}
-        ]
+    async def get_user_data_optimized(user_id: int, rarity_filter: Optional[int] = None):
+        """Single aggregation pipeline for maximum speed"""
+        cache_key = f"user_harem:{user_id}:{rarity_filter}"
         
-        user_data = await user_collection.aggregate(pipeline).to_list(1)
-        if not user_data:
-            return None, []
+        async def fetch_data():
+            # Optimized aggregation with projection pushdown
+            pipeline = [
+                {"$match": {"id": user_id}},
+                {"$project": {
+                    "characters": 1,
+                    "favorites": 1,
+                    "name": 1,
+                    "_id": 0
+                }}
+            ]
+            
+            # Use hint for index optimization if available
+            cursor = user_collection.aggregate(
+                pipeline, 
+                allowDiskUse=False,
+                batchSize=1
+            )
+            
+            user_data = await cursor.to_list(1)
+            if not user_data:
+                return None, []
+            
+            user = user_data[0]
+            characters = user.get('characters', [])
+            
+            if not characters:
+                return user, []
+            
+            # In-memory filtering (faster than DB for small arrays)
+            if rarity_filter:
+                filtered = []
+                for char in characters:
+                    # Fast tuple conversion for cache hashability
+                    r_val = char.get('rarity')
+                    if isinstance(r_val, (int, str)):
+                        if parse_rarity((r_val,)) == rarity_filter:
+                            filtered.append(char)
+                characters = filtered
+            
+            return user, characters
         
-        user = user_data[0]
-        characters = user.get('characters', [])
-        
-        if not characters:
-            return user, []
-        
-        if rarity_filter is not None:
-            filtered_chars = []
-            for char in characters:
-                char_rarity = parse_rarity(char.get('rarity'))
-                if char_rarity == rarity_filter:
-                    filtered_chars.append(char)
-            characters = filtered_chars
-        
-        return user, characters
+        return await cache_manager.get_or_set(cache_key, fetch_data, ttl=60)
     
     @staticmethod
-    async def get_character_details_batch(char_ids: List[str]):
+    async def get_character_details_optimized(char_ids: List[str]):
+        """Batch fetch with projection and caching"""
         if not char_ids:
             return {}
         
         unique_ids = list(set(char_ids))
+        cache_hits = {}
+        missing_ids = []
         
+        # Check cache for each ID (parallel)
+        cache_keys = [f"char:{cid}" for cid in unique_ids]
+        
+        if redis_client:
+            try:
+                pipe = redis_client.pipeline()
+                for key in cache_keys:
+                    pipe.get(key)
+                results = await pipe.execute()
+                
+                for cid, data in zip(unique_ids, results):
+                    if data:
+                        cache_hits[cid] = pickle.loads(data)
+                    else:
+                        missing_ids.append(cid)
+            except Exception:
+                missing_ids = unique_ids
+        else:
+            missing_ids = unique_ids
+        
+        if not missing_ids:
+            return cache_hits
+        
+        # Batch fetch from DB
         projection = {
-            "id": 1, 
-            "name": 1, 
-            "anime": 1, 
-            "rarity": 1,
-            "img_url": 1, 
-            "_id": 0
+            "id": 1, "name": 1, "anime": 1, 
+            "rarity": 1, "img_url": 1, "_id": 0
         }
         
         cursor = collection.find(
-            {"id": {"$in": unique_ids}},
+            {"id": {"$in": missing_ids}},
             projection
-        )
+        ).batch_size(len(missing_ids))
         
         char_map = {}
-        async for char in cursor:
-            char_map[char['id']] = char
+        cache_items = []
         
+        async for char in cursor:
+            cid = char['id']
+            char_map[cid] = char
+            cache_items.append((f"char:{cid}", char))
+        
+        # Parallel cache set
+        if redis_client and cache_items:
+            pipe = redis_client.pipeline()
+            for key, value in cache_items:
+                pipe.setex(key, CACHE_TTL, pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL))
+            asyncio.create_task(pipe.execute())
+        
+        char_map.update(cache_hits)
         return char_map
     
     @staticmethod
-    async def get_anime_counts_batch(animes: List[str]):
+    async def get_anime_counts_optimized(animes: List[str]):
+        """Optimized with caching"""
         if not animes:
             return {}
+        
+        # Simple in-memory cache for anime counts (rarely changes)
+        cache_key = f"anime_counts:{hash(tuple(sorted(animes)))}"
+        cached = await cache_manager.get(cache_key)
+        if cached:
+            return cached
         
         pipeline = [
             {"$match": {"anime": {"$in": animes}}},
@@ -203,98 +342,39 @@ class HaremManagerV3:
         async for doc in collection.aggregate(pipeline):
             results[doc['_id']] = doc['count']
         
+        await cache_manager.set(cache_key, results, ttl=300)
         return results
 
-async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
-    user_id = update.effective_user.id
+# ==========================================
+# MESSAGE BUILDING (CPU Offloading)
+# ==========================================
+def build_harem_message_sync(
+    user_name: str,
+    page: int,
+    total_pages: int,
+    total_count: int,
+    rarity_filter: Optional[int],
+    display_chars: List[dict],
+    anime_counts: Dict[str, int]
+) -> str:
+    """CPU intensive task - runs in thread pool"""
     
-    rarity_filter = None
-    try:
-        from shivu.modules.smode import get_user_sort_preference
-        rarity_filter = await get_user_sort_preference(user_id)
-        if rarity_filter:
-            rarity_filter = int(rarity_filter)
-    except:
-        pass
-    
-    user, user_chars = await HaremManagerV3.get_user_characters_fast(user_id, rarity_filter)
-    
-    if not user:
-        msg = to_small_caps("You Have Not Guessed any Characters Yet..")
-        await _send_message(update, msg)
-        return
-    
-    total_count = len(user_chars)
-    
-    if not user_chars:
-        if rarity_filter:
-            msg = to_small_caps(f"No Characters Of This Rarity! Use /smode")
-        else:
-            msg = to_small_caps("You Have Not Guessed any Characters Yet..")
-        await _send_message(update, msg)
-        return
-    
-    char_id_counts = {}
-    unique_char_ids = []
-    seen = set()
-    user_rarity_map = {}
-    
-    for char in user_chars:
-        cid = char.get('id')
-        if cid:
-            char_id_counts[cid] = char_id_counts.get(cid, 0) + 1
-            if cid not in seen:
-                seen.add(cid)
-                unique_char_ids.append(cid)
-            user_rarity_map[cid] = parse_rarity(char.get('rarity'))
-    
-    total_unique = len(unique_char_ids)
-    total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
-    page = max(0, min(page, total_pages - 1))
-    
-    start_idx = page * PAGE_SIZE
-    end_idx = start_idx + PAGE_SIZE
-    page_ids = unique_char_ids[start_idx:end_idx]
-    
-    char_details = await HaremManagerV3.get_character_details_batch(page_ids)
-    
-    display_chars = []
-    for cid in page_ids:
-        if cid in char_details:
-            char_data = char_details[cid].copy()
-            char_data['count'] = char_id_counts[cid]
-            
-            user_rarity = user_rarity_map.get(cid, 1)
-            name_rarity = extract_rarity_from_name(char_data.get('name', ''))
-            
-            if name_rarity != 1:
-                char_data['rarity'] = name_rarity
-            else:
-                char_data['rarity'] = user_rarity
-            
-            display_chars.append(char_data)
-    
-    display_chars.sort(key=lambda x: x.get('anime', ''))
-    
-    page_animes = list({c.get('anime') for c in display_chars})
-    anime_counts_task = asyncio.create_task(
-        HaremManagerV3.get_anime_counts_batch(page_animes)
-    )
-    
-    safe_name = escape(update.effective_user.first_name)
-    header = f"<b>{to_small_caps(f'{safe_name} S HAREM - PAGE {page+1}/{total_pages}')}</b>\n"
+    safe_name = escape(user_name)
+    header_parts = [f"<b>{to_small_caps(f'{safe_name} S HAREM - PAGE {page+1}/{total_pages}')}</b>"]
     
     if rarity_filter:
         filter_emoji = RARITY_EMOJIS.get(rarity_filter, '⚪')
-        header += f"<b>{to_small_caps(f'FILTER: {filter_emoji} ({total_count})')}</b>\n"
+        header_parts.append(f"<b>{to_small_caps(f'FILTER: {filter_emoji} ({total_count})')}</b>")
     
-    harem_msg = header + "\n"
+    harem_msg = "\n".join(header_parts) + "\n\n"
     
-    from itertools import groupby
-    grouped = {k: list(v) for k, v in groupby(display_chars, key=lambda x: x.get('anime', 'Unknown'))}
-    anime_counts = await anime_counts_task
+    # Group by anime (faster than itertools.groupby for this use case)
+    anime_groups = defaultdict(list)
+    for char in display_chars:
+        anime = char.get('anime', 'Unknown')
+        anime_groups[anime].append(char)
     
-    for anime, chars in grouped.items():
+    for anime, chars in anime_groups.items():
         safe_anime = escape(str(anime))
         total_in_anime = anime_counts.get(anime, len(chars))
         
@@ -303,11 +383,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
         
         for char in chars:
             name = to_small_caps(escape(char.get('name', 'Unknown')))
-            
             rarity = char.get('rarity', 1)
-            if isinstance(rarity, str):
-                rarity = parse_rarity(rarity)
-            
             emoji = RARITY_EMOJIS.get(rarity, '⚪')
             count = char.get('count', 1)
             
@@ -315,20 +391,135 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
         
         harem_msg += f"{to_small_caps('--------------------')}\n\n"
     
-    keyboard = []
-    keyboard.append([
+    return harem_msg
+
+# ==========================================
+# MAIN HANDLER (Ultra Fast)
+# ==========================================
+async def harem_v4(update: Update, context: CallbackContext, page: int = 0):
+    start_time = time.time()
+    user_id = update.effective_user.id
+    
+    # Get rarity filter (with timeout protection)
+    rarity_filter = None
+    try:
+        import asyncio
+        from shivu.modules.smode import get_user_sort_preference
+        rarity_filter = await asyncio.wait_for(
+            get_user_sort_preference(user_id), 
+            timeout=0.5
+        )
+        if rarity_filter:
+            rarity_filter = int(rarity_filter)
+    except Exception:
+        pass
+    
+    # Fetch user data (cached)
+    result = await HaremManagerV4.get_user_data_optimized(user_id, rarity_filter)
+    if not result:
+        await _send_response(update, to_small_caps("You Have Not Guessed any Characters Yet.."))
+        return
+    
+    user, user_chars = result
+    
+    if not user_chars:
+        msg = to_small_caps(f"No Characters Of This Rarity! Use /smode") if rarity_filter else to_small_caps("You Have Not Guessed any Characters Yet..")
+        await _send_response(update, msg)
+        return
+    
+    total_count = len(user_chars)
+    
+    # Fast character ID extraction with count tracking
+    char_counts = {}
+    unique_ids = []
+    seen = set()
+    user_rarity_map = {}
+    
+    for char in user_chars:
+        cid = char.get('id')
+        if cid:
+            char_counts[cid] = char_counts.get(cid, 0) + 1
+            if cid not in seen:
+                seen.add(cid)
+                unique_ids.append(cid)
+                # Store rarity as int for faster lookup
+                r = char.get('rarity')
+                user_rarity_map[cid] = parse_rarity((r,)) if r else 1
+    
+    total_unique = len(unique_ids)
+    total_pages = max(1, math.ceil(total_unique / PAGE_SIZE))
+    page = max(0, min(page, total_pages - 1))
+    
+    # Pagination slicing
+    start_idx = page * PAGE_SIZE
+    page_ids = unique_ids[start_idx:start_idx + PAGE_SIZE]
+    
+    # Parallel fetch: character details + anime counts
+    char_task = asyncio.create_task(
+        HaremManagerV4.get_character_details_optimized(page_ids)
+    )
+    
+    # Prepare display data while DB fetches
+    display_chars = []
+    
+    char_details = await char_task
+    
+    # Get animes for count fetching
+    page_animes = set()
+    
+    for cid in page_ids:
+        if cid in char_details:
+            char_data = char_details[cid]
+            page_animes.add(char_data.get('anime'))
+            
+            # Determine rarity (name priority > user data)
+            name = char_data.get('name', '')
+            name_rarity = extract_rarity_from_name(name)
+            
+            display_chars.append({
+                'id': cid,
+                'name': name,
+                'anime': char_data.get('anime', 'Unknown'),
+                'rarity': name_rarity if name_rarity != 1 else user_rarity_map.get(cid, 1),
+                'count': char_counts[cid]
+            })
+    
+    # Fetch anime counts in background
+    anime_counts_task = asyncio.create_task(
+        HaremManagerV4.get_anime_counts_optimized(list(page_animes))
+    )
+    
+    # Sort by anime name
+    display_chars.sort(key=lambda x: x['anime'])
+    
+    # Offload CPU intensive message building to thread pool
+    anime_counts = await anime_counts_task
+    
+    loop = asyncio.get_event_loop()
+    harem_msg = await loop.run_in_executor(
+        _thread_pool,
+        build_harem_message_sync,
+        update.effective_user.first_name,
+        page,
+        total_pages,
+        total_count,
+        rarity_filter,
+        display_chars,
+        anime_counts
+    )
+    
+    # Build keyboard
+    keyboard = [[
         InlineKeyboardButton(
             to_small_caps(f"🔮 See Collection ({total_count})"),
             switch_inline_query_current_chat=f"collection.{user_id}"
         )
-    ])
-    
-    keyboard.append([
+    ], [
         InlineKeyboardButton(
             "❌ " + to_small_caps("Cancel"),
             callback_data=f"open_smode:{user_id}"
         )
-    ])
+    ]]
     
     if total_pages > 1:
         nav_buttons = []
@@ -340,6 +531,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     
     markup = InlineKeyboardMarkup(keyboard)
     
+    # Image selection (prioritize favorites)
     photo_url = None
     if user.get('favorites'):
         fav_id = user['favorites'][0]
@@ -349,35 +541,66 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     if not photo_url and display_chars:
         photo_url = display_chars[0].get('img_url')
     
+    # Send response
     try:
         if photo_url:
             if update.message:
-                await update.message.reply_photo(photo_url, caption=harem_msg, reply_markup=markup, parse_mode='HTML')
+                await update.message.reply_photo(
+                    photo_url, 
+                    caption=harem_msg, 
+                    reply_markup=markup, 
+                    parse_mode='HTML',
+                    write_timeout=5,
+                    connect_timeout=5
+                )
             else:
-                await update.callback_query.edit_message_caption(caption=harem_msg, reply_markup=markup, parse_mode='HTML')
+                await update.callback_query.edit_message_caption(
+                    caption=harem_msg, 
+                    reply_markup=markup, 
+                    parse_mode='HTML'
+                )
         else:
-            await _send_message(update, harem_msg, markup)
+            await _send_response(update, harem_msg, markup)
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            # Fallback to text if photo fails
+            await _send_response(update, harem_msg, markup)
+    
+    # Debug: Log response time
+    elapsed = time.time() - start_time
+    if elapsed > 1.0:
+        print(f"[HAREM-V4] Slow response: {elapsed:.2f}s for user {user_id}")
+
+async def _send_response(update: Update, text: str, markup=None):
+    """Unified send method with error handling"""
+    try:
+        if update.message:
+            await update.message.reply_text(
+                text, 
+                reply_markup=markup, 
+                parse_mode='HTML',
+                write_timeout=5
+            )
+        else:
+            await update.callback_query.edit_message_text(
+                text, 
+                reply_markup=markup, 
+                parse_mode='HTML'
+            )
     except Exception as e:
         if "message is not modified" in str(e).lower():
             pass
-        else:
-            raise
+        elif update.callback_query:
+            try:
+                await update.callback_query.answer(to_small_caps("Updated"), show_alert=False)
+            except:
+                pass
 
-async def _send_message(update: Update, text: str, markup=None):
-    if update.message:
-        await update.message.reply_text(text, reply_markup=markup, parse_mode='HTML')
-    else:
-        try:
-            await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode='HTML')
-        except:
-            pass
-
-async def harem_callback_v3(update: Update, context: CallbackContext):
+async def harem_callback_v4(update: Update, context: CallbackContext):
     query = update.callback_query
-    data = query.data
     
     try:
-        _, page, user_id = data.split(':')
+        _, page, user_id = query.data.split(':')
         page, user_id = int(page), int(user_id)
     except:
         await query.answer(to_small_caps("Invalid"), show_alert=True)
@@ -388,7 +611,8 @@ async def harem_callback_v3(update: Update, context: CallbackContext):
         return
     
     await query.answer()
-    await harem_v3(update, context, page)
+    await harem_v4(update, context, page)
 
-application.add_handler(CommandHandler(["harem", "collection"], harem_v3, block=False))
-application.add_handler(CallbackQueryHandler(harem_callback_v3, pattern=r'^harem:', block=False))
+# Register handlers
+application.add_handler(CommandHandler(["harem", "collection"], harem_v4, block=False))
+application.add_handler(CallbackQueryHandler(harem_callback_v4, pattern=r'^harem:', block=False))

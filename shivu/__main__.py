@@ -5,7 +5,7 @@ import re
 import asyncio
 import logging
 from html import escape
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
@@ -57,7 +57,7 @@ MAX_SPAWN_ATTEMPTS = 10  # 🔥 NEW: Maximum attempts to find a spawnable charac
 # In-memory runtime state
 locks: Dict[str, asyncio.Lock] = {}
 message_counters: Dict[str, int] = {}
-sent_characters: Dict[int, List[str]] = {}
+sent_characters: Dict[int, Set[int]] = {}
 last_characters: Dict[int, Dict[str, Any]] = {}
 first_correct_guesses: Dict[int, int] = {}
 last_user: Dict[str, Dict[str, Any]] = {}
@@ -258,22 +258,23 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             LOGGER.exception("Failed to notify about empty collection")
         return
 
-    sent_characters.setdefault(chat_id, [])
+    sent_characters.setdefault(chat_id, set())
 
     if len(sent_characters[chat_id]) >= len(all_characters):
-        sent_characters[chat_id] = []
+        sent_characters[chat_id] = set()
 
     # Select from unsent characters
     choices = [c for c in all_characters if c.get('id') not in sent_characters[chat_id]]
     if not choices:
         choices = all_characters
-        sent_characters[chat_id] = []  # Reset sent list
+        sent_characters[chat_id] = set()  # Reset sent list
 
     # Select random character (already filtered for enabled rarity + not locked)
     character = random.choice(choices)
     LOGGER.info(f"✅ Character selected: ID={character.get('id')}, Rarity={character.get('rarity', 1)}")
 
-    sent_characters[chat_id].append(character.get('id'))
+    if character.get('id') is not None:
+        sent_characters[chat_id].add(character.get('id'))
     last_characters[chat_id] = character
     first_correct_guesses.pop(chat_id, None)
 
@@ -438,7 +439,11 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(to_small_caps("Please provide a character id: /fav <id>"))
         return
 
-    character_id = args[0]
+    try:
+        character_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text(to_small_caps("Character id must be a number."))
+        return
 
     try:
         user = await user_collection.find_one({'id': user_id})

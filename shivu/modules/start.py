@@ -78,34 +78,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     video_url = random.choice(VIDEO_URL)
     keyboard = get_keyboard()
-
-    if update.effective_chat.type == "private":
-        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
-
-ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
-
-        await context.bot.send_video(
-    chat_id=update.effective_chat.id,
-    video=video_url,
-            caption=caption,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
-
-    else:
-        caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
+    
+    caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
 ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
+    try:
+        # Try sending video with extended timeouts
         await context.bot.send_video(
-    chat_id=update.effective_chat.id,
-    video=video_url,
+            chat_id=update.effective_chat.id,
+            video=video_url,
             caption=caption,
             reply_markup=keyboard,
-            parse_mode='HTML'
+            parse_mode='HTML',
+            read_timeout=300,     # 5 minutes to read/download
+            write_timeout=300,    # 5 minutes to write/upload
+            connect_timeout=60    # 1 minute to connect
         )
-
-
+    except Exception as e:
+        print(f"Video send failed: {e}")
+        try:
+            # Fallback: Try sending as animation (better for GIFs/mp4)
+            await context.bot.send_animation(
+                chat_id=update.effective_chat.id,
+                animation=video_url,
+                caption=caption,
+                reply_markup=keyboard,
+                parse_mode='HTML',
+                read_timeout=60,
+                write_timeout=60
+            )
+        except Exception as e2:
+            print(f"Animation send failed: {e2}")
+            # Final fallback: Send text message only
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=caption,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
 
 
 async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,12 +1,23 @@
+# Core Mongo / Async
 motor==3.7.1
-aiohttp==3.13.3
-requests==2.32.5
-python-telegram-bot==22.6
 pymongo==4.16.0
+aiohttp==3.13.3
+
+# Telegram
+python-telegram-bot==22.6
+httpx==0.27.0          # PTB 22.x required (auto aa jata hai, but pin safe)
+tenacity==9.0.0       # retry logic (upload.py use kar raha hai)
+
+# Rate limit / Scheduler
 pyrate-limiter==4.0.2
 APScheduler==3.11.2
+tzlocal==5.2           # APScheduler dependency (future errors avoid)
+
+# Pyrogram stack
 Pyrogram==2.0.106
 TgCrypto==1.2.5
+
+# Utils
+requests==2.32.5
 python-dotenv==1.2.1
 cachetools==6.2.5
-tenacity==9.0.0

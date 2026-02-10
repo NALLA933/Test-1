@@ -3,7 +3,7 @@ aiohttp==3.13.3
 requests==2.32.5
 python-telegram-bot==22.6
 pymongo==4.16.0
-pyrate-limiter==4.1.0
+pyrate-limiter==4.0.2
 APScheduler==3.11.3
 Pyrogram==2.0.106
 TgCrypto==1.2.5

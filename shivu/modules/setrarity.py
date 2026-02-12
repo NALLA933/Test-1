@@ -8,36 +8,29 @@ from telegram.ext import CommandHandler, ContextTypes
 from shivu import application, db, collection, LOGGER
 from shivu import shivuu
 
-# Collections
 rarity_settings_collection = db.rarity_settings
 locked_characters_collection = db.locked_characters
 
-# Config se owner aur sudo data load karna
 try:
-    # Try importing Config class first (class-based config)
     from shivu.config import Config
     OWNER_ID = Config.OWNER_ID
     SUDO_USERS = Config.SUDO_USERS
-    LOGGER.info(f"✅ Config loaded: OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
+    LOGGER.info(f"Config loaded: OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
 except (ImportError, AttributeError) as e:
     try:
-        # Fallback: try direct import from shivu package
         from shivu.config import OWNER_ID, SUDO_USERS
-        LOGGER.info(f"✅ Config loaded (direct): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
+        LOGGER.info(f"Config loaded (direct): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
     except (ImportError, AttributeError) as e2:
         try:
-            # Fallback 2: try import from config module directly
             from config import Config
             OWNER_ID = Config.OWNER_ID
             SUDO_USERS = Config.SUDO_USERS
-            LOGGER.info(f"✅ Config loaded (fallback): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
+            LOGGER.info(f"Config loaded (fallback): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
         except (ImportError, AttributeError) as e3:
-            LOGGER.error(f"❌ Config import failed: {e3}")
-            LOGGER.error("Make sure config.py exists with OWNER_ID and SUDO_USERS")
+            LOGGER.error(f"Config import failed: {e3}")
             OWNER_ID = None
             SUDO_USERS = []
 
-# Small caps conversion function (same as main.py)
 def to_small_caps(text: str) -> str:
     mapping = {
         'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 
@@ -58,7 +51,6 @@ def to_small_caps(text: str) -> str:
             result.append(char)
     return ''.join(result)
 
-# Rarity display mapping (same as main.py)
 RARITY_MAP = {
     1: "⚪ ᴄᴏᴍᴍᴏɴ",
     2: "🔵 ʀᴀʀᴇ",
@@ -77,11 +69,27 @@ RARITY_MAP = {
     15: "🧬 ʜʏʙʀɪᴅ",
 }
 
-# Authorization check
+RARITY_TEXT_TO_NUMBER = {
+    "⚪ ᴄᴏᴍᴍᴏɴ": 1,
+    "🔵 ʀᴀʀᴇ": 2,
+    "🟡 ʟᴇɢᴇɴᴅᴀʀʏ": 3,
+    "💮 ꜱᴘᴇᴄɪᴀʟ": 4,
+    "👹 ᴀɴᴄɪᴇɴᴛ": 5,
+    "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ": 6,
+    "🔮 ᴇᴘɪᴄ": 7,
+    "🪐 ᴄᴏꜱᴍɪᴄ": 8,
+    "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ": 9,
+    "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ": 10,
+    "💝 ᴠᴀʟᴇɴᴛɪɴᴇ": 11,
+    "🌸 ꜱᴘʀɪɴɢ": 12,
+    "🏖️ ᴛʀᴏᴘɪᴄᴀʟ": 13,
+    "🍭 ᴋᴀᴡᴀɪɪ": 14,
+    "🧬 ʜʏʙʀɪᴅ": 15,
+}
+
 def is_authorized(user_id: int) -> bool:
-    """Check if user is owner or sudo"""
     if OWNER_ID is None:
-        LOGGER.warning("⚠️ OWNER_ID is None - authorization will fail")
+        LOGGER.warning("OWNER_ID is None - authorization will fail")
         return False
     
     is_owner = user_id == OWNER_ID
@@ -92,10 +100,8 @@ def is_authorized(user_id: int) -> bool:
     return is_owner or is_sudo
 
 async def get_chat_rarity_settings(chat_id: int) -> Dict[str, Any]:
-    """Get rarity settings for a specific chat"""
     settings = await rarity_settings_collection.find_one({'chat_id': chat_id})
     if not settings:
-        # Default: all rarities enabled
         settings = {
             'chat_id': chat_id,
             'disabled_rarities': []
@@ -104,60 +110,59 @@ async def get_chat_rarity_settings(chat_id: int) -> Dict[str, Any]:
     return settings
 
 async def is_character_locked(character_id: str) -> bool:
-    """Check if a character is locked"""
     locked = await locked_characters_collection.find_one({'character_id': character_id})
     return locked is not None
 
 async def is_rarity_enabled(chat_id: int, rarity: int) -> bool:
-    """Check if a rarity is enabled in a chat"""
     settings = await get_chat_rarity_settings(chat_id)
-    return rarity not in settings.get('disabled_rarities', [])
+    disabled = settings.get('disabled_rarities', [])
+    
+    if rarity in disabled:
+        return False
+    if str(rarity) in disabled:
+        return False
+    
+    return True
 
-# Command 1: set_on - Enable a rarity
 async def set_on(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Enable a rarity for spawning in the group"""
     if not update.effective_user or not update.effective_chat:
         return
     
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
-    # Authorization check
     if not is_authorized(user_id):
         await update.message.reply_text(
             to_small_caps("⛔ You are not authorized to use this command. Only owner and sudo users can use it.")
         )
         return
     
-    # Check if rarity number is provided
     if not context.args:
         rarity_list = "\n".join([f"{k}: {v}" for k, v in RARITY_MAP.items()])
         await update.message.reply_text(
-            to_small_caps(f"❌ Please provide a rarity number.\n\nUsage: /set_on <rarity_number>\n\nAvailable Rarities:\n{rarity_list}")
+            to_small_caps(f"Please provide a rarity number.\n\nUsage: /set_on <rarity_number>\n\nAvailable Rarities:\n{rarity_list}")
         )
         return
     
     try:
         rarity_num = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(to_small_caps("❌ Please provide a valid rarity number."))
+        await update.message.reply_text(to_small_caps("Please provide a valid rarity number."))
         return
     
-    # Validate rarity number
     if rarity_num not in RARITY_MAP:
         await update.message.reply_text(
-            to_small_caps(f"❌ Invalid rarity number. Please choose from 1-{len(RARITY_MAP)}.")
+            to_small_caps(f"Invalid rarity number. Please choose from 1-{len(RARITY_MAP)}.")
         )
         return
     
     try:
-        # Remove from disabled list
         settings = await get_chat_rarity_settings(chat_id)
         disabled_rarities = settings.get('disabled_rarities', [])
         
         if rarity_num not in disabled_rarities:
             await update.message.reply_text(
-                to_small_caps(f"✅ Rarity {RARITY_MAP[rarity_num]} is already enabled!")
+                to_small_caps(f"Rarity {RARITY_MAP[rarity_num]} is already enabled!")
             )
             return
         
@@ -170,59 +175,53 @@ async def set_on(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         
         await update.message.reply_text(
-            to_small_caps(f"✅ Rarity {RARITY_MAP[rarity_num]} has been enabled for spawning in this group!")
+            to_small_caps(f"Rarity {RARITY_MAP[rarity_num]} has been enabled for spawning in this group!")
         )
         LOGGER.info(f"User {user_id} enabled rarity {rarity_num} in chat {chat_id}")
         
     except Exception as e:
         LOGGER.exception(f"Error in set_on command: {e}")
-        await update.message.reply_text(to_small_caps("❌ An error occurred. Please try again."))
+        await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-# Command 2: set_off - Disable a rarity
 async def set_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Disable a rarity from spawning in the group"""
     if not update.effective_user or not update.effective_chat:
         return
     
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
-    # Authorization check
     if not is_authorized(user_id):
         await update.message.reply_text(
             to_small_caps("⛔ You are not authorized to use this command. Only owner and sudo users can use it.")
         )
         return
     
-    # Check if rarity number is provided
     if not context.args:
         rarity_list = "\n".join([f"{k}: {v}" for k, v in RARITY_MAP.items()])
         await update.message.reply_text(
-            to_small_caps(f"❌ Please provide a rarity number.\n\nUsage: /set_off <rarity_number>\n\nAvailable Rarities:\n{rarity_list}")
+            to_small_caps(f"Please provide a rarity number.\n\nUsage: /set_off <rarity_number>\n\nAvailable Rarities:\n{rarity_list}")
         )
         return
     
     try:
         rarity_num = int(context.args[0])
     except ValueError:
-        await update.message.reply_text(to_small_caps("❌ Please provide a valid rarity number."))
+        await update.message.reply_text(to_small_caps("Please provide a valid rarity number."))
         return
     
-    # Validate rarity number
     if rarity_num not in RARITY_MAP:
         await update.message.reply_text(
-            to_small_caps(f"❌ Invalid rarity number. Please choose from 1-{len(RARITY_MAP)}.")
+            to_small_caps(f"Invalid rarity number. Please choose from 1-{len(RARITY_MAP)}.")
         )
         return
     
     try:
-        # Add to disabled list
         settings = await get_chat_rarity_settings(chat_id)
         disabled_rarities = settings.get('disabled_rarities', [])
         
         if rarity_num in disabled_rarities:
             await update.message.reply_text(
-                to_small_caps(f"✅ Rarity {RARITY_MAP[rarity_num]} is already disabled!")
+                to_small_caps(f"Rarity {RARITY_MAP[rarity_num]} is already disabled!")
             )
             return
         
@@ -235,58 +234,49 @@ async def set_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         
         await update.message.reply_text(
-            to_small_caps(f"🚫 Rarity {RARITY_MAP[rarity_num]} has been disabled for spawning in this group!")
+            to_small_caps(f"Rarity {RARITY_MAP[rarity_num]} has been disabled for spawning in this group!")
         )
         LOGGER.info(f"User {user_id} disabled rarity {rarity_num} in chat {chat_id}")
         
     except Exception as e:
         LOGGER.exception(f"Error in set_off command: {e}")
-        await update.message.reply_text(to_small_caps("❌ An error occurred. Please try again."))
+        await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-# Command 3: lock - Lock a character from spawning
 async def lock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Lock a character from spawning in all groups"""
     if not update.effective_user:
         return
     
     user_id = update.effective_user.id
     
-    # Authorization check
     if not is_authorized(user_id):
         await update.message.reply_text(
             to_small_caps("⛔ You are not authorized to use this command. Only owner and sudo users can use it.")
         )
         return
     
-    # Check if character ID is provided
     if not context.args:
         await update.message.reply_text(
-            to_small_caps("❌ Please provide a character ID.\n\nUsage: /lock <character_id> <reason>")
+            to_small_caps("Please provide a character ID.\n\nUsage: /lock <character_id> <reason>")
         )
         return
     
     character_id = context.args[0]
-    
-    # Get lock reason (optional)
     reason = " ".join(context.args[1:]) if len(context.args) > 1 else "No reason provided"
     
     try:
-        # Check if character exists
         character = await collection.find_one({'id': character_id})
         if not character:
             await update.message.reply_text(
-                to_small_caps(f"❌ Character with ID {character_id} not found in database.")
+                to_small_caps(f"Character with ID {character_id} not found in database.")
             )
             return
         
-        # Check if already locked
         if await is_character_locked(character_id):
             await update.message.reply_text(
-                to_small_caps(f"🔒 Character {escape(character.get('name', 'Unknown'))} is already locked!")
+                to_small_caps(f"Character {escape(character.get('name', 'Unknown'))} is already locked!")
             )
             return
         
-        # Lock the character
         lock_data = {
             'character_id': character_id,
             'character_name': character.get('name', 'Unknown'),
@@ -300,78 +290,69 @@ async def lock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
         await update.message.reply_text(
             to_small_caps(
-                f"🔒 Character locked successfully!\n\n"
-                f"👤 Name: {escape(character.get('name', 'Unknown'))}\n"
-                f"🆔 ID: {character_id}\n"
-                f"📝 Reason: {escape(reason)}\n"
-                f"🔐 Locked by: {escape(update.effective_user.first_name)}"
+                f"Character locked successfully!\n\n"
+                f"Name: {escape(character.get('name', 'Unknown'))}\n"
+                f"ID: {character_id}\n"
+                f"Reason: {escape(reason)}\n"
+                f"Locked by: {escape(update.effective_user.first_name)}"
             )
         )
         LOGGER.info(f"User {user_id} locked character {character_id}")
         
     except Exception as e:
         LOGGER.exception(f"Error in lock command: {e}")
-        await update.message.reply_text(to_small_caps("❌ An error occurred. Please try again."))
+        await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-# Command 4: unlock - Unlock a character
 async def unlock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Unlock a character to allow spawning again"""
     if not update.effective_user:
         return
     
     user_id = update.effective_user.id
     
-    # Authorization check
     if not is_authorized(user_id):
         await update.message.reply_text(
             to_small_caps("⛔ You are not authorized to use this command. Only owner and sudo users can use it.")
         )
         return
     
-    # Check if character ID is provided
     if not context.args:
         await update.message.reply_text(
-            to_small_caps("❌ Please provide a character ID.\n\nUsage: /unlock <character_id>")
+            to_small_caps("Please provide a character ID.\n\nUsage: /unlock <character_id>")
         )
         return
     
     character_id = context.args[0]
     
     try:
-        # Check if character is locked
         locked_char = await locked_characters_collection.find_one({'character_id': character_id})
         if not locked_char:
             await update.message.reply_text(
-                to_small_caps(f"❌ Character with ID {character_id} is not locked.")
+                to_small_caps(f"Character with ID {character_id} is not locked.")
             )
             return
         
-        # Unlock the character
         await locked_characters_collection.delete_one({'character_id': character_id})
         
         await update.message.reply_text(
             to_small_caps(
-                f"🔓 Character unlocked successfully!\n\n"
-                f"👤 Name: {escape(locked_char.get('character_name', 'Unknown'))}\n"
-                f"🆔 ID: {character_id}\n"
-                f"✅ The character can now spawn in groups!"
+                f"Character unlocked successfully!\n\n"
+                f"Name: {escape(locked_char.get('character_name', 'Unknown'))}\n"
+                f"ID: {character_id}\n"
+                f"The character can now spawn in groups!"
             )
         )
         LOGGER.info(f"User {user_id} unlocked character {character_id}")
         
     except Exception as e:
         LOGGER.exception(f"Error in unlock command: {e}")
-        await update.message.reply_text(to_small_caps("❌ An error occurred. Please try again."))
+        await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-# Command 5: locklist - Show all locked characters
 async def locklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show list of all locked characters"""
     if not update.effective_user:
         return
     
     user_id = update.effective_user.id
     
-    # Authorization check
     if not is_authorized(user_id):
         await update.message.reply_text(
             to_small_caps("⛔ You are not authorized to use this command. Only owner and sudo users can use it.")
@@ -379,31 +360,27 @@ async def locklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     
     try:
-        # Get all locked characters
         locked_chars = await locked_characters_collection.find().to_list(length=None)
         
         if not locked_chars:
             await update.message.reply_text(
-                to_small_caps("✅ No characters are currently locked!")
+                to_small_caps("No characters are currently locked!")
             )
             return
         
-        # Build the list message
-        message = to_small_caps("🔒 Locked Characters List:\n\n")
+        message = to_small_caps("Locked Characters List:\n\n")
         
         for idx, char in enumerate(locked_chars, 1):
             message += to_small_caps(
-                f"{idx}. 👤 Name: {escape(char.get('character_name', 'Unknown'))}\n"
-                f"   🆔 ID: {char.get('character_id', 'Unknown')}\n"
-                f"   📝 Reason: {escape(char.get('reason', 'No reason'))}\n"
-                f"   🔐 Locked by: {escape(char.get('locked_by_name', 'Unknown'))}\n\n"
+                f"{idx}. Name: {escape(char.get('character_name', 'Unknown'))}\n"
+                f"   ID: {char.get('character_id', 'Unknown')}\n"
+                f"   Reason: {escape(char.get('reason', 'No reason'))}\n"
+                f"   Locked by: {escape(char.get('locked_by_name', 'Unknown'))}\n\n"
             )
         
         message += to_small_caps(f"Total locked characters: {len(locked_chars)}")
         
-        # Send message (split if too long)
         if len(message) > 4000:
-            # Split message
             for i in range(0, len(message), 4000):
                 await update.message.reply_text(message[i:i+4000])
         else:
@@ -413,41 +390,35 @@ async def locklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
     except Exception as e:
         LOGGER.exception(f"Error in locklist command: {e}")
-        await update.message.reply_text(to_small_caps("❌ An error occurred. Please try again."))
+        await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-# Helper function to check spawn eligibility (to be used in main.py)
 async def can_character_spawn(character_id: str, rarity: int, chat_id: int) -> tuple[bool, Optional[str]]:
-    """
-    Check if a character can spawn in a chat
-    Returns: (can_spawn: bool, reason: Optional[str])
-    """
-    # Check if character is locked
     if await is_character_locked(character_id):
         return False, "Character is locked"
     
-    # Check if rarity is enabled
     if not await is_rarity_enabled(chat_id, rarity):
         return False, f"Rarity {RARITY_MAP.get(rarity, rarity)} is disabled in this chat"
     
     return True, None
 
 async def get_disabled_rarities(chat_id: int) -> List[int]:
-    """
-    Get list of disabled rarities for a chat
-    Returns: List of disabled rarity numbers
-    """
     try:
         settings = await get_chat_rarity_settings(chat_id)
-        return settings.get('disabled_rarities', [])
+        disabled = settings.get('disabled_rarities', [])
+        
+        normalized = []
+        for r in disabled:
+            if isinstance(r, int):
+                normalized.append(r)
+            elif isinstance(r, str) and r.isdigit():
+                normalized.append(int(r))
+        
+        return normalized
     except Exception as e:
         LOGGER.exception(f"Error getting disabled rarities: {e}")
         return []
 
 async def get_locked_character_ids() -> List[str]:
-    """
-    Get list of all locked character IDs
-    Returns: List of character IDs that are locked
-    """
     try:
         locked_chars = await locked_characters_collection.find({}).to_list(length=None)
         return [char.get('character_id') for char in locked_chars if char.get('character_id')]
@@ -456,10 +427,9 @@ async def get_locked_character_ids() -> List[str]:
         return []
 
 def setup_handlers():
-    """Setup command handlers - to be called from main.py"""
     application.add_handler(CommandHandler("set_on", set_on, block=False))
     application.add_handler(CommandHandler("set_off", set_off, block=False))
     application.add_handler(CommandHandler("lock", lock, block=False))
     application.add_handler(CommandHandler("unlock", unlock, block=False))
     application.add_handler(CommandHandler("locklist", locklist, block=False))
-    LOGGER.info("ʀᴀʀɪᴛʏ ᴄᴏᴍᴍᴀɴᴅs ʀᴇᴀᴅʏ!")
+    LOGGER.info("Rarity commands ready!")

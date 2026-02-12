@@ -22,14 +22,11 @@ from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
 from shivu.modules import ALL_MODULES
 from shivu.modules.leaderboard import update_daily_user_guess, update_daily_group_guess
 
-# Import all modules declared in ALL_MODULES (same as original behavior)
 for module_name in ALL_MODULES:
     importlib.import_module("shivu.modules." + module_name)
 
-# 🔥 NEW: Import setrarity module for rarity and character lock management
 import shivu.modules.setrarity as setrarity
 
-# Rarity display mapping (presentation layer only - DB still stores integers)
 RARITY_MAP = {
     1: "⚪ ᴄᴏᴍᴍᴏɴ",
     2: "🔵 ʀᴀʀᴇ",
@@ -48,13 +45,29 @@ RARITY_MAP = {
     15: "🧬 ʜʏʙʀɪᴅ",
 }
 
-# Constants
+RARITY_TEXT_TO_NUMBER = {
+    "⚪ ᴄᴏᴍᴍᴏɴ": 1,
+    "🔵 ʀᴀʀᴇ": 2,
+    "🟡 ʟᴇɢᴇɴᴅᴀʀʏ": 3,
+    "💮 ꜱᴘᴇᴄɪᴀʟ": 4,
+    "👹 ᴀɴᴄɪᴇɴᴛ": 5,
+    "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ": 6,
+    "🔮 ᴇᴘɪᴄ": 7,
+    "🪐 ᴄᴏꜱᴍɪᴄ": 8,
+    "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ": 9,
+    "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ": 10,
+    "💝 ᴠᴀʟᴇɴᴛɪɴᴇ": 11,
+    "🌸 ꜱᴘʀɪɴɢ": 12,
+    "🏖️ ᴛʀᴏᴘɪᴄᴀʟ": 13,
+    "🍭 ᴋᴀᴡᴀɪɪ": 14,
+    "🧬 ʜʏʙʀɪᴅ": 15,
+}
+
 SPAM_REPEAT_THRESHOLD = 10
 SPAM_IGNORE_SECONDS = 10 * 60
 DEFAULT_MESSAGE_FREQUENCY = 100
-MAX_SPAWN_ATTEMPTS = 10  # 🔥 NEW: Maximum attempts to find a spawnable character
+MAX_SPAWN_ATTEMPTS = 10
 
-# In-memory runtime state
 locks: Dict[str, asyncio.Lock] = {}
 message_counters: Dict[str, int] = {}
 sent_characters: Dict[int, Set[int]] = {}
@@ -89,8 +102,16 @@ def to_small_caps(text: str) -> str:
 
 def get_rarity_display(character: Dict[str, Any]) -> str:
     rarity_raw = character.get('rarity', 'Unknown')
-    rarity_text = RARITY_MAP.get(rarity_raw, str(rarity_raw))
-    return str(rarity_text)
+    
+    if isinstance(rarity_raw, int):
+        return RARITY_MAP.get(rarity_raw, str(rarity_raw))
+    elif isinstance(rarity_raw, str):
+        if rarity_raw.isdigit():
+            return RARITY_MAP.get(int(rarity_raw), rarity_raw)
+        else:
+            return rarity_raw
+    
+    return str(rarity_raw)
 
 async def _get_chat_lock(chat_id: str) -> asyncio.Lock:
     if chat_id not in locks:
@@ -189,7 +210,7 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     return
                 try:
                     await update.message.reply_text(
-                        to_small_caps(f"⚠️ Don't spam, {escape(update.effective_user.first_name)}.\nYour messages will be ignored for {SPAM_IGNORE_SECONDS // 60} minutes.")
+                        to_small_caps(f"Don't spam, {escape(update.effective_user.first_name)}.\nYour messages will be ignored for {SPAM_IGNORE_SECONDS // 60} minutes.")
                     )
                 except Exception:
                     LOGGER.exception("Failed to send spam warning")
@@ -208,14 +229,12 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
 
-    # 🔥 NEW: Get chat's disabled rarities FIRST
     try:
         disabled_rarities = await setrarity.get_disabled_rarities(chat_id)
     except Exception as e:
         LOGGER.exception(f"Failed to get disabled rarities: {e}")
         disabled_rarities = []
 
-    # 🔥 NEW: Get locked character IDs
     try:
         locked_character_ids = await setrarity.get_locked_character_ids()
     except Exception as e:
@@ -223,27 +242,38 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         locked_character_ids = []
 
     try:
-        # 🔥 OPTIMIZED: Fetch only characters with ENABLED rarities and NOT locked
         query = {}
 
-        # Exclude disabled rarities
         if disabled_rarities:
-            query['rarity'] = {'$nin': disabled_rarities}
+            disabled_ints = [int(r) for r in disabled_rarities]
+            disabled_strs = [str(r) for r in disabled_rarities]
+            all_disabled = list(set(disabled_ints + disabled_strs))
+            
+            text_rarities = []
+            for r in disabled_ints:
+                text_rarities.append(RARITY_MAP.get(r, str(r)))
+            
+            all_disabled = list(set(all_disabled + text_rarities))
+            
+            query['rarity'] = {'$nin': all_disabled}
 
-        # Exclude locked characters
         if locked_character_ids:
-            if 'id' in query:
-                query['$and'] = [
-                    {'id': {'$nin': locked_character_ids}},
-                    query
-                ]
+            if 'rarity' in query:
+                query = {
+                    '$and': [
+                        {'id': {'$nin': locked_character_ids}},
+                        query
+                    ]
+                }
             else:
                 query['id'] = {'$nin': locked_character_ids}
 
+        LOGGER.info(f"Query: {query}")
+        
         all_characters = await collection.find(query).to_list(length=None)
 
-        if disabled_rarities or locked_character_ids:
-            LOGGER.info(f"📊 Filtered characters: disabled_rarities={disabled_rarities}, locked_chars={len(locked_character_ids)}, available={len(all_characters)}")
+        LOGGER.info(f"Found {len(all_characters)} characters after filtering")
+        
     except Exception:
         LOGGER.exception("Failed to fetch characters from DB")
         all_characters = []
@@ -263,15 +293,13 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if len(sent_characters[chat_id]) >= len(all_characters):
         sent_characters[chat_id] = set()
 
-    # Select from unsent characters
     choices = [c for c in all_characters if c.get('id') not in sent_characters[chat_id]]
     if not choices:
         choices = all_characters
-        sent_characters[chat_id] = set()  # Reset sent list
+        sent_characters[chat_id] = set()
 
-    # Select random character (already filtered for enabled rarity + not locked)
     character = random.choice(choices)
-    LOGGER.info(f"✅ Character selected: ID={character.get('id')}, Rarity={character.get('rarity', 1)}")
+    LOGGER.info(f"Selected: ID={character.get('id')}, Rarity={character.get('rarity')}")
 
     if character.get('id') is not None:
         sent_characters[chat_id].add(character.get('id'))
@@ -279,8 +307,7 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     first_correct_guesses.pop(chat_id, None)
 
     rarity_display = get_rarity_display(character)
-    # Single line caption in normal font (no small caps)
-    caption = f"✨ ᴀ ɴᴇᴡ {escape(rarity_display)} ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴘᴘᴇᴀʀᴇᴅ! ɢᴜᴇꜱꜱ ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴀᴍᴇ ᴡɪᴛʜ /guess ᴛᴏ ᴀᴅᴅ ᴛʜᴇᴍ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ."
+    caption = f"A new {escape(rarity_display)} character appeared! Guess the character name with /guess to add them to your harem."
 
     try:
         await context.bot.send_photo(
@@ -306,7 +333,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if chat_id in first_correct_guesses:
-        await update.message.reply_text(to_small_caps("❌ Already guessed by someone. Try next time."))
+        await update.message.reply_text(to_small_caps("Already guessed by someone. Try next time."))
         return
 
     guess_text = ' '.join(context.args).strip().lower() if context.args else ''
@@ -327,7 +354,6 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         character_to_store = character.copy()
         character_to_store.pop('_id', None)
 
-        # 🔥 FIXED: Update balance in user_collection directly
         try:
             await _update_user_info(user_id, update.effective_user)
 
@@ -336,9 +362,9 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 {'$inc': {'balance': 100}},
                 upsert=True
             )
-            LOGGER.info(f"✅ Added 100 coins to user {user_id} balance")
+            LOGGER.info(f"Added 100 coins to user {user_id}")
         except Exception as e:
-            LOGGER.exception(f"❌ Failed to update user balance: {e}")
+            LOGGER.exception(f"Failed to update user balance: {e}")
 
         try:
             await user_collection.update_one(
@@ -366,7 +392,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 first_name=safe_first_name
             )
         except Exception as e:
-            LOGGER.exception(f"❌ Failed to update daily user guess: {e}")
+            LOGGER.exception(f"Failed to update daily user guess: {e}")
 
         if update.effective_chat.type in ['group', 'supergroup']:
             try:
@@ -377,10 +403,10 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     group_name=safe_group_name
                 )
             except Exception as e:
-                LOGGER.exception(f"❌ Failed to update daily group guess: {e}")
+                LOGGER.exception(f"Failed to update daily group guess: {e}")
 
         coin_alert_msg = await update.message.reply_text(
-            to_small_caps("✨ ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎉  ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ ɪᴛ ʀɪɢʜᴛ! ᴀꜱ ᴀ ʀᴇᴡᴀʀᴅ, 100 ᴄᴏɪɴꜱ ʜᴀᴠᴇ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ.."),
+            to_small_caps("Congratulations! You guessed it right! As a reward, 100 coins have been added to your balance."),
             parse_mode='HTML'
         )
 
@@ -396,16 +422,16 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         safe_rarity = escape(rarity_display)
         character_id = escape(str(character.get('id', 'Unknown')))
 
-        reveal_message = to_small_caps(f"✨ ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ 🎊 {safe_name} ᴛʜɪꜱ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ.\n\n"
-                                       f"👤 ɴᴀᴍᴇ: {character_name}\n"
-                                       f"🎬 ᴀɴɪᴍᴇ: {anime_name}\n"
-                                       f"✨ ʀᴀʀɪᴛʏ: {safe_rarity}\n"
-                                       f"🆔 ɪᴅ: {character_id}\n\n"
-                                       f"✅ ꜱᴜᴄᴄᴇꜱꜱ ꜰᴜʟʟ ᴀᴅᴅ ʜᴀʀᴇᴍ.")
+        reveal_message = to_small_caps(f"Congratulations {safe_name} this character has been added to your.\n\n"
+                                       f"Name: {character_name}\n"
+                                       f"Anime: {anime_name}\n"
+                                       f"Rarity: {safe_rarity}\n"
+                                       f"ID: {character_id}\n\n"
+                                       f"Success full add harem.")
 
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton(
-                "ꜱᴇᴇ ʜᴀʀᴇᴍ",
+                "See harem",
                 switch_inline_query_current_chat=str(user_id)
             )]]
         )
@@ -420,13 +446,13 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             LOGGER.exception("Failed to send character reveal reply")
             try:
                 await update.message.reply_text(
-                    to_small_caps(f"You guessed {character.get('name', 'a character')} ✅")
+                    to_small_caps(f"You guessed {character.get('name', 'a character')}")
                 )
             except Exception:
                 LOGGER.exception("Failed fallback reply")
     else:
         await update.message.reply_text(
-            to_small_caps("Please write the correct character name. ❌")
+            to_small_caps("Please write the correct character name.")
         )
 
 async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -468,10 +494,8 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(to_small_caps("Failed to mark favorite. Please try again later."))
 
 def main() -> None:
-    # 🔥 NEW: Setup setrarity command handlers
     setrarity.setup_handlers()
 
-    # Existing handlers
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(CommandHandler("fav", fav, block=False))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
@@ -479,5 +503,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     shivuu.start()
-    LOGGER.info("Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ɪs Bᴀᴄᴋ Bᴀʙᴇ")
+    LOGGER.info("Senpai Waifu Bot is Back")
     main()

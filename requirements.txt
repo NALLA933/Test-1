@@ -12,3 +12,4 @@ TgCrypto==1.2.5
 requests==2.32.5
 python-dotenv==1.2.1
 cachetools==6.2.5
+pytz

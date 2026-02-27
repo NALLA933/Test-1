@@ -84,29 +84,8 @@ _escape_markdown_re = re.compile(r'([\\*_`~>#+=\\-|{}.!])')
 def escape_markdown(text: str) -> str:
     return _escape_markdown_re.sub(r'\\\1', text or '')
 
-def to_small_caps(text: str) -> str:
-    mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 
-        'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 
-        's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ',
-        'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ',
-        'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-        '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7', '8': '8', '9': '9',
-        ' ': ' ', '!': '!', ':': ':', '.': '.', ',': ',', "'": "'", '"': '"', '?': '?', 
-        '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '-': '-', '_': '_'
-    }
-    result = []
-    for char in text:
-        if char in mapping:
-            result.append(mapping[char])
-        else:
-            result.append(char)
-    return ''.join(result)
-
 def get_rarity_display(character: Dict[str, Any]) -> str:
     rarity_raw = character.get('rarity', 'Unknown')
-    
     if isinstance(rarity_raw, int):
         return RARITY_MAP.get(rarity_raw, str(rarity_raw))
     elif isinstance(rarity_raw, str):
@@ -114,7 +93,6 @@ def get_rarity_display(character: Dict[str, Any]) -> str:
             return RARITY_MAP.get(int(rarity_raw), rarity_raw)
         else:
             return rarity_raw
-    
     return str(rarity_raw)
 
 async def _get_chat_lock(chat_id: str) -> asyncio.Lock:
@@ -157,8 +135,12 @@ async def _update_group_user_totals(user_id: int, chat_id: int, tg_user: Update.
             if tg_user.first_name and tg_user.first_name != existing.get('first_name'):
                 update_fields['first_name'] = tg_user.first_name
             if update_fields:
-                await group_user_totals_collection.update_one({'user_id': user_id, 'group_id': chat_id}, {'$set': update_fields})
-            await group_user_totals_collection.update_one({'user_id': user_id, 'group_id': chat_id}, {'$inc': {'count': 1}})
+                await group_user_totals_collection.update_one(
+                    {'user_id': user_id, 'group_id': chat_id}, {'$set': update_fields}
+                )
+            await group_user_totals_collection.update_one(
+                {'user_id': user_id, 'group_id': chat_id}, {'$inc': {'count': 1}}
+            )
         else:
             await group_user_totals_collection.insert_one({
                 'user_id': user_id,
@@ -178,8 +160,12 @@ async def _update_top_global_groups(chat_id: int, chat_title: Optional[str]) -> 
             if chat_title and chat_title != group_info.get('group_name'):
                 update_fields['group_name'] = chat_title
             if update_fields:
-                await top_global_groups_collection.update_one({'group_id': chat_id}, {'$set': update_fields})
-            await top_global_groups_collection.update_one({'group_id': chat_id}, {'$inc': {'count': 1}})
+                await top_global_groups_collection.update_one(
+                    {'group_id': chat_id}, {'$set': update_fields}
+                )
+            await top_global_groups_collection.update_one(
+                {'group_id': chat_id}, {'$inc': {'count': 1}}
+            )
         else:
             await top_global_groups_collection.insert_one({
                 'group_id': chat_id,
@@ -200,7 +186,10 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     async with lock:
         try:
             chat_frequency = await user_totals_collection.find_one({'chat_id': chat_id_str})
-            message_frequency = chat_frequency.get('message_frequency', DEFAULT_MESSAGE_FREQUENCY) if chat_frequency else DEFAULT_MESSAGE_FREQUENCY
+            message_frequency = (
+                chat_frequency.get('message_frequency', DEFAULT_MESSAGE_FREQUENCY)
+                if chat_frequency else DEFAULT_MESSAGE_FREQUENCY
+            )
         except Exception:
             message_frequency = DEFAULT_MESSAGE_FREQUENCY
             LOGGER.exception("Error fetching message_frequency; using default")
@@ -214,7 +203,8 @@ async def message_counter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     return
                 try:
                     await update.message.reply_text(
-                        to_small_caps(f"Don't spam, {escape(update.effective_user.first_name)}.\nYour messages will be ignored for {SPAM_IGNORE_SECONDS // 60} minutes.")
+                        f"ᴅᴏɴ'ᴛ ꜱᴘᴀᴍ, {escape(update.effective_user.first_name)}.\n"
+                        f"ʏᴏᴜʀ ᴍᴇꜱꜱᴀɢᴇꜱ ᴡɪʟʟ ʙᴇ ɪɢɴᴏʀᴇᴅ ꜰᴏʀ {SPAM_IGNORE_SECONDS // 60} ᴍɪɴᴜᴛᴇꜱ."
                     )
                 except Exception:
                     LOGGER.exception("Failed to send spam warning")
@@ -252,13 +242,12 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             disabled_ints = [int(r) for r in disabled_rarities]
             disabled_strs = [str(r) for r in disabled_rarities]
             all_disabled = list(set(disabled_ints + disabled_strs))
-            
+
             text_rarities = []
             for r in disabled_ints:
                 text_rarities.append(RARITY_MAP.get(r, str(r)))
-            
+
             all_disabled = list(set(all_disabled + text_rarities))
-            
             query['rarity'] = {'$nin': all_disabled}
 
         if locked_character_ids:
@@ -273,11 +262,9 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 query['id'] = {'$nin': locked_character_ids}
 
         LOGGER.info(f"Query: {query}")
-        
         all_characters = await collection.find(query).to_list(length=None)
-
         LOGGER.info(f"Found {len(all_characters)} characters after filtering")
-        
+
     except Exception:
         LOGGER.exception("Failed to fetch characters from DB")
         all_characters = []
@@ -285,8 +272,8 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not all_characters:
         try:
             await context.bot.send_message(
-                chat_id=chat_id, 
-                text=to_small_caps("No characters available right now. All rarities may be disabled or characters locked.")
+                chat_id=chat_id,
+                text="ɴᴏ ᴄʜᴀʀᴀᴄᴛᴇʀꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ʀɪɢʜᴛ ɴᴏᴡ. ᴀʟʟ ʀᴀʀɪᴛɪᴇꜱ ᴍᴀʏ ʙᴇ ᴅɪꜱᴀʙʟᴇᴅ ᴏʀ ᴄʜᴀʀᴀᴄᴛᴇʀꜱ ʟᴏᴄᴋᴇᴅ."
             )
         except Exception:
             LOGGER.exception("Failed to notify about empty collection")
@@ -311,7 +298,10 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     first_correct_guesses.pop(chat_id, None)
 
     rarity_display = get_rarity_display(character)
-    caption = f"A new {escape(rarity_display)} character appeared! Guess the character name with /guess to add them to your harem."
+    caption = (
+        f"ᴀ ɴᴇᴡ {escape(rarity_display)} ᴄʜᴀʀᴀᴄᴛᴇʀ ᴀᴘᴘᴇᴀʀᴇᴅ! "
+        f"ɢᴜᴇꜱꜱ ᴛʜᴇ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴀᴍᴇ ᴡɪᴛʜ /guess ᴛᴏ ᴀᴅᴅ ᴛʜᴇᴍ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ."
+    )
 
     try:
         await context.bot.send_photo(
@@ -337,16 +327,16 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if chat_id in first_correct_guesses:
-        await update.message.reply_text(to_small_caps("Already guessed by someone. Try next time."))
+        await update.message.reply_text("ᴀʟʀᴇᴀᴅʏ ɢᴜᴇꜱꜱᴇᴅ ʙʏ ꜱᴏᴍᴇᴏɴᴇ. ᴛʀʏ ɴᴇxᴛ ᴛɪᴍᴇ.")
         return
 
     guess_text = ' '.join(context.args).strip().lower() if context.args else ''
     if not guess_text:
-        await update.message.reply_text("Please provide a guess, e.g. /guess Alice")
+        await update.message.reply_text("ᴘʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ɢᴜᴇꜱꜱ, ᴇ.ɢ. /guess Alice")
         return
 
     if "()" in guess_text or "&" in guess_text:
-        await update.message.reply_text(to_small_caps("You can't use these characters in your guess."))
+        await update.message.reply_text("ʏᴏᴜ ᴄᴀɴ'ᴛ ᴜꜱᴇ ᴛʜᴇꜱᴇ ᴄʜᴀʀᴀᴄᴛᴇʀꜱ ɪɴ ʏᴏᴜʀ ɢᴜᴇꜱꜱ.")
         return
 
     character = last_characters.get(chat_id)
@@ -372,12 +362,14 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         try:
             await user_collection.update_one(
-                {'id': user_id}, 
+                {'id': user_id},
                 {'$push': {'characters': character_to_store}}
             )
         except Exception as e:
             LOGGER.exception(f"Failed updating user character collection: {e}")
-            await update.message.reply_text(to_small_caps("Failed to add character to your collection. Please try again."))
+            await update.message.reply_text(
+                "ꜰᴀɪʟᴇᴅ ᴛᴏ ᴀᴅᴅ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ. ᴘʟᴇᴀꜱᴇ ᴛʀʏ ᴀɢᴀɪɴ."
+            )
             return
 
         try:
@@ -401,7 +393,6 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_chat.type in ['group', 'supergroup']:
             try:
                 safe_group_name = update.effective_chat.title if update.effective_chat.title else "Unknown Group"
-
                 await update_daily_group_guess(
                     group_id=chat_id,
                     group_name=safe_group_name
@@ -410,7 +401,8 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 LOGGER.exception(f"Failed to update daily group guess: {e}")
 
         coin_alert_msg = await update.message.reply_text(
-            to_small_caps("Congratulations! You guessed it right! As a reward, 100 coins have been added to your balance."),
+            "ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ! ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ ɪᴛ ʀɪɢʜᴛ! "
+            "ᴀꜱ ᴀ ʀᴇᴡᴀʀᴅ, 100 ᴄᴏɪɴꜱ ʜᴀᴠᴇ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʙᴀʟᴀɴᴄᴇ.",
             parse_mode='HTML'
         )
 
@@ -426,37 +418,39 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         safe_rarity = escape(rarity_display)
         character_id = escape(str(character.get('id', 'Unknown')))
 
-        reveal_message = to_small_caps(f"Congratulations {safe_name} this character has been added to your.\n\n"
-                                       f"Name: {character_name}\n"
-                                       f"Anime: {anime_name}\n"
-                                       f"Rarity: {safe_rarity}\n"
-                                       f"ID: {character_id}\n\n"
-                                       f"Success full add harem.")
+        reveal_message = (
+            f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ {safe_name} ᴛʜɪꜱ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ.\n\n"
+            f"ɴᴀᴍᴇ: {character_name}\n"
+            f"ᴀɴɪᴍᴇ: {anime_name}\n"
+            f"ʀᴀʀɪᴛʏ: {safe_rarity}\n"
+            f"ɪᴅ: {character_id}\n\n"
+            f"ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴀᴅᴅᴇᴅ ᴛᴏ ʜᴀʀᴇᴍ."
+        )
 
         keyboard = InlineKeyboardMarkup(
             [[InlineKeyboardButton(
-                "See harem",
+                "ꜱᴇᴇ ʜᴀʀᴇᴍ",
                 switch_inline_query_current_chat=str(user_id)
             )]]
         )
 
         try:
             await update.message.reply_text(
-                reveal_message, 
-                reply_markup=keyboard, 
+                reveal_message,
+                reply_markup=keyboard,
                 parse_mode='HTML'
             )
         except Exception:
             LOGGER.exception("Failed to send character reveal reply")
             try:
                 await update.message.reply_text(
-                    to_small_caps(f"You guessed {character.get('name', 'a character')}")
+                    f"ʏᴏᴜ ɢᴜᴇꜱꜱᴇᴅ {character.get('name', 'ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ')}"
                 )
             except Exception:
                 LOGGER.exception("Failed fallback reply")
     else:
         await update.message.reply_text(
-            to_small_caps("Please write the correct character name.")
+            "ᴘʟᴇᴀꜱᴇ ᴡʀɪᴛᴇ ᴛʜᴇ ᴄᴏʀʀᴇᴄᴛ ᴄʜᴀʀᴀᴄᴛᴇʀ ɴᴀᴍᴇ."
         )
 
 async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -466,13 +460,13 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     args = context.args or []
     if not args:
-        await update.message.reply_text(to_small_caps("Please provide a character id: /fav <id>"))
+        await update.message.reply_text("ᴘʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ɪᴅ: /fav <ɪᴅ>")
         return
 
     try:
         character_id = int(args[0])
     except ValueError:
-        await update.message.reply_text(to_small_caps("Character id must be a number."))
+        await update.message.reply_text("ᴄʜᴀʀᴀᴄᴛᴇʀ ɪᴅ ᴍᴜꜱᴛ ʙᴇ ᴀ ɴᴜᴍʙᴇʀ.")
         return
 
     try:
@@ -482,27 +476,30 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = None
 
     if not user or not user.get('characters'):
-        await update.message.reply_text(to_small_caps("You have not collected any characters yet."))
+        await update.message.reply_text("ʏᴏᴜ ʜᴀᴠᴇ ɴᴏᴛ ᴄᴏʟʟᴇᴄᴛᴇᴅ ᴀɴʏ ᴄʜᴀʀᴀᴄᴛᴇʀꜱ ʏᴇᴛ.")
         return
 
     character = next((c for c in user['characters'] if c.get('id') == character_id), None)
     if not character:
-        await update.message.reply_text(to_small_caps("That character is not in your collection."))
+        await update.message.reply_text("ᴛʜᴀᴛ ᴄʜᴀʀᴀᴄᴛᴇʀ ɪꜱ ɴᴏᴛ ɪɴ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ.")
         return
 
     try:
         await user_collection.update_one({'id': user_id}, {'$addToSet': {'favorites': character_id}})
-        await update.message.reply_text(to_small_caps(f'Character {character.get("name")} has been added to your favorites.'))
+        await update.message.reply_text(
+            f"ᴄʜᴀʀᴀᴄᴛᴇʀ {character.get('name')} ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ꜰᴀᴠᴏʀɪᴛᴇꜱ."
+        )
     except Exception:
         LOGGER.exception("Failed to set favorite character")
-        await update.message.reply_text(to_small_caps("Failed to mark favorite. Please try again later."))
+        await update.message.reply_text("ꜰᴀɪʟᴇᴅ ᴛᴏ ᴍᴀʀᴋ ꜰᴀᴠᴏʀɪᴛᴇ. ᴘʟᴇᴀꜱᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.")
 
 
 async def updatebot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ── Owner-only guard ──────────────────────────────────────────────────────
     if not update.effective_user or update.effective_user.id != OWNER_ID:
         return
 
-    msg = await update.message.reply_text("🔄 Checking for updates...")
+    msg = await update.message.reply_text("🔄 ᴄʜᴇᴄᴋɪɴɢ ꜰᴏʀ ᴜᴘᴅᴀᴛᴇꜱ...")
 
     try:
         # Pull latest code
@@ -512,10 +509,7 @@ async def updatebot(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=True
         )
 
-        output = result.stdout or result.stderr
-
-        if not output:
-            output = "Already up to date."
+        output = result.stdout or result.stderr or "Already up to date."
 
         if len(output) > 3500:
             output = output[:3500] + "\n\nOutput truncated..."
@@ -524,33 +518,37 @@ async def updatebot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # If no changes, don't restart
         if "Already up to date." in output:
-            await update.message.reply_text("✅ Bot is already up to date.")
+            await update.message.reply_text("✅ ʙᴏᴛ ɪꜱ ᴀʟʀᴇᴀᴅʏ ᴜᴘ ᴛᴏ ᴅᴀᴛᴇ.")
             return
 
-        # Install requirements automatically if exists
+        # Install requirements automatically if file exists
         if os.path.exists("requirements.txt"):
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
                 capture_output=True
             )
 
-        await update.message.reply_text("♻ Restarting bot...")
+        await update.message.reply_text("♻ ʀᴇꜱᴛᴀʀᴛɪɴɢ ʙᴏᴛ...")
 
-        # Self restart (NO VPS SETUP NEEDED)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        
+        os.execv(sys.executable, [sys.executable, "-m", "shivu"])
 
     except Exception as e:
-        await msg.edit_text(f"❌ Update failed:\n{e}")
+        await msg.edit_text(f"❌ ᴜᴘᴅᴀᴛᴇ ꜰᴀɪʟᴇᴅ:\n{e}")
+
 
 def main() -> None:
     setrarity.setup_handlers()
 
-    application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
+    application.add_handler(CommandHandler(
+        ["guess", "protecc", "collect", "grab", "hunt"], guess, block=False
+    ))
     application.add_handler(CommandHandler("fav", fav, block=False))
     application.add_handler(CommandHandler("true", updatebot))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
 
     application.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     shivuu.start()

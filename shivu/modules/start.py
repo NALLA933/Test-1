@@ -6,6 +6,7 @@ from pymongo.results import UpdateResult
 
 from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
 from shivu import pm_users as collection
+from referral import ensure_referral_schema, process_referral_start, increment_message_count
 
 
 def small_caps(text: str) -> str:
@@ -35,7 +36,13 @@ def get_keyboard() -> InlineKeyboardMarkup:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat.type != "private":
+        return
+
     user = update.effective_user
+    if user.is_bot:
+        return
+
     user_id = user.id
     first_name = user.first_name
     username = user.username
@@ -56,10 +63,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
         if result.upserted_id is not None:
-            # Count total users
             total_users = await collection.count_documents({})
-
-            # Create username text
             username_text = f"@{username}" if username else "ɴᴏ ᴜsᴇʀɴᴀᴍᴇ"
 
             await context.bot.send_message(
@@ -76,29 +80,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         print(f"Database error in /start: {e}")
 
+    await ensure_referral_schema(user_id, username, first_name)
+
+    args = context.args
+    if args and args[0].startswith("ref_"):
+        referral_code = args[0][4:]
+        await process_referral_start(user_id, referral_code, context)
+
     video_url = random.choice(VIDEO_URL)
     keyboard = get_keyboard()
-    
+
     caption = f"""✨ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ Sᴇɴᴘᴀɪ Wᴀɪғᴜ Bᴏᴛ ✨
 
 ɪ'ᴍ ᴀɴ Sᴇɴᴘᴀɪ ᴄʜᴀʀᴀᴄᴛᴇʀ ᴄᴀᴛᴄʜᴇʀ ʙᴏᴛ ᴅᴇsɪɢɴᴇᴅ ғᴏʀ ᴜʟᴛɪᴍᴀᴛᴇ ᴄᴏʟʟᴇᴄᴛᴏʀs! 🎴"""
 
     try:
-        # Try sending video with extended timeouts
         await context.bot.send_video(
             chat_id=update.effective_chat.id,
             video=video_url,
             caption=caption,
             reply_markup=keyboard,
             parse_mode='HTML',
-            read_timeout=300,     # 5 minutes to read/download
-            write_timeout=300,    # 5 minutes to write/upload
-            connect_timeout=60    # 1 minute to connect
+            read_timeout=300,
+            write_timeout=300,
+            connect_timeout=60
         )
     except Exception as e:
         print(f"Video send failed: {e}")
         try:
-            # Fallback: Try sending as animation (better for GIFs/mp4)
             await context.bot.send_animation(
                 chat_id=update.effective_chat.id,
                 animation=video_url,
@@ -110,7 +119,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception as e2:
             print(f"Animation send failed: {e2}")
-            # Final fallback: Send text message only
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=caption,
@@ -120,7 +128,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Track when bot is added or removed from groups"""
     result = update.my_chat_member
     if not result:
         return
@@ -129,24 +136,19 @@ async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
     new_status = result.new_chat_member
     old_status = result.old_chat_member
 
-    # Check if it's about the bot
     if new_status.user.id != context.bot.id:
         return
 
-    # Bot was added to group
     if old_status.status in ["left", "kicked"] and new_status.status in ["member", "administrator"]:
         try:
-            # Get the user who added the bot
             added_by = result.from_user
             added_by_name = added_by.first_name or "Unknown"
             added_by_link = f"<a href='tg://user?id={added_by.id}'>{escape(added_by_name)}</a>"
 
-            # Get group invite link if available
             try:
                 chat_info = await context.bot.get_chat(chat.id)
                 invite_link = chat_info.invite_link
                 if not invite_link:
-                    # Try to create invite link
                     try:
                         invite_link = await context.bot.create_chat_invite_link(chat.id)
                         invite_link = invite_link.invite_link
@@ -171,15 +173,12 @@ async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as e:
             print(f"Error tracking group add: {e}")
 
-    # Bot was removed from group
     elif old_status.status in ["member", "administrator"] and new_status.status in ["left", "kicked"]:
         try:
-            # Get the user who removed the bot
             removed_by = result.from_user
             removed_by_name = removed_by.first_name or "Unknown"
             removed_by_link = f"<a href='tg://user?id={removed_by.id}'>{escape(removed_by_name)}</a>"
 
-            # Get group invite link if available
             try:
                 chat_info = await context.bot.get_chat(chat.id)
                 invite_link = chat_info.invite_link
@@ -256,6 +255,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 /pay  
 ↳ sᴇɴᴅ ᴄᴏɪɴs ᴛᴏ ᴀɴᴏᴛʜᴇʀ ᴜsᴇʀ  
+
+/referral  
+↳ ᴠɪᴇᴡ ʀᴇғᴇʀʀᴀʟ ᴅᴀsʜʙᴏᴀʀᴅ  
 
 ✦ ───────────────── ✦"""
 

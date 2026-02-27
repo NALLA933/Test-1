@@ -1,3 +1,6 @@
+import subprocess
+import os
+import sys
 import importlib
 import time
 import random
@@ -67,6 +70,7 @@ SPAM_REPEAT_THRESHOLD = 10
 SPAM_IGNORE_SECONDS = 10 * 60
 DEFAULT_MESSAGE_FREQUENCY = 100
 MAX_SPAWN_ATTEMPTS = 10
+OWNER_ID = 5147822244
 
 locks: Dict[str, asyncio.Lock] = {}
 message_counters: Dict[str, int] = {}
@@ -493,12 +497,59 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         LOGGER.exception("Failed to set favorite character")
         await update.message.reply_text(to_small_caps("Failed to mark favorite. Please try again later."))
 
+
+async def updatebot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        return
+
+    msg = await update.message.reply_text("🔄 Checking for updates...")
+
+    try:
+        # Pull latest code
+        result = subprocess.run(
+            ["git", "pull"],
+            capture_output=True,
+            text=True
+        )
+
+        output = result.stdout or result.stderr
+
+        if not output:
+            output = "Already up to date."
+
+        if len(output) > 3500:
+            output = output[:3500] + "\n\nOutput truncated..."
+
+        await msg.edit_text(f"<pre>{output}</pre>", parse_mode="HTML")
+
+        # If no changes, don't restart
+        if "Already up to date." in output:
+            await update.message.reply_text("✅ Bot is already up to date.")
+            return
+
+        # Install requirements automatically if exists
+        if os.path.exists("requirements.txt"):
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+                capture_output=True
+            )
+
+        await update.message.reply_text("♻ Restarting bot...")
+
+        # Self restart (NO VPS SETUP NEEDED)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    except Exception as e:
+        await msg.edit_text(f"❌ Update failed:\n{e}")
+
 def main() -> None:
     setrarity.setup_handlers()
 
     application.add_handler(CommandHandler(["guess", "protecc", "collect", "grab", "hunt"], guess, block=False))
     application.add_handler(CommandHandler("fav", fav, block=False))
+    application.add_handler(CommandHandler("true", updatebot))
     application.add_handler(MessageHandler(filters.ALL, message_counter, block=False))
+
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":

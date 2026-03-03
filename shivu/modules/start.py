@@ -6,7 +6,7 @@ from pymongo.results import UpdateResult
 
 from shivu import application, VIDEO_URL, SUPPORT_CHAT, UPDATE_CHAT, BOT_USERNAME, db, GROUP_ID
 from shivu import pm_users as collection
-from referral import ensure_referral_schema, process_referral_start, increment_message_count
+from shivu.modules.ref import ensure_referral_schema, process_referral_start, increment_message_count
 
 
 def small_caps(text: str) -> str:

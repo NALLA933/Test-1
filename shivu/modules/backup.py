@@ -26,12 +26,13 @@ from shivu import (
     user_balance_coll,
     shivuu
 )
+from shivu.config import Config
+from shivu.security import is_owner, is_owner_or_sudo
 
 LOGGER = logging.getLogger(__name__)
 
 # Backup settings
-BACKUP_CHAT_ID = -1003702395415
-AUTHORIZED_BACKUP_USER = 7818323042
+BACKUP_CHAT_ID = Config.BACKUP_CHAT_ID
 
 # ---------------- HELPER FUNCTIONS ---------------- #
 
@@ -142,6 +143,10 @@ async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
     """
     filepath = None
     try:
+        if not BACKUP_CHAT_ID:
+            LOGGER.warning("Auto backup skipped because BACKUP_CHAT_ID is not configured")
+            return
+
         LOGGER.info("Starting automatic database backup...")
         backup_data = await create_database_backup()
         
@@ -199,7 +204,7 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     user_id = update.effective_user.id
     
-    if user_id != AUTHORIZED_BACKUP_USER:
+    if not is_owner_or_sudo(user_id):
         await update.message.reply_text("❌ You are not authorized to use this command.")
         return
     
@@ -260,7 +265,7 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     user_id = update.effective_user.id
     
-    if user_id != AUTHORIZED_BACKUP_USER:
+    if not is_owner(user_id):
         await update.message.reply_text("❌ You are not authorized to use this command.")
         return
     
@@ -337,15 +342,16 @@ def setup_backup_system():
     application.add_handler(CommandHandler("backup", backup_command))
     application.add_handler(CommandHandler("restore", restore_command))
     
-    # Schedule auto backup job (runs every 1 hour)
-    job_queue = application.job_queue
-    job_queue.run_repeating(
-        auto_backup_job,
-        interval=3600,  # 1 hour in seconds
-        first=10  # First run after 10 seconds of bot start
-    )
-    
-    LOGGER.info("Backup system initialized with auto-backup every 1 hour")
+    if Config.ENABLE_AUTO_BACKUP and BACKUP_CHAT_ID:
+        job_queue = application.job_queue
+        job_queue.run_repeating(
+            auto_backup_job,
+            interval=3600,
+            first=10
+        )
+        LOGGER.info("Backup system initialized with auto-backup every 1 hour")
+    else:
+        LOGGER.info("Backup system initialized without auto-backup")
 
 # Auto-initialize when imported
 setup_backup_system()

@@ -6,6 +6,13 @@ import asyncio
 import logging
 
 from shivu import user_collection, shivuu
+from shivu.character_ids import (
+    character_id_filter,
+    character_matches_id,
+    normalize_character_document,
+    normalize_character_id,
+)
+from shivu.security import is_owner_or_sudo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,6 +69,17 @@ def get_user_lock(user_id):
         user_locks[user_id] = asyncio.Lock()
     return user_locks[user_id]
 
+
+def get_character_from_inventory(characters, character_id):
+    return next(
+        (char for char in characters if character_matches_id(char, character_id)),
+        None
+    )
+
+
+def build_character_pull(character_id):
+    return {'$pull': {'characters': {'id': character_id_filter(character_id)}}}
+
 async def is_bot_or_channel(client, user_id):
     try:
         chat = await client.get_chat(user_id)
@@ -93,17 +111,20 @@ async def safe_store_recovery(character, context):
         logger.critical(f"CRITICAL: Failed to store character in recovery: {e}")
 
 async def atomic_transfer_character(sender_id, receiver_id, character_id):
+    character_id = normalize_character_id(character_id)
+    if sender_char_id is None:
+        return False, "Invalid character ID"
+
     sender = await user_collection.find_one({'id': sender_id})
     if not sender:
         return False, "Sender not found"
     
-    character = next(
-        (char for char in sender.get('characters', []) if char.get('id') == character_id), 
-        None
-    )
+    character = get_character_from_inventory(sender.get('characters', []), character_id)
     
     if not character:
         return False, "Character not found in sender inventory"
+
+    character = normalize_character_document(character)
     
     receiver = await user_collection.find_one({'id': receiver_id})
     receiver_inventory_size = len(receiver.get('characters', [])) if receiver else 0
@@ -112,8 +133,8 @@ async def atomic_transfer_character(sender_id, receiver_id, character_id):
         return False, "Receiver inventory is full"
     
     pull_result = await user_collection.update_one(
-        {'id': sender_id, 'characters.id': character_id},
-        {'$pull': {'characters': {'id': character_id}}}
+        {'id': sender_id, 'characters.id': character_id_filter(character_id)},
+        build_character_pull(character_id)
     )
     
     if pull_result.modified_count == 0:
@@ -123,13 +144,13 @@ async def atomic_transfer_character(sender_id, receiver_id, character_id):
         if receiver:
             push_result = await user_collection.update_one(
                 {'id': receiver_id}, 
-                {'$push': {'characters': character}}
+                {'$push': {'characters': normalize_character_document(character)}}
             )
             
             if push_result.modified_count == 0:
                 rollback_result = await user_collection.update_one(
                     {'id': sender_id},
-                    {'$push': {'characters': character}}
+                    {'$push': {'characters': normalize_character_document(character)}}
                 )
                 
                 if rollback_result.modified_count == 0:
@@ -148,7 +169,7 @@ async def atomic_transfer_character(sender_id, receiver_id, character_id):
             if not insert_result.inserted_id:
                 rollback_result = await user_collection.update_one(
                     {'id': sender_id},
-                    {'$push': {'characters': character}}
+                    {'$push': {'characters': normalize_character_document(character)}}
                 )
                 
                 if rollback_result.modified_count == 0:
@@ -164,7 +185,7 @@ async def atomic_transfer_character(sender_id, receiver_id, character_id):
         
         rollback_result = await user_collection.update_one(
             {'id': sender_id},
-            {'$push': {'characters': character}}
+            {'$push': {'characters': normalize_character_document(character)}}
         )
         
         if rollback_result.modified_count == 0:
@@ -303,10 +324,19 @@ async def trade(client, message):
         return
 
     try:
-        sender_char_id = args[1]
-        receiver_char_id = args[2]
+        sender_char_id = normalize_character_id(args[1])
+        receiver_char_id = normalize_character_id(args[2])
     except (IndexError, ValueError):
         await message.reply_text("❌ Please provide valid character IDs!")
+        return
+
+    character_id = sender_char_id
+    if sender_char_id is None or receiver_char_id is None:
+        await message.reply_text("âŒ Please provide valid character IDs!")
+        return
+
+    if character_id is None:
+        await message.reply_text("âŒ Please provide a valid character ID!")
         return
 
     try:
@@ -317,10 +347,7 @@ async def trade(client, message):
                 await message.reply_text("❌ You don't have any characters yet!")
                 return
 
-            sender_character = next(
-                (char for char in sender.get('characters', []) if char.get('id') == sender_char_id), 
-                None
-            )
+            sender_character = get_character_from_inventory(sender.get('characters', []), sender_char_id)
 
             if not sender_character:
                 await message.reply_text(f"❌ You don't have a character with ID {sender_char_id}!")
@@ -333,10 +360,7 @@ async def trade(client, message):
                 await message.reply_text(f"❌ {receiver_mention} doesn't have any characters yet!")
                 return
 
-            receiver_character = next(
-                (char for char in receiver.get('characters', []) if char.get('id') == receiver_char_id), 
-                None
-            )
+            receiver_character = get_character_from_inventory(receiver.get('characters', []), receiver_char_id)
 
             if not receiver_character:
                 await message.reply_text(
@@ -419,15 +443,9 @@ async def on_trade_callback(client, callback_query):
                     sender = await user_collection.find_one({'id': sender_id})
                     receiver = await user_collection.find_one({'id': receiver_id})
 
-                    sender_character = next(
-                        (char for char in sender.get('characters', []) if char.get('id') == sender_char_id), 
-                        None
-                    )
+                    sender_character = get_character_from_inventory(sender.get('characters', []), sender_char_id)
 
-                    receiver_character = next(
-                        (char for char in receiver.get('characters', []) if char.get('id') == receiver_char_id), 
-                        None
-                    )
+                    receiver_character = get_character_from_inventory(receiver.get('characters', []), receiver_char_id)
 
                     if not sender_character:
                         await callback_query.message.edit_text(
@@ -457,8 +475,8 @@ async def on_trade_callback(client, callback_query):
                         return
 
                     sender_pull = await user_collection.update_one(
-                        {'id': sender_id, 'characters.id': sender_char_id},
-                        {'$pull': {'characters': {'id': sender_char_id}}}
+                        {'id': sender_id, 'characters.id': character_id_filter(sender_char_id)},
+                        build_character_pull(sender_char_id)
                     )
 
                     if sender_pull.modified_count == 0:
@@ -468,14 +486,14 @@ async def on_trade_callback(client, callback_query):
                         return
 
                     receiver_pull = await user_collection.update_one(
-                        {'id': receiver_id, 'characters.id': receiver_char_id},
-                        {'$pull': {'characters': {'id': receiver_char_id}}}
+                        {'id': receiver_id, 'characters.id': character_id_filter(receiver_char_id)},
+                        build_character_pull(receiver_char_id)
                     )
 
                     if receiver_pull.modified_count == 0:
                         await user_collection.update_one(
                             {'id': sender_id},
-                            {'$push': {'characters': sender_character}}
+                            {'$push': {'characters': normalize_character_document(sender_character)}}
                         )
                         await callback_query.message.edit_text(
                             "❌ Trade failed! Could not remove your character."
@@ -484,17 +502,17 @@ async def on_trade_callback(client, callback_query):
 
                     sender_push = await user_collection.update_one(
                         {'id': sender_id},
-                        {'$push': {'characters': receiver_character}}
+                        {'$push': {'characters': normalize_character_document(receiver_character)}}
                     )
 
                     if sender_push.modified_count == 0:
                         await user_collection.update_one(
                             {'id': sender_id},
-                            {'$push': {'characters': sender_character}}
+                            {'$push': {'characters': normalize_character_document(sender_character)}}
                         )
                         await user_collection.update_one(
                             {'id': receiver_id},
-                            {'$push': {'characters': receiver_character}}
+                            {'$push': {'characters': normalize_character_document(receiver_character)}}
                         )
                         await callback_query.message.edit_text(
                             "❌ Trade failed! Could not complete transfer to sender."
@@ -504,21 +522,21 @@ async def on_trade_callback(client, callback_query):
 
                     receiver_push = await user_collection.update_one(
                         {'id': receiver_id},
-                        {'$push': {'characters': sender_character}}
+                        {'$push': {'characters': normalize_character_document(sender_character)}}
                     )
 
                     if receiver_push.modified_count == 0:
                         await user_collection.update_one(
-                            {'id': sender_id, 'characters.id': receiver_char_id},
-                            {'$pull': {'characters': {'id': receiver_char_id}}}
+                            {'id': sender_id, 'characters.id': character_id_filter(receiver_char_id)},
+                            build_character_pull(receiver_char_id)
                         )
                         await user_collection.update_one(
                             {'id': sender_id},
-                            {'$push': {'characters': sender_character}}
+                            {'$push': {'characters': normalize_character_document(sender_character)}}
                         )
                         await user_collection.update_one(
                             {'id': receiver_id},
-                            {'$push': {'characters': receiver_character}}
+                            {'$push': {'characters': normalize_character_document(receiver_character)}}
                         )
                         await callback_query.message.edit_text(
                             "❌ Trade failed! Could not complete transfer to receiver."
@@ -597,7 +615,7 @@ async def gift(client, message):
         return
 
     try:
-        character_id = args[1]
+        character_id = normalize_character_id(args[1])
     except (IndexError, ValueError):
         await message.reply_text("❌ Please provide a valid character ID!")
         return
@@ -610,10 +628,7 @@ async def gift(client, message):
                 await message.reply_text("❌ You don't have any characters yet!")
                 return
 
-            character = next(
-                (char for char in sender.get('characters', []) if char.get('id') == character_id), 
-                None
-            )
+            character = get_character_from_inventory(sender.get('characters', []), character_id)
 
             if not character:
                 await message.reply_text(f"❌ You don't have a character with ID {character_id}!")
@@ -628,7 +643,7 @@ async def gift(client, message):
                 return
 
             pending_gifts[(sender_id, receiver_id)] = {
-                'character': character,
+                'character': normalize_character_document(character),
                 'receiver_username': receiver_username,
                 'receiver_first_name': receiver_first_name,
                 'timestamp': time.time()
@@ -705,10 +720,7 @@ async def on_gift_callback(client, callback_query):
                 async with get_user_lock(second_id):
                     sender = await user_collection.find_one({'id': sender_id})
 
-                    sender_character = next(
-                        (char for char in sender.get('characters', []) if char.get('id') == character['id']), 
-                        None
-                    )
+                    sender_character = get_character_from_inventory(sender.get('characters', []), character['id'])
 
                     if not sender_character:
                         await callback_query.message.edit_text(
@@ -811,10 +823,12 @@ async def check_pending(client, message):
     await message.reply_text(msg)
 
 
-ADMIN_USER_IDS = [123456789, 987654321]
-
-@shivuu.on_message(filters.command("clearpending") & filters.user(ADMIN_USER_IDS))
+@shivuu.on_message(filters.command("clearpending"))
 async def clear_pending(client, message):
+    if not message.from_user or not is_owner_or_sudo(message.from_user.id):
+        await message.reply_text("âŒ You are not authorized to clear pending operations.")
+        return
+
     pending_trades.clear()
     pending_gifts.clear()
     last_trade_time.clear()

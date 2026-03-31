@@ -14,7 +14,9 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CommandHandler, CallbackContext
 
 from shivu import application, collection, db, CHARA_CHANNEL_ID, SUPPORT_CHAT
+from shivu.character_ids import character_id_query, format_character_id, normalize_character_id
 from shivu.config import Config
+from shivu.security import is_owner_or_sudo
 
 # ========== LOGGING SETUP ==========
 logging.basicConfig(
@@ -83,8 +85,8 @@ def admin_only(func):
     """Check if user is owner or sudo user"""
     @wraps(func)
     async def wrapper(update: Update, context: CallbackContext, *args, **kwargs):
-        user_id = str(update.effective_user.id)
-        if user_id != str(Config.OWNER_ID) and user_id not in [str(uid) for uid in Config.SUDO_USERS]:
+        user_id = update.effective_user.id
+        if not is_owner_or_sudo(user_id):
             await update.message.reply_text('⛔ You do not have permission to use this command.')
             logger.warning(f"Unauthorized access attempt by user {user_id}")
             return
@@ -108,13 +110,13 @@ def log_command(func):
 # ========== IMAGE UPLOADER CLASS ==========
 class ImageUploader:
     def __init__(self):
+        self.imgbb_key = Config.IMGBB_API_KEY
         self.services = [
-            self._upload_to_imgbb,
             self._upload_to_telegraph,
             self._upload_to_catbox,
         ]
-        # API Keys (hardcoded as per your request)
-        self.imgbb_key = "6d52008ec9026912f9f50c8ca96a09c3"
+        if self.imgbb_key:
+            self.services.insert(0, self._upload_to_imgbb)
         
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _upload_to_imgbb(self, image_data: bytes) -> str:
@@ -205,7 +207,7 @@ class ImageUploader:
 
 # ========== DATABASE OPERATIONS ==========
 async def get_next_sequence_number(sequence_name):
-    """Get next ID with proper formatting"""
+    """Get the next numeric character ID."""
     sequence_collection = db.sequences
     sequence_document = await sequence_collection.find_one_and_update(
         {'_id': sequence_name},
@@ -213,9 +215,7 @@ async def get_next_sequence_number(sequence_name):
         upsert=True,
         return_document=ReturnDocument.AFTER
     )
-    num = sequence_document['sequence_value']
-    # Format: 001, 010, 100
-    return f"{num:03d}"
+    return int(sequence_document['sequence_value'])
 
 # ========== COMMAND HANDLERS ==========
 @admin_only
@@ -284,6 +284,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
         await progress_msg.edit_text('💾 <b>Saving to database...</b>', parse_mode='HTML')
         
         char_id = await get_next_sequence_number('character_id')
+        display_char_id = format_character_id(char_id)
         
         character = {
             'img_url': img_url,
@@ -305,7 +306,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
                     f'<b>🎴 Character:</b> {character_name}\n'
                     f'<b>📺 Anime:</b> {anime_name}\n'
                     f'<b>⭐ Rarity:</b> {rarity}\n'
-                    f'<b>🆔 ID:</b> <code>{char_id}</code>\n\n'
+                    f'<b>🆔 ID:</b> <code>{display_char_id}</code>\n\n'
                     f'<b>👤 Added by:</b> <a href="tg://user?id={update.effective_user.id}">{update.effective_user.first_name}</a>\n'
                     f'<b>📅 Date:</b> {datetime.utcnow().strftime("%Y-%m-%d %H:%M")}'
                 ),
@@ -329,7 +330,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
                     f'<b>🎴 Character:</b> {character_name}\n'
                     f'<b>📺 Anime:</b> {anime_name}\n'
                     f'<b>⭐ Rarity:</b> {rarity}\n'
-                    f'<b>🆔 ID:</b> <code>{char_id}</code>\n\n'
+                    f'<b>🆔 ID:</b> <code>{display_char_id}</code>\n\n'
                     f'<b>👤 Added by:</b> <a href="tg://user?id={update.effective_user.id}">{update.effective_user.first_name}</a>'
                 ),
                 parse_mode='HTML'
@@ -345,7 +346,7 @@ async def upload(update: Update, context: CallbackContext) -> None:
         await progress_msg.delete()
         await update.message.reply_text(
             f'✅ <b>Character Added Successfully!</b>\n\n'
-            f'🆔 ID: <code>{char_id}</code>\n'
+            f'🆔 ID: <code>{display_char_id}</code>\n'
             f'👤 Name: {character_name}\n'
             f'📺 Anime: {anime_name}\n'
             f'⭐ Rarity: {rarity}\n'
@@ -380,15 +381,22 @@ async def delete(update: Update, context: CallbackContext) -> None:
         )
         return
 
-    char_id = args[0]
+    char_id = normalize_character_id(args[0])
+    if char_id is None:
+        await update.message.reply_text('❌ Character ID must be a number.')
+        return
     
     try:
         # Find character first
-        character = await collection.find_one({'id': char_id})
+        character = await collection.find_one(character_id_query(char_id))
         
         if not character:
-            await update.message.reply_text(f'❌ Character with ID <code>{char_id}</code> not found.', parse_mode='HTML')
+            await update.message.reply_text(
+                f'❌ Character with ID <code>{format_character_id(char_id)}</code> not found.',
+                parse_mode='HTML'
+            )
             return
+        display_char_id = format_character_id(character.get('id', char_id))
         
         # Delete from channel if message exists
         if character.get('message_id'):
@@ -403,11 +411,11 @@ async def delete(update: Update, context: CallbackContext) -> None:
                 # Continue anyway
         
         # Delete from database
-        await collection.delete_one({'id': char_id})
+        await collection.delete_one(character_id_query(char_id))
         
         await update.message.reply_text(
             f'✅ <b>Character Deleted!</b>\n\n'
-            f'🆔 ID: <code>{char_id}</code>\n'
+            f'🆔 ID: <code>{display_char_id}</code>\n'
             f'👤 Was: {character.get("name", "Unknown")}\n'
             f'📺 Anime: {character.get("anime", "Unknown")}',
             parse_mode='HTML'
@@ -436,7 +444,12 @@ async def update(update: Update, context: CallbackContext) -> None:
         )
         return
 
-    char_id, field, new_value = args[0], args[1], args[2]
+    char_id = normalize_character_id(args[0])
+    if char_id is None:
+        await update.message.reply_text('❌ Character ID must be a number.')
+        return
+
+    field, new_value = args[1], args[2]
 
     valid_fields = ['img_url', 'name', 'anime', 'rarity']
     if field not in valid_fields:
@@ -448,10 +461,14 @@ async def update(update: Update, context: CallbackContext) -> None:
 
     try:
         # Find character
-        character = await collection.find_one({'id': char_id})
+        character = await collection.find_one(character_id_query(char_id))
         if not character:
-            await update.message.reply_text(f'❌ Character with ID <code>{char_id}</code> not found.', parse_mode='HTML')
+            await update.message.reply_text(
+                f'❌ Character with ID <code>{format_character_id(char_id)}</code> not found.',
+                parse_mode='HTML'
+            )
             return
+        display_char_id = format_character_id(character.get('id', char_id))
 
         # Process new value
         if field in ['name', 'anime']:
@@ -471,7 +488,7 @@ async def update(update: Update, context: CallbackContext) -> None:
 
         # Update database
         await collection.update_one(
-            {'id': char_id},
+            character_id_query(char_id),
             {
                 '$set': {
                     field: processed_value,
@@ -500,7 +517,7 @@ async def update(update: Update, context: CallbackContext) -> None:
                     f'<b>🎴 Character:</b> {character["name"]}\n'
                     f'<b>📺 Anime:</b> {character["anime"]}\n'
                     f'<b>⭐ Rarity:</b> {character["rarity"]}\n'
-                    f'<b>🆔 ID:</b> <code>{char_id}</code>\n\n'
+                    f'<b>🆔 ID:</b> <code>{display_char_id}</code>\n\n'
                     f'<b>✏️ Updated by:</b> <a href="tg://user?id={update.effective_user.id}">{update.effective_user.first_name}</a>\n'
                     f'<b>🔄 Field:</b> Image URL'
                 ),
@@ -509,7 +526,7 @@ async def update(update: Update, context: CallbackContext) -> None:
             
             # Update message_id in DB
             await collection.update_one(
-                {'id': char_id},
+                character_id_query(char_id),
                 {'$set': {'message_id': new_msg.message_id}}
             )
             
@@ -524,7 +541,7 @@ async def update(update: Update, context: CallbackContext) -> None:
                             f'<b>🎴 Character:</b> {character["name"] if field != "name" else processed_value}\n'
                             f'<b>📺 Anime:</b> {character["anime"] if field != "anime" else processed_value}\n'
                             f'<b>⭐ Rarity:</b> {character["rarity"] if field != "rarity" else processed_value}\n'
-                            f'<b>🆔 ID:</b> <code>{char_id}</code>\n\n'
+                            f'<b>🆔 ID:</b> <code>{display_char_id}</code>\n\n'
                             f'<b>✏️ Updated by:</b> <a href="tg://user?id={update.effective_user.id}">{update.effective_user.first_name}</a>\n'
                             f'<b>🔄 Field:</b> {field}'
                         ),
@@ -535,7 +552,7 @@ async def update(update: Update, context: CallbackContext) -> None:
 
         await update.message.reply_text(
             f'✅ <b>Updated Successfully!</b>\n\n'
-            f'🆔 ID: <code>{char_id}</code>\n'
+            f'🆔 ID: <code>{display_char_id}</code>\n'
             f'🔄 Field: <code>{field}</code>\n'
             f'✨ New Value: <code>{processed_value[:50]}</code>',
             parse_mode='HTML'

@@ -3,17 +3,17 @@ from telegram import Update
 from telegram.ext import CommandHandler, CallbackContext
 
 from shivu import application
-from shivu.config import Config
+from shivu.security import is_owner_or_sudo
 
 async def ping(update: Update, context: CallbackContext) -> None:
     """
     ᴘɪɴɢ ᴄᴏᴍᴍᴀɴᴅ ᴛᴏ ᴄʜᴇᴄᴋ ʙᴏᴛ ʟᴀᴛᴇɴᴄʏ.
     ʀᴇsᴛʀɪᴄᴛᴇᴅ ᴛᴏ sᴜᴅᴏ ᴜsᴇʀs ᴏɴʟʏ.
     """
-    user_id = str(update.effective_user.id)
+    user_id = update.effective_user.id
     
     # ᴄʜᴇᴄᴋ ɪғ ᴜsᴇʀ ɪs ᴀᴜᴛʜᴏʀɪᴢᴇᴅ (sᴜᴅᴏ ᴜsᴇʀs ᴏʀ ᴏᴡɴᴇʀ)
-    if user_id not in Config.SUDO_USERS and user_id != str(Config.OWNER_ID):
+    if not is_owner_or_sudo(user_id):
         await update.message.reply_text(
             "⚠️ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ɪs ʀᴇsᴛʀɪᴄᴛᴇᴅ ᴛᴏ sᴜᴅᴏ ᴜsᴇʀs ᴏɴʟʏ."
         )

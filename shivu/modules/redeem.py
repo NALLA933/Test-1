@@ -7,7 +7,14 @@ from html import escape
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
-from shivu import application, user_collection, collection, db, LOGGER, OWNER_ID, SUDO_USERS
+from shivu import application, user_collection, collection, db, LOGGER
+from shivu.character_ids import (
+    character_id_query,
+    character_matches_id,
+    normalize_character_document,
+    normalize_character_id,
+)
+from shivu.security import is_owner_or_sudo
 
 redeem_codes_collection = db.redeem_codes
 
@@ -121,9 +128,7 @@ async def create_character_code(character_id: int, max_uses: int, created_by: in
         return None
 
     try:
-        character = await collection.find_one({"id": character_id})
-        if not character:
-            character = await collection.find_one({"id": str(character_id)})
+        character = await collection.find_one(character_id_query(character_id))
 
         if not character:
             LOGGER.warning(f"Character ID {character_id} not found in anime_characters_lol collection")
@@ -277,12 +282,10 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                 }
 
         elif code_type == "character":
-            character_id = update_result.get("character_id")
+            character_id = normalize_character_id(update_result.get("character_id"))
             
             try:
-                character = await collection.find_one({"id": character_id})
-                if not character:
-                    character = await collection.find_one({"id": str(character_id)})
+                character = await collection.find_one(character_id_query(character_id))
                 
                 if not character:
                     await redeem_codes_collection.update_one(
@@ -302,20 +305,29 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                 img_url = character.get("img_url", "")
                 
                 rarity_display = get_rarity_display(rarity)
-                
-                character_data = {
-                    "id": str(character.get("id", character_id)),
+                character_data = normalize_character_document({
+                    "id": character.get("id", character_id),
                     "name": character_name,
                     "anime": anime_name,
                     "rarity": rarity,
                     "img_url": img_url
-                }
+                })
+
+                user_doc = await user_collection.find_one({"id": user_id}, {"characters": 1})
+                existing_chars = user_doc.get("characters", []) if user_doc else []
+                if any(character_matches_id(existing_char, character_id) for existing_char in existing_chars):
+                    await redeem_codes_collection.update_one(
+                        {"code": code_normalized},
+                        {"$pull": {"used_by": user_id}}
+                    )
+                    return {
+                        "success": False,
+                        "message": "⚠️ You already own this character.",
+                        "show_alert": True
+                    }
                 
                 char_update = await user_collection.update_one(
-                    {
-                        "id": user_id,
-                        "characters.id": {"$ne": str(character_id)}
-                    },
+                    {"id": user_id},
                     {
                         "$push": {"characters": character_data},
                         "$setOnInsert": {"id": user_id}
@@ -328,10 +340,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
                     
                     if user_doc:
                         existing_chars = user_doc.get("characters", [])
-                        has_char = any(
-                            str(c.get("id")) == str(character_id) 
-                            for c in existing_chars
-                        )
+                        has_char = any(character_matches_id(c, character_id) for c in existing_chars)
                         
                         if not has_char:
                             raise Exception("Failed to add character to user collection")
@@ -398,8 +407,7 @@ async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
 async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
 
-    sudo_check = SUDO_USERS if isinstance(SUDO_USERS, (list, set, tuple)) else []
-    if user_id != OWNER_ID and user_id not in sudo_check:
+    if not is_owner_or_sudo(user_id):
         await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
 
@@ -447,8 +455,7 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
 
-    sudo_check = SUDO_USERS if isinstance(SUDO_USERS, (list, set, tuple)) else []
-    if user_id != OWNER_ID and user_id not in sudo_check:
+    if not is_owner_or_sudo(user_id):
         await update.message.reply_text("❌ " + to_small_caps("You are not authorized to use this command."))
         return
 
@@ -477,10 +484,7 @@ async def sgen_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ " + to_small_caps("Max users must be greater than 0."))
         return
 
-    character = await collection.find_one({"id": character_id})
-
-    if not character:
-        character = await collection.find_one({"id": str(character_id)})
+    character = await collection.find_one(character_id_query(character_id))
 
     if not character:
         error_msg = (

@@ -21,7 +21,15 @@ from shivu import (
     user_totals_collection,
     shivuu,
 )
+from shivu.character_ids import (
+    expand_character_id_variants,
+    format_character_id,
+    normalize_character_document,
+    normalize_character_id,
+    character_matches_id,
+)
 from shivu import application, SUPPORT_CHAT, UPDATE_CHAT, db, LOGGER
+from shivu.security import is_owner
 from shivu.modules import ALL_MODULES
 from shivu.modules.leaderboard import update_daily_user_guess, update_daily_group_guess
 
@@ -70,8 +78,6 @@ SPAM_REPEAT_THRESHOLD = 10
 SPAM_IGNORE_SECONDS = 10 * 60
 DEFAULT_MESSAGE_FREQUENCY = 100
 MAX_SPAWN_ATTEMPTS = 10
-OWNER_ID = 5147822244
-
 locks: Dict[str, asyncio.Lock] = {}
 message_counters: Dict[str, int] = {}
 sent_characters: Dict[int, Set[int]] = {}
@@ -251,18 +257,22 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             query['rarity'] = {'$nin': all_disabled}
 
         if locked_character_ids:
+            locked_id_variants = expand_character_id_variants(locked_character_ids)
             if 'rarity' in query:
                 query = {
                     '$and': [
-                        {'id': {'$nin': locked_character_ids}},
+                        {'id': {'$nin': locked_id_variants}},
                         query
                     ]
                 }
             else:
-                query['id'] = {'$nin': locked_character_ids}
+                query['id'] = {'$nin': locked_id_variants}
 
         LOGGER.info(f"Query: {query}")
-        all_characters = await collection.find(query).to_list(length=None)
+        all_characters = [
+            normalize_character_document(character)
+            for character in await collection.find(query).to_list(length=None)
+        ]
         LOGGER.info(f"Found {len(all_characters)} characters after filtering")
 
     except Exception:
@@ -284,7 +294,10 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if len(sent_characters[chat_id]) >= len(all_characters):
         sent_characters[chat_id] = set()
 
-    choices = [c for c in all_characters if c.get('id') not in sent_characters[chat_id]]
+    choices = [
+        c for c in all_characters
+        if normalize_character_id(c.get('id')) not in sent_characters[chat_id]
+    ]
     if not choices:
         choices = all_characters
         sent_characters[chat_id] = set()
@@ -292,8 +305,9 @@ async def send_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     character = random.choice(choices)
     LOGGER.info(f"Selected: ID={character.get('id')}, Rarity={character.get('rarity')}")
 
-    if character.get('id') is not None:
-        sent_characters[chat_id].add(character.get('id'))
+    normalized_character_id = normalize_character_id(character.get('id'))
+    if normalized_character_id is not None:
+        sent_characters[chat_id].add(normalized_character_id)
     last_characters[chat_id] = character
     first_correct_guesses.pop(chat_id, None)
 
@@ -345,7 +359,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if sorted(name_parts) == sorted(guess_text.split()) or any(part == guess_text for part in name_parts):
         first_correct_guesses[chat_id] = user_id
 
-        character_to_store = character.copy()
+        character_to_store = normalize_character_document(character)
         character_to_store.pop('_id', None)
 
         try:
@@ -416,7 +430,7 @@ async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         anime_name = escape(character.get('anime', 'Unknown'))
         rarity_display = get_rarity_display(character)
         safe_rarity = escape(rarity_display)
-        character_id = escape(str(character.get('id', 'Unknown')))
+        character_id = escape(format_character_id(character.get('id', 'Unknown')))
 
         reveal_message = (
             f"ᴄᴏɴɢʀᴀᴛᴜʟᴀᴛɪᴏɴꜱ {safe_name} ᴛʜɪꜱ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀꜱ ʙᴇᴇɴ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ.\n\n"
@@ -479,7 +493,7 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("ʏᴏᴜ ʜᴀᴠᴇ ɴᴏᴛ ᴄᴏʟʟᴇᴄᴛᴇᴅ ᴀɴʏ ᴄʜᴀʀᴀᴄᴛᴇʀꜱ ʏᴇᴛ.")
         return
 
-    character = next((c for c in user['characters'] if c.get('id') == character_id), None)
+    character = next((c for c in user['characters'] if character_matches_id(c, character_id)), None)
     if not character:
         await update.message.reply_text("ᴛʜᴀᴛ ᴄʜᴀʀᴀᴄᴛᴇʀ ɪꜱ ɴᴏᴛ ɪɴ ʏᴏᴜʀ ᴄᴏʟʟᴇᴄᴛɪᴏɴ.")
         return
@@ -496,7 +510,7 @@ async def fav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def updatebot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Owner-only guard ──────────────────────────────────────────────────────
-    if not update.effective_user or update.effective_user.id != OWNER_ID:
+    if not update.effective_user or not is_owner(update.effective_user.id):
         return
 
     msg = await update.message.reply_text("🔄 ᴄʜᴇᴄᴋɪɴɢ ꜰᴏʀ ᴜᴘᴅᴀᴛᴇꜱ...")

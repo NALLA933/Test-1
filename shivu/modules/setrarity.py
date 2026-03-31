@@ -6,30 +6,16 @@ from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
 from shivu import application, db, collection, LOGGER
+from shivu.character_ids import (
+    character_id_query,
+    format_character_id,
+    normalize_character_id,
+)
+from shivu.security import is_owner_or_sudo
 from shivu import shivuu
 
 rarity_settings_collection = db.rarity_settings
 locked_characters_collection = db.locked_characters
-
-try:
-    from shivu.config import Config
-    OWNER_ID = Config.OWNER_ID
-    SUDO_USERS = Config.SUDO_USERS
-    LOGGER.info(f"Config loaded: OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
-except (ImportError, AttributeError) as e:
-    try:
-        from shivu.config import OWNER_ID, SUDO_USERS
-        LOGGER.info(f"Config loaded (direct): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
-    except (ImportError, AttributeError) as e2:
-        try:
-            from config import Config
-            OWNER_ID = Config.OWNER_ID
-            SUDO_USERS = Config.SUDO_USERS
-            LOGGER.info(f"Config loaded (fallback): OWNER_ID={OWNER_ID}, SUDO_USERS={SUDO_USERS}")
-        except (ImportError, AttributeError) as e3:
-            LOGGER.error(f"Config import failed: {e3}")
-            OWNER_ID = None
-            SUDO_USERS = []
 
 def to_small_caps(text: str) -> str:
     mapping = {
@@ -88,16 +74,7 @@ RARITY_TEXT_TO_NUMBER = {
 }
 
 def is_authorized(user_id: int) -> bool:
-    if OWNER_ID is None:
-        LOGGER.warning("OWNER_ID is None - authorization will fail")
-        return False
-    
-    is_owner = user_id == OWNER_ID
-    is_sudo = user_id in SUDO_USERS
-    
-    LOGGER.debug(f"Auth check: user={user_id}, owner={OWNER_ID}, is_owner={is_owner}, is_sudo={is_sudo}")
-    
-    return is_owner or is_sudo
+    return is_owner_or_sudo(user_id)
 
 async def get_chat_rarity_settings(chat_id: int) -> Dict[str, Any]:
     settings = await rarity_settings_collection.find_one({'chat_id': chat_id})
@@ -109,8 +86,8 @@ async def get_chat_rarity_settings(chat_id: int) -> Dict[str, Any]:
         await rarity_settings_collection.insert_one(settings)
     return settings
 
-async def is_character_locked(character_id: str) -> bool:
-    locked = await locked_characters_collection.find_one({'character_id': character_id})
+async def is_character_locked(character_id: int) -> bool:
+    locked = await locked_characters_collection.find_one(character_id_query(character_id, 'character_id'))
     return locked is not None
 
 async def is_rarity_enabled(chat_id: int, rarity: int) -> bool:
@@ -260,14 +237,20 @@ async def lock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
     
-    character_id = context.args[0]
+    character_id = normalize_character_id(context.args[0])
+    if character_id is None:
+        await update.message.reply_text(
+            to_small_caps("Please provide a valid numeric character ID.")
+        )
+        return
+
     reason = " ".join(context.args[1:]) if len(context.args) > 1 else "No reason provided"
     
     try:
-        character = await collection.find_one({'id': character_id})
+        character = await collection.find_one(character_id_query(character_id))
         if not character:
             await update.message.reply_text(
-                to_small_caps(f"Character with ID {character_id} not found in database.")
+                to_small_caps(f"Character with ID {format_character_id(character_id)} not found in database.")
             )
             return
         
@@ -292,7 +275,7 @@ async def lock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             to_small_caps(
                 f"Character locked successfully!\n\n"
                 f"Name: {escape(character.get('name', 'Unknown'))}\n"
-                f"ID: {character_id}\n"
+                f"ID: {format_character_id(character_id)}\n"
                 f"Reason: {escape(reason)}\n"
                 f"Locked by: {escape(update.effective_user.first_name)}"
             )
@@ -321,23 +304,28 @@ async def unlock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
     
-    character_id = context.args[0]
+    character_id = normalize_character_id(context.args[0])
+    if character_id is None:
+        await update.message.reply_text(
+            to_small_caps("Please provide a valid numeric character ID.")
+        )
+        return
     
     try:
-        locked_char = await locked_characters_collection.find_one({'character_id': character_id})
+        locked_char = await locked_characters_collection.find_one(character_id_query(character_id, 'character_id'))
         if not locked_char:
             await update.message.reply_text(
-                to_small_caps(f"Character with ID {character_id} is not locked.")
+                to_small_caps(f"Character with ID {format_character_id(character_id)} is not locked.")
             )
             return
         
-        await locked_characters_collection.delete_one({'character_id': character_id})
+        await locked_characters_collection.delete_one(character_id_query(character_id, 'character_id'))
         
         await update.message.reply_text(
             to_small_caps(
                 f"Character unlocked successfully!\n\n"
                 f"Name: {escape(locked_char.get('character_name', 'Unknown'))}\n"
-                f"ID: {character_id}\n"
+                f"ID: {format_character_id(character_id)}\n"
                 f"The character can now spawn in groups!"
             )
         )
@@ -371,9 +359,10 @@ async def locklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = to_small_caps("Locked Characters List:\n\n")
         
         for idx, char in enumerate(locked_chars, 1):
+            character_id = char.get('character_id', 'Unknown')
             message += to_small_caps(
                 f"{idx}. Name: {escape(char.get('character_name', 'Unknown'))}\n"
-                f"   ID: {char.get('character_id', 'Unknown')}\n"
+                f"   ID: {format_character_id(character_id)}\n"
                 f"   Reason: {escape(char.get('reason', 'No reason'))}\n"
                 f"   Locked by: {escape(char.get('locked_by_name', 'Unknown'))}\n\n"
             )
@@ -392,7 +381,7 @@ async def locklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         LOGGER.exception(f"Error in locklist command: {e}")
         await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-async def can_character_spawn(character_id: str, rarity: int, chat_id: int) -> tuple[bool, Optional[str]]:
+async def can_character_spawn(character_id: int, rarity: int, chat_id: int) -> tuple[bool, Optional[str]]:
     if await is_character_locked(character_id):
         return False, "Character is locked"
     
@@ -418,10 +407,15 @@ async def get_disabled_rarities(chat_id: int) -> List[int]:
         LOGGER.exception(f"Error getting disabled rarities: {e}")
         return []
 
-async def get_locked_character_ids() -> List[str]:
+async def get_locked_character_ids() -> List[int]:
     try:
         locked_chars = await locked_characters_collection.find({}).to_list(length=None)
-        return [char.get('character_id') for char in locked_chars if char.get('character_id')]
+        normalized_ids = []
+        for char in locked_chars:
+            character_id = normalize_character_id(char.get('character_id'))
+            if character_id is not None:
+                normalized_ids.append(character_id)
+        return normalized_ids
     except Exception as e:
         LOGGER.exception(f"Error getting locked character IDs: {e}")
         return []

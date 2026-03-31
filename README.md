@@ -67,11 +67,11 @@ use Rarity Number accordingly rarity Map
 
 ### Heroku
 - Fork The Repository
-- Go to [`config.py`](./shivu/config.py)
-- Fill the All variables and Go to heroku. and deploy Your forked Repository
+- Copy [`.env.example`](./.env.example) to `.env`
+- Fill all required environment variables and deploy your forked repository
 
 ### Local Deploy/VPS
-- Fill variables in [`config.py`](./shivu/config.py) 
+- Copy [`.env.example`](./.env.example) to `.env` and fill the required values
 - Open your VPS terminal (we're using Debian based) and run the following:
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y           
@@ -86,6 +86,12 @@ pip3 install -U -r requirements.txt
 sudo apt install tmux && tmux          
 python3 -m shivu
 ```       
+
+### Docker
+```bash
+docker build -t senpai-bot .
+docker run --env-file .env senpai-bot
+```
  
 ## License
 The Source is licensed under MIT, and hence comes with no Warranty whatsoever.

@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.error import Forbidden, BadRequest, RetryAfter, TelegramError
 from telegram.ext import CallbackContext, CommandHandler
 from shivu import application, top_global_groups_collection, pm_users
+from shivu.security import is_owner
 
 # Setup logging
 logging.basicConfig(
@@ -14,9 +15,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# Hardcoded Owner ID - ONLY this user can access the broadcast command
-OWNER_ID = 8420981179
 
 # Broadcast control flag (for cancel feature)
 broadcast_running = {'status': False, 'cancel': False}
@@ -116,12 +114,12 @@ async def broadcast(update: Update, context: CallbackContext) -> None:
     """
 
     # STRICT AUTHORIZATION CHECK - Only user ID 8420981179 can access
-    if update.effective_user.id != OWNER_ID:
+    if not is_owner(update.effective_user.id):
         logger.warning(f"⚠️ Unauthorized broadcast attempt by user {update.effective_user.id}")
         await update.message.reply_text(
             "⛔ **ACCESS DENIED**\n\n"
             "🚫 This command is strictly restricted to the bot owner only.\n"
-            f"🔒 Owner ID: {OWNER_ID}\n\n"
+            "🔒 Owner-only command\n\n"
             "Your attempt has been logged."
         )
         return
@@ -402,7 +400,7 @@ async def broadcast(update: Update, context: CallbackContext) -> None:
 async def cancel_broadcast(update: Update, context: CallbackContext) -> None:
     """Cancel the running broadcast (Owner only)."""
     
-    if update.effective_user.id != OWNER_ID:
+    if not is_owner(update.effective_user.id):
         await update.message.reply_text("⛔ Access denied. Owner only.")
         return
 

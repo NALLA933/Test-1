@@ -2,7 +2,9 @@ from html import escape
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
-from shivu import application, user_collection, collection, LOGGER, OWNER_ID, SUDO_USERS
+from shivu import application, user_collection, collection, LOGGER
+from shivu.character_ids import character_id_query, normalize_character_document
+from shivu.security import is_owner_or_sudo
 
 
 # ---------- Small Caps Utility ----------
@@ -61,7 +63,7 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     admin_id = update.effective_user.id
     
     # Check if user is admin (Owner or Sudo user)
-    if admin_id != OWNER_ID and admin_id not in SUDO_USERS:
+    if not is_owner_or_sudo(admin_id):
         await update.message.reply_text(
             "❌ " + to_small_caps("You are not authorized to use this command.")
         )
@@ -110,11 +112,7 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     
     # Fetch character from database
-    character = await collection.find_one({"id": character_id})
-    
-    # If not found with integer, try string
-    if not character:
-        character = await collection.find_one({"id": str(character_id)})
+    character = await collection.find_one(character_id_query(character_id))
     
     if not character:
         error_msg = (
@@ -133,13 +131,13 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     rarity_display = get_rarity_display(rarity)
     
     # Prepare character entry
-    character_entry = {
+    character_entry = normalize_character_document({
         "id": character.get("id"),
         "name": character.get("name"),
         "anime": character.get("anime"),
         "rarity": character.get("rarity"),
         "img_url": character.get("img_url")
-    }
+    })
     
     # Add optional fields if they exist
     optional_fields = ["id_al", "video_url"]

@@ -8,6 +8,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMe
 from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
 
 from shivu import collection, user_collection, application
+from shivu.character_ids import (
+    character_id_query,
+    normalize_character_document,
+    normalize_character_id,
+)
+from shivu.security import is_owner_or_sudo
 
 # Small Caps Conversion Utility
 def to_small_caps(text: str) -> str:
@@ -140,35 +146,37 @@ async def change_balance(user_id: int, amount: int) -> int:
     return int(user.get('balance', 0)) if user else 0
 
 
-async def get_user_owned_characters(user_id: int) -> List[str]:
+async def get_user_owned_characters(user_id: int) -> List[int]:
     """Get list of character IDs owned by user."""
     user = await user_collection.find_one({'id': user_id})
     if not user:
         return []
 
     characters = user.get('characters', [])
-    owned_ids = [char.get('id') for char in characters if char.get('id')]
+    owned_ids = [
+        normalize_character_id(char.get('id'))
+        for char in characters
+        if normalize_character_id(char.get('id')) is not None
+    ]
     return list(set(owned_ids))  # Return unique IDs
 
 
-async def get_character_owner_count(char_id: str) -> int:
+async def get_character_owner_count(char_id: int) -> int:
     """Get count of how many users own this character."""
-    count = await user_collection.count_documents({
-        'characters.id': char_id
-    })
+    count = await user_collection.count_documents(character_id_query(char_id, 'characters.id'))
     return count
 
 
 async def add_character_to_user(user_id: int, character: dict) -> bool:
     """Add a character to user's collection."""
     try:
-        char_data = {
+        char_data = normalize_character_document({
             'id': character['id'],
             'name': character['name'],
             'anime': character['anime'],
             'rarity': character.get('rarity', 1),
             'img_url': character.get('img_url', '')
-        }
+        })
 
         await user_collection.update_one(
             {'id': user_id},
@@ -193,6 +201,7 @@ async def fetch_shop_characters() -> List[dict]:
 
         if rarity_int in SHOP_RARITIES:
             char['rarity'] = rarity_int
+            char = normalize_character_document(char)
             all_chars.append(char)
 
     return all_chars
@@ -379,7 +388,7 @@ async def display_shop_character(update: Update, context: CallbackContext,
 
     # Check if user already owns this character
     owned_chars = await get_user_owned_characters(user_id)
-    status = "Sold" if char['id'] in owned_chars else "Available"
+    status = "Sold" if normalize_character_id(char['id']) in owned_chars else "Available"
 
     # Build message
     rarity_emoji = RARITY_EMOJIS.get(char['rarity'], '⚪')
@@ -647,7 +656,7 @@ async def show_purchase_confirmation(update: Update, context: CallbackContext,
 
     # Check if already owned
     owned_chars = await get_user_owned_characters(user_id)
-    if char['id'] in owned_chars:
+    if normalize_character_id(char['id']) in owned_chars:
         await query.answer(
             to_small_caps("⚠️ You already own this character!"),
             show_alert=True
@@ -748,7 +757,7 @@ async def process_purchase(update: Update, context: CallbackContext,
 
     # Check if already owned
     owned_chars = await get_user_owned_characters(user_id)
-    if char['id'] in owned_chars:
+    if normalize_character_id(char['id']) in owned_chars:
         await query.answer(
             to_small_caps("⚠️ You already own this character!"),
             show_alert=True
@@ -765,7 +774,7 @@ async def process_purchase(update: Update, context: CallbackContext,
         return
 
     # Get full character data from collection
-    full_char = await collection.find_one({'id': char['id']})
+    full_char = await collection.find_one(character_id_query(char['id']))
     if not full_char:
         await query.answer(to_small_caps("⚠️ Character not found in database!"), show_alert=True)
         return
@@ -834,12 +843,10 @@ async def process_purchase(update: Update, context: CallbackContext,
 
 async def resetshop_command(update: Update, context: CallbackContext) -> None:
     """Handle /resetshop command - Owner only."""
-    from shivu import OWNER_ID, SUDO_USERS
-
     user_id = update.effective_user.id
 
     # Check if user is owner or sudo
-    if user_id != OWNER_ID and user_id not in SUDO_USERS:
+    if not is_owner_or_sudo(user_id):
         await update.message.reply_text(to_small_caps("⚠️ You are not authorized to use this command!"))
         return
 

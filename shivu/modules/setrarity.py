@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Any
 from html import escape
 
 from telegram import Update
@@ -17,43 +17,7 @@ from shivu import shivuu
 rarity_settings_collection = db.rarity_settings
 locked_characters_collection = db.locked_characters
 
-def to_small_caps(text: str) -> str:
-    mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 
-        'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 
-        's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ',
-        'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ',
-        'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-        '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7', '8': '8', '9': '9',
-        ' ': ' ', '!': '!', ':': ':', '.': '.', ',': ',', "'": "'", '"': '"', '?': '?', 
-        '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '-': '-', '_': '_'
-    }
-    result = []
-    for char in text:
-        if char in mapping:
-            result.append(mapping[char])
-        else:
-            result.append(char)
-    return ''.join(result)
-
-RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ",
-    2: "🔵 ʀᴀʀᴇ",
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ",
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
-    7: "🔮 ᴇᴘɪᴄ",
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ",
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
-    14: "🍭 ᴋᴀᴡᴀɪɪ",
-    15: "🧬 ʜʏʙʀɪᴅ",
-}
+from shivu.utils import to_small_caps, RARITY_MAP
 
 RARITY_TEXT_TO_NUMBER = {
     "⚪ ᴄᴏᴍᴍᴏɴ": 1,
@@ -76,7 +40,7 @@ RARITY_TEXT_TO_NUMBER = {
 def is_authorized(user_id: int) -> bool:
     return is_owner_or_sudo(user_id)
 
-async def get_chat_rarity_settings(chat_id: int) -> Dict[str, Any]:
+async def get_chat_rarity_settings(chat_id: int) -> dict[str, Any]:
     settings = await rarity_settings_collection.find_one({'chat_id': chat_id})
     if not settings:
         settings = {
@@ -381,7 +345,7 @@ async def locklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         LOGGER.exception(f"Error in locklist command: {e}")
         await update.message.reply_text(to_small_caps("An error occurred. Please try again."))
 
-async def can_character_spawn(character_id: int, rarity: int, chat_id: int) -> tuple[bool, Optional[str]]:
+async def can_character_spawn(character_id: int, rarity: int, chat_id: int) -> tuple[bool, str | None]:
     if await is_character_locked(character_id):
         return False, "Character is locked"
     
@@ -390,7 +354,7 @@ async def can_character_spawn(character_id: int, rarity: int, chat_id: int) -> t
     
     return True, None
 
-async def get_disabled_rarities(chat_id: int) -> List[int]:
+async def get_disabled_rarities(chat_id: int) -> list[int]:
     try:
         settings = await get_chat_rarity_settings(chat_id)
         disabled = settings.get('disabled_rarities', [])
@@ -407,7 +371,7 @@ async def get_disabled_rarities(chat_id: int) -> List[int]:
         LOGGER.exception(f"Error getting disabled rarities: {e}")
         return []
 
-async def get_locked_character_ids() -> List[int]:
+async def get_locked_character_ids() -> list[int]:
     try:
         locked_chars = await locked_characters_collection.find({}).to_list(length=None)
         normalized_ids = []

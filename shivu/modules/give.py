@@ -7,51 +7,7 @@ from shivu.character_ids import character_id_query, normalize_character_document
 from shivu.security import is_owner_or_sudo
 
 
-# ---------- Small Caps Utility ----------
-SMALL_CAPS_MAP = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-    'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-    'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ',
-    'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-    'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-    'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ',
-    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-    ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
-    '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '=': '=',
-    '+': '+', '*': '*', '/': '/', '\\': '\\', '|': '|', '_': '_',
-    '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', 
-    '6': '6', '7': '7', '8': '8', '9': '9'
-}
-
-# ---------- Rarity Mapping ----------
-RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ",
-    2: "🔵 ʀᴀʀᴇ",
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ",
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
-    7: "🔮 ᴇᴘɪᴄ",
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ",
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
-    14: "🍭 ᴋᴀᴡᴀɪɪ",
-    15: "🧬 ʜʏʙʀɪᴅ"
-}
-
-def to_small_caps(text: str) -> str:
-    """Convert text to small caps Unicode characters."""
-    return ''.join(SMALL_CAPS_MAP.get(char, char) for char in str(text))
-
-
-def get_rarity_display(rarity: int) -> str:
-    """Get rarity display string with emoji and name."""
-    return RARITY_MAP.get(rarity, f"⚪ ᴜɴᴋɴᴏᴡɴ ({rarity})")
-
+from shivu.utils import to_small_caps, get_rarity_display
 
 # ---------- Give Command Handler ----------
 async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

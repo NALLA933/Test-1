@@ -1,4 +1,3 @@
-from pymongo import ReturnDocument
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
@@ -101,11 +100,10 @@ async def change_time_single_group(client: Client, message: Message):
     chat_id = message.chat.id
 
     try:
-        await user_totals_collection.find_one_and_update(
+        await user_totals_collection.update_one(
             {"chat_id": str(chat_id)},
             {"$set": {"message_frequency": new_frequency}},
             upsert=True,
-            return_document=ReturnDocument.AFTER
         )
 
         await message.reply_text(

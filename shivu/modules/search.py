@@ -1,49 +1,15 @@
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
-from typing import List, Dict, Optional, Tuple
 from cachetools import TTLCache
 import asyncio
 from functools import wraps
 
 from shivu import shivuu, collection, user_collection
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==================== CONFIGURATION ====================
-
-# Rarity mapping with small caps
-RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ", 
-    2: "🔵 ʀᴀʀᴇ", 
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ", 
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ", 
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ", 
-    7: "🔮 ᴇᴘɪᴄ", 
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ", 
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ", 
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ", 
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ", 
-    14: "🍭 ᴋᴀᴡᴀɪɪ", 
-    15: "🧬 ʜʏʙʀɪᴅ"
-}
-
-# Small caps conversion map
-SMALL_CAPS_MAP = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ',
-    'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ',
-    'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
-    'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ',
-    'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ',
-    'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
-    'Y': 'ʏ', 'Z': 'ᴢ'
-}
 
 # TTL Caches (5 minutes TTL for high performance)
 character_cache = TTLCache(maxsize=1000, ttl=300)  # Cache character lookups
@@ -52,11 +18,8 @@ grabber_cache = TTLCache(maxsize=500, ttl=300)     # Cache top grabbers
 search_cache = TTLCache(maxsize=200, ttl=300)      # Cache search results
 
 # ==================== UTILITY FUNCTIONS ====================
+from shivu.utils import RARITY_MAP, to_small_caps
 
-def to_small_caps(text):
-    """Convert text to small caps for premium UI"""
-    text = str(text) if text is not None else 'Unknown'
-    return ''.join(SMALL_CAPS_MAP.get(c, c) for c in text)
 
 
 def cache_key(*args):
@@ -66,7 +29,7 @@ def cache_key(*args):
 
 # ==================== DATABASE ACCESS LAYER ====================
 
-async def get_character_by_id(character_id: str) -> Optional[Dict]:
+async def get_character_by_id(character_id: str) -> Dict | None:
     """
     Fetch character from database with caching.
     
@@ -136,7 +99,7 @@ async def get_character_count_optimized(character_id: str) -> int:
         return 0
 
 
-async def get_top_grabbers_optimized(character_id: str, limit: int = 10) -> List[Dict]:
+async def get_top_grabbers_optimized(character_id: str, limit: int = 10) -> list[Dict]:
     """
     Get top users who own the most of this character using aggregation.
     
@@ -201,7 +164,7 @@ async def get_top_grabbers_optimized(character_id: str, limit: int = 10) -> List
         return []
 
 
-async def search_characters_optimized(search_query: str) -> List[Dict]:
+async def search_characters_optimized(search_query: str) -> list[Dict]:
     """
     Search for characters by name with caching.
     
@@ -254,7 +217,7 @@ async def search_characters_optimized(search_query: str) -> List[Dict]:
 
 # ==================== FORMATTING LAYER ====================
 
-def format_character_details(character: Dict, total_count: int, top_grabbers: List[Dict]) -> str:
+def format_character_details(character: Dict, total_count: int, top_grabbers: list[Dict]) -> str:
     """
     Format character details with top grabbers.
     
@@ -305,7 +268,7 @@ def format_character_details(character: Dict, total_count: int, top_grabbers: Li
     return msg
 
 
-def format_sfind_page(characters: List[Dict], page: int, total_pages: int, search_query: str) -> str:
+def format_sfind_page(characters: list[Dict], page: int, total_pages: int, search_query: str) -> str:
     """
     Format sfind results page.
     
@@ -400,7 +363,7 @@ def create_sfind_keyboard(page: int, total_pages: int, user_id: int, search_hash
 
 async def safe_send_media(
     message,
-    img_url: Optional[str],
+    img_url: str | None,
     caption: str,
     reply_markup: InlineKeyboardMarkup
 ) -> bool:
@@ -461,7 +424,7 @@ def compute_search_hash(search_query: str) -> str:
     return str(hash(search_query.lower().strip()) % 100000000).zfill(8)
 
 
-async def get_cached_search_results(search_hash: str, search_query: str) -> Optional[List[Dict]]:
+async def get_cached_search_results(search_hash: str, search_query: str) -> list[Dict] | None:
     """
     Get search results from cache, re-search if not found.
     

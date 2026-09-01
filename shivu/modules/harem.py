@@ -4,46 +4,12 @@ from html import escape
 import math
 import asyncio
 import functools
-from typing import Dict, List, Tuple, Optional
 import hashlib
 import re
 
-try:
-    import redis.asyncio as redis
-    REDIS_AVAILABLE = True
-except ImportError:
-    REDIS_AVAILABLE = False
 
-from shivu import collection, user_collection, application
 
-CACHE_TTL = 300
-PAGE_SIZE = 15
-
-redis_client = None
-if REDIS_AVAILABLE:
-    try:
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-    except:
-        pass
-
-_SMALL_CAPS_MAP = str.maketrans({
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
-    'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
-    'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ',
-    'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ',
-    'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ',
-    'z': 'ᴢ', 'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ',
-    'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ',
-    'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-    'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ',
-    'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
-    'Y': 'ʏ', 'Z': 'ᴢ'
-})
-
-def to_small_caps(text: str) -> str:
-    if not text:
-        return ""
-    return str(text).translate(_SMALL_CAPS_MAP)
+from shivu.utils import to_small_caps
 
 RARITY_DATA = {
     1: ("⚪", "ᴄᴏᴍᴍᴏɴ"),
@@ -96,42 +62,13 @@ def extract_rarity_from_name(name: str) -> int:
                 return num
     return 1
 
-def cached(ttl_seconds: int = CACHE_TTL):
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            if not redis_client:
-                return await func(*args, **kwargs)
-            
-            key_parts = [func.__name__] + [str(a) for a in args] + [f"{k}={v}" for k, v in kwargs.items()]
-            cache_key = hashlib.md5(":".join(key_parts).encode()).hexdigest()
-            
-            try:
-                cached_data = await redis_client.get(cache_key)
-                if cached_data:
-                    import json
-                    return json.loads(cached_data)
-            except:
-                pass
-            
-            result = await func(*args, **kwargs)
-            
-            try:
-                if result is not None:
-                    import json
-                    await redis_client.setex(cache_key, ttl_seconds, json.dumps(result, default=str))
-            except:
-                pass
-            
-            return result
-        return wrapper
-    return decorator
 
-class HaremManagerV3:
-    
-    @staticmethod
-    @cached(ttl_seconds=60)
-    async def get_user_characters_fast(user_id: int, rarity_filter: Optional[int] = None):
+
+async def get_user_characters_fast(user_id: int, rarity_filter: int | None = None):
+    cache_key = (user_id, rarity_filter)
+    if cache_key in _harem_cache:
+        return _harem_cache[cache_key]
+
         pipeline = [
             {"$match": {"id": user_id}},
             {"$project": {
@@ -162,48 +99,46 @@ class HaremManagerV3:
         
         return user, characters
     
-    @staticmethod
-    async def get_character_details_batch(char_ids: List[str]):
-        if not char_ids:
-            return {}
-        
-        unique_ids = list(set(char_ids))
-        
-        projection = {
-            "id": 1, 
-            "name": 1, 
-            "anime": 1, 
-            "rarity": 1,
-            "img_url": 1, 
-            "_id": 0
-        }
-        
-        cursor = collection.find(
-            {"id": {"$in": unique_ids}},
-            projection
-        )
-        
-        char_map = {}
-        async for char in cursor:
-            char_map[char['id']] = char
-        
-        return char_map
+async def get_character_details_batch(char_ids: list[str]):
+    if not char_ids:
+        return {}
     
-    @staticmethod
-    async def get_anime_counts_batch(animes: List[str]):
-        if not animes:
-            return {}
-        
-        pipeline = [
-            {"$match": {"anime": {"$in": animes}}},
-            {"$group": {"_id": "$anime", "count": {"$sum": 1}}}
-        ]
-        
-        results = {}
-        async for doc in collection.aggregate(pipeline):
-            results[doc['_id']] = doc['count']
-        
-        return results
+    unique_ids = list(set(char_ids))
+    
+    projection = {
+        "id": 1, 
+        "name": 1, 
+        "anime": 1, 
+        "rarity": 1,
+        "img_url": 1, 
+        "_id": 0
+    }
+    
+    cursor = collection.find(
+        {"id": {"$in": unique_ids}},
+        projection
+    )
+    
+    char_map = {}
+    async for char in cursor:
+        char_map[char['id']] = char
+    
+    return char_map
+
+async def get_anime_counts_batch(animes: list[str]):
+    if not animes:
+        return {}
+    
+    pipeline = [
+        {"$match": {"anime": {"$in": animes}}},
+        {"$group": {"_id": "$anime", "count": {"$sum": 1}}}
+    ]
+    
+    results = {}
+    async for doc in collection.aggregate(pipeline):
+        results[doc['_id']] = doc['count']
+    
+    return results
 
 async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     user_id = update.effective_user.id
@@ -217,7 +152,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     except:
         pass
     
-    user, user_chars = await HaremManagerV3.get_user_characters_fast(user_id, rarity_filter)
+    user, user_chars = await get_user_characters_fast(user_id, rarity_filter)
     
     if not user:
         msg = to_small_caps("You Have Not Guessed any Characters Yet..")
@@ -256,7 +191,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     end_idx = start_idx + PAGE_SIZE
     page_ids = unique_char_ids[start_idx:end_idx]
     
-    char_details = await HaremManagerV3.get_character_details_batch(page_ids)
+    char_details = await get_character_details_batch(page_ids)
     
     display_chars = []
     for cid in page_ids:
@@ -278,7 +213,7 @@ async def harem_v3(update: Update, context: CallbackContext, page: int = 0):
     
     page_animes = list({c.get('anime') for c in display_chars})
     anime_counts_task = asyncio.create_task(
-        HaremManagerV3.get_anime_counts_batch(page_animes)
+        get_anime_counts_batch(page_animes)
     )
     
     safe_name = escape(update.effective_user.first_name)

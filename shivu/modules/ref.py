@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime, timezone, timedelta
 from html import escape
-from typing import Optional
+from shivu.utils import to_small_caps
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -59,7 +59,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-_config_cache: Optional[dict] = None
+_config_cache: dict | None = None
 _config_cache_time: float = 0
 CONFIG_TTL = 300
 
@@ -90,7 +90,7 @@ def generate_referral_code(user_id: int) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:10].upper()
 
 
-def get_utc_date_str(ts: Optional[float] = None) -> str:
+def get_utc_date_str(ts: float | None = None) -> str:
     dt = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else datetime.now(timezone.utc)
     return dt.strftime("%Y-%m-%d")
 
@@ -189,7 +189,7 @@ async def ensure_referral_schema(user_id: int, username: str = None, first_name:
     )
 
 
-async def get_user_referral_data(user_id: int) -> Optional[dict]:
+async def get_user_referral_data(user_id: int) -> dict | None:
     doc = await user_collection.find_one(
         {"id": user_id},
         {"referral": 1, "balance": 1, "id": 1},
@@ -197,7 +197,7 @@ async def get_user_referral_data(user_id: int) -> Optional[dict]:
     return doc
 
 
-async def get_referrer_by_code(code: str) -> Optional[dict]:
+async def get_referrer_by_code(code: str) -> dict | None:
     doc = await user_collection.find_one(
         {"referral.code": code},
         {"id": 1, "referral": 1},
@@ -270,19 +270,6 @@ async def flag_fraud_user(user_id: int, reason: str, score: float):
     except Exception as e:
         LOGGER.error(f"Fraud notification failed: {e}")
 
-
-def small_caps(text: str) -> str:
-    mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-        'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-        'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ',
-        'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'S', 'T': 'ᴛ', 'U': 'ᴜ',
-        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'X', 'Y': 'ʏ', 'Z': 'ᴢ',
-    }
-    return ''.join(mapping.get(ch, ch) for ch in text)
 
 
 async def process_referral_start(new_user_id: int, referral_code: str, context: ContextTypes.DEFAULT_TYPE):
@@ -462,7 +449,7 @@ async def verify_and_reward_referral(new_user_id: int, referrer_id: int, context
         await context.bot.send_message(
             chat_id=referrer_id,
             text=(
-                f"✨ <b>{small_caps('referral verified!')}</b>\n\n"
+                f"✨ <b>{to_small_caps('referral verified!')}</b>\n\n"
                 f"ᴜsᴇʀ <code>{new_user_id}</code> ʜᴀs ʙᴇᴇɴ ᴠᴇʀɪғɪᴇᴅ!\n"
                 f"ʀᴇᴡᴀʀᴅ: <b>+{reward} ᴄᴏɪɴs</b>\n"
                 f"sᴛʀᴇᴀᴋ: <b>{new_streak} ᴅᴀʏs</b>\n"
@@ -532,19 +519,19 @@ async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_reward = int(base_reward * multiplier)
 
     text = (
-        f"✦ <b>{small_caps('your referral dashboard')}</b> ✦\n\n"
-        f"🔗 <b>{small_caps('referral link')}</b>\n"
+        f"✦ <b>{to_small_caps('your referral dashboard')}</b> ✦\n\n"
+        f"🔗 <b>{to_small_caps('referral link')}</b>\n"
         f"↳ <code>{referral_link}</code>\n\n"
-        f"🎫 <b>{small_caps('code')}</b>: <code>{code}</code>\n\n"
-        f"🏅 <b>{small_caps('tier')}</b>: <b>{tier}</b>\n"
-        f"⚡ <b>{small_caps('streak')}</b>: {streak} ᴅᴀʏs\n"
-        f"🔥 <b>{small_caps('longest streak')}</b>: {longest} ᴅᴀʏs\n\n"
-        f"✅ <b>{small_caps('verified referrals')}</b>: {verified}\n"
-        f"⏳ <b>{small_caps('pending referrals')}</b>: {pending}\n"
-        f"💰 <b>{small_caps('total earned')}</b>: {total_earned} ᴄᴏɪɴs\n\n"
-        f"🎯 <b>{small_caps('current reward')}</b>: {current_reward} ᴄᴏɪɴs (×{multiplier})\n\n"
-        f"📈 <b>{small_caps('tier progress')}</b>\n{progress_text}\n\n"
-        f"🛡 <b>{small_caps('trust score')}</b>: {fraud_indicator}"
+        f"🎫 <b>{to_small_caps('code')}</b>: <code>{code}</code>\n\n"
+        f"🏅 <b>{to_small_caps('tier')}</b>: <b>{tier}</b>\n"
+        f"⚡ <b>{to_small_caps('streak')}</b>: {streak} ᴅᴀʏs\n"
+        f"🔥 <b>{to_small_caps('longest streak')}</b>: {longest} ᴅᴀʏs\n\n"
+        f"✅ <b>{to_small_caps('verified referrals')}</b>: {verified}\n"
+        f"⏳ <b>{to_small_caps('pending referrals')}</b>: {pending}\n"
+        f"💰 <b>{to_small_caps('total earned')}</b>: {total_earned} ᴄᴏɪɴs\n\n"
+        f"🎯 <b>{to_small_caps('current reward')}</b>: {current_reward} ᴄᴏɪɴs (×{multiplier})\n\n"
+        f"📈 <b>{to_small_caps('tier progress')}</b>\n{progress_text}\n\n"
+        f"🛡 <b>{to_small_caps('trust score')}</b>: {fraud_indicator}"
     )
 
     keyboard = [
@@ -599,7 +586,7 @@ async def send_topref_page(update_or_query, context, page: int, edit: bool = Fal
         return
 
     tier_medals = {"Diamond": "💎", "Platinum": "🏅", "Gold": "🥇", "Silver": "🥈", "Bronze": "🥉"}
-    lines = [f"✦ <b>{small_caps('top referrers')}</b> ✦\n"]
+    lines = [f"✦ <b>{to_small_caps('top referrers')}</b> ✦\n"]
 
     for i, u in enumerate(users, start=skip + 1):
         name = escape(u.get("first_name") or "User")
@@ -664,7 +651,7 @@ async def send_topstreak_page(update_or_query, context, page: int, edit: bool = 
         return
 
     streak_emojis = ["🔥", "⚡", "✨", "💫", "🌟"]
-    lines = [f"✦ <b>{small_caps('top streaks')}</b> ✦\n"]
+    lines = [f"✦ <b>{to_small_caps('top streaks')}</b> ✦\n"]
 
     for i, u in enumerate(users, start=skip + 1):
         name = escape(u.get("first_name") or "User")
@@ -743,7 +730,7 @@ async def refstats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ) or "  ɴ/ᴀ"
 
     text = (
-        f"✦ <b>{small_caps('global referral analytics')}</b> ✦\n\n"
+        f"✦ <b>{to_small_caps('global referral analytics')}</b> ✦\n\n"
         f"📊 ᴛᴏᴛᴀʟ ᴠᴇʀɪғɪᴇᴅ ʀᴇғᴇʀʀᴀʟs: <b>{total_refs}</b>\n"
         f"💰 ᴛᴏᴛᴀʟ ʀᴇᴡᴀʀᴅs ᴘᴀɪᴅ: <b>{total_rewards} ᴄᴏɪɴs</b>\n"
         f"🚨 ғʀᴀᴜᴅ ғʟᴀɢɢᴇᴅ ᴜsᴇʀs: <b>{fraud_count}</b>\n"
@@ -762,7 +749,7 @@ async def setrefconfig_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if not context.args or len(context.args) < 2:
         text = (
-            f"✦ <b>{small_caps('referral config editor')}</b> ✦\n\n"
+            f"✦ <b>{to_small_caps('referral config editor')}</b> ✦\n\n"
             f"<b>ᴜsᴀɢᴇ:</b>\n"
             f"/setrefconfig base_reward Bronze 50\n"
             f"/setrefconfig base_reward Silver 60\n"
@@ -854,9 +841,9 @@ async def referral_callback_handler(update: Update, context: ContextTypes.DEFAUL
         )
 
         text = (
-            f"✦ <b>{small_caps('reward structure')}</b> ✦\n\n"
-            f"🏅 <b>{small_caps('base rewards by tier')}</b>\n{reward_lines}\n\n"
-            f"🔥 <b>{small_caps('streak multipliers')}</b>\n{mult_lines}"
+            f"✦ <b>{to_small_caps('reward structure')}</b> ✦\n\n"
+            f"🏅 <b>{to_small_caps('base rewards by tier')}</b>\n{reward_lines}\n\n"
+            f"🔥 <b>{to_small_caps('streak multipliers')}</b>\n{mult_lines}"
         )
 
         back_keyboard = [[InlineKeyboardButton("◀ ʙᴀᴄᴋ", callback_data="ref_back")]]
@@ -920,19 +907,19 @@ async def referral_callback_handler(update: Update, context: ContextTypes.DEFAUL
         longest = ref.get("longest_streak", 0)
 
         text = (
-            f"✦ <b>{small_caps('your referral dashboard')}</b> ✦\n\n"
-            f"🔗 <b>{small_caps('referral link')}</b>\n"
+            f"✦ <b>{to_small_caps('your referral dashboard')}</b> ✦\n\n"
+            f"🔗 <b>{to_small_caps('referral link')}</b>\n"
             f"↳ <code>{referral_link}</code>\n\n"
-            f"🎫 <b>{small_caps('code')}</b>: <code>{code}</code>\n\n"
-            f"🏅 <b>{small_caps('tier')}</b>: <b>{tier}</b>\n"
-            f"⚡ <b>{small_caps('streak')}</b>: {streak} ᴅᴀʏs\n"
-            f"🔥 <b>{small_caps('longest streak')}</b>: {longest} ᴅᴀʏs\n\n"
-            f"✅ <b>{small_caps('verified referrals')}</b>: {verified}\n"
-            f"⏳ <b>{small_caps('pending referrals')}</b>: {pending}\n"
-            f"💰 <b>{small_caps('total earned')}</b>: {total_earned} ᴄᴏɪɴs\n\n"
-            f"🎯 <b>{small_caps('current reward')}</b>: {current_reward} ᴄᴏɪɴs (×{multiplier})\n\n"
-            f"📈 <b>{small_caps('tier progress')}</b>\n{progress_text}\n\n"
-            f"🛡 <b>{small_caps('trust score')}</b>: {fraud_indicator}"
+            f"🎫 <b>{to_small_caps('code')}</b>: <code>{code}</code>\n\n"
+            f"🏅 <b>{to_small_caps('tier')}</b>: <b>{tier}</b>\n"
+            f"⚡ <b>{to_small_caps('streak')}</b>: {streak} ᴅᴀʏs\n"
+            f"🔥 <b>{to_small_caps('longest streak')}</b>: {longest} ᴅᴀʏs\n\n"
+            f"✅ <b>{to_small_caps('verified referrals')}</b>: {verified}\n"
+            f"⏳ <b>{to_small_caps('pending referrals')}</b>: {pending}\n"
+            f"💰 <b>{to_small_caps('total earned')}</b>: {total_earned} ᴄᴏɪɴs\n\n"
+            f"🎯 <b>{to_small_caps('current reward')}</b>: {current_reward} ᴄᴏɪɴs (×{multiplier})\n\n"
+            f"📈 <b>{to_small_caps('tier progress')}</b>\n{progress_text}\n\n"
+            f"🛡 <b>{to_small_caps('trust score')}</b>: {fraud_indicator}"
         )
 
         await query.edit_message_text(

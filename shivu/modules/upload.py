@@ -18,15 +18,6 @@ from shivu.character_ids import character_id_query, format_character_id, normali
 from shivu.config import Config
 from shivu.security import is_owner_or_sudo
 
-# ========== LOGGING SETUP ==========
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 # ========== RARITY ENUM ==========

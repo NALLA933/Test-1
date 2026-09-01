@@ -1,6 +1,5 @@
 import html
 import random
-from typing import Optional
 from datetime import datetime, timedelta
 import pytz
 
@@ -11,67 +10,15 @@ from shivu import (
     application, VIDEO_URL, user_collection, top_global_groups_collection,
     group_user_totals_collection, LOGGER, collection
 )
-from motor.motor_asyncio import AsyncIOMotorDatabase
 
 
-class SimpleCache:
-    def __init__(self):
-        self._cache = {}
-        self._timestamps = {}
-    
-    async def get(self, key: str, ttl_seconds: int = 300) -> Optional[str]:
-        if key not in self._cache:
-            return None
-        
-        timestamp = self._timestamps.get(key)
-        if timestamp and (datetime.now() - timestamp).seconds < ttl_seconds:
-            return self._cache[key]
-        
-        self._cache.pop(key, None)
-        self._timestamps.pop(key, None)
-        return None
-    
-    async def set(self, key: str, value: str) -> None:
-        self._cache[key] = value
-        self._timestamps[key] = datetime.now()
-    
-    async def delete(self, key: str) -> None:
-        self._cache.pop(key, None)
-        self._timestamps.pop(key, None)
-    
-    async def clear_pattern(self, pattern: str) -> None:
-        keys_to_delete = [k for k in self._cache.keys() if pattern in k]
-        for key in keys_to_delete:
-            await self.delete(key)
+from cachetools import TTLCache
 
-
-cache = SimpleCache()
 CACHE_TTL = 300
+cache = TTLCache(maxsize=100, ttl=CACHE_TTL)
 
 
-def to_small_caps(text: str) -> str:
-    if not text:
-        return ""
-
-    small_caps_map = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ',
-        'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ',
-        'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ',
-        's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
-        'y': 'ʏ', 'z': 'ᴢ'
-    }
-
-    result = []
-    for char in text:
-        if char.lower() in small_caps_map:
-            if char.isupper():
-                result.append(small_caps_map[char.lower()].upper())
-            else:
-                result.append(small_caps_map[char])
-        else:
-            result.append(char)
-
-    return ''.join(result)
+from shivu.utils import to_small_caps
 
 
 def get_ist_date() -> str:
@@ -160,7 +107,9 @@ async def update_daily_user_guess(user_id: int, username: str = "", first_name: 
             upsert=True
         )
         
-        await cache.clear_pattern("leaderboard:user:")
+        keys_to_delete = [k for k in cache.keys() if "leaderboard:user:" in k]
+        for k in keys_to_delete:
+            cache.pop(k, None)
         
         LOGGER.info(f"Daily user guess updated: user_id={user_id}, date={today}")
     except Exception as e:
@@ -192,7 +141,9 @@ async def update_daily_group_guess(group_id: int, group_name: str = "") -> None:
             upsert=True
         )
         
-        await cache.clear_pattern("leaderboard:group:")
+        keys_to_delete = [k for k in cache.keys() if "leaderboard:group:" in k]
+        for k in keys_to_delete:
+            cache.pop(k, None)
         
         LOGGER.info(f"Daily group guess updated: group_id={group_id}, date={today}")
     except Exception as e:
@@ -204,7 +155,7 @@ async def show_char_top() -> str:
         await initialize_leaderboard()
         
         cache_key = "leaderboard:char:top10"
-        cached = await cache.get(cache_key, CACHE_TTL)
+        cached = cache.get(cache_key)
         if cached:
             LOGGER.info("Serving character leaderboard from cache")
             return cached
@@ -237,7 +188,7 @@ async def show_char_top() -> str:
 
         if not leaderboard_data:
             message += "ɴᴏ ᴅᴀᴛᴀ ᴀᴠᴀɪʟᴀʙʟᴇ ʏᴇᴛ!"
-            await cache.set(cache_key, message)
+            cache[cache_key] = message
             return message
 
         for i, user in enumerate(leaderboard_data, start=1):
@@ -256,7 +207,7 @@ async def show_char_top() -> str:
             else:
                 message += f'{i}. <b>{display_name}</b> ➾ <b>{character_count}</b>\n'
 
-        await cache.set(cache_key, message)
+        cache[cache_key] = message
         LOGGER.info("Character leaderboard generated and cached")
         
         return message
@@ -268,7 +219,7 @@ async def show_char_top() -> str:
 async def show_coin_top() -> str:
     try:
         cache_key = "leaderboard:coin:top10"
-        cached = await cache.get(cache_key, CACHE_TTL)
+        cached = cache.get(cache_key)
         if cached:
             LOGGER.info("Serving coin leaderboard from cache")
             return cached
@@ -291,7 +242,7 @@ async def show_coin_top() -> str:
 
         if not coin_data:
             message += "ɴᴏ ᴅᴀᴛᴀ ᴀᴠᴀɪʟᴀʙʟᴇ ʏᴇᴛ!"
-            await cache.set(cache_key, message)
+            cache[cache_key] = message
             return message
 
         for i, user_data in enumerate(coin_data, start=1):
@@ -308,7 +259,7 @@ async def show_coin_top() -> str:
             else:
                 message += f'{i}. <b>{display_name}</b> ➾ <b>{balance} coins</b>\n'
 
-        await cache.set(cache_key, message)
+        cache[cache_key] = message
         LOGGER.info("Coin leaderboard generated and cached")
         
         return message
@@ -322,7 +273,7 @@ async def show_group_top() -> str:
         today = get_ist_date()
         
         cache_key = f"leaderboard:group:top10:{today}"
-        cached = await cache.get(cache_key, CACHE_TTL)
+        cached = cache.get(cache_key)
         if cached:
             LOGGER.info("Serving group leaderboard from cache")
             return cached
@@ -343,7 +294,7 @@ async def show_group_top() -> str:
 
         if not daily_data:
             message = f"👥 <b>ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n📅 <i>{today}</i>\n\nɴᴏ ɢᴜᴇssᴇs ᴛᴏᴅᴀʏ ʏᴇᴛ!"
-            await cache.set(cache_key, message)
+            cache[cache_key] = message
             return message
 
         message = f"👥 <b>ᴛᴏᴘ 10 ɢʀᴏᴜᴘs ʙʏ ᴄʜᴀʀᴀᴄᴛᴇʀ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n📅 <i>{today}</i>\n\n"
@@ -358,7 +309,7 @@ async def show_group_top() -> str:
             count = group.get('count', 0)
             message += f'{i}. <b>{display_name}</b> ➾ <b>{count}</b>\n'
 
-        await cache.set(cache_key, message)
+        cache[cache_key] = message
         LOGGER.info("Group leaderboard generated and cached")
         
         return message
@@ -367,12 +318,12 @@ async def show_group_top() -> str:
         return "❌ <b>ᴇʀʀᴏʀ ʟᴏᴀᴅɪɴɢ ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ</b>"
 
 
-async def show_group_user_top(chat_id: Optional[int] = None) -> str:
+async def show_group_user_top(chat_id: int | None = None) -> str:
     try:
         today = get_ist_date()
         
         cache_key = f"leaderboard:user:top10:{today}"
-        cached = await cache.get(cache_key, CACHE_TTL)
+        cached = cache.get(cache_key)
         if cached:
             LOGGER.info("Serving user leaderboard from cache")
             return cached
@@ -394,7 +345,7 @@ async def show_group_user_top(chat_id: Optional[int] = None) -> str:
 
         if not daily_data:
             message = f"⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏʀʀᴇᴄᴛ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n📅 <i>{today}</i>\n\nɴᴏ ɢᴜᴇssᴇs ᴛᴏᴅᴀʏ ʏᴇᴛ!"
-            await cache.set(cache_key, message)
+            cache[cache_key] = message
             return message
 
         message = f"⏳ <b>ᴛᴏᴘ 10 ᴜsᴇʀs ʙʏ ᴄᴏʀʀᴇᴄᴛ ɢᴜᴇssᴇs (ᴛᴏᴅᴀʏ)</b>\n📅 <i>{today}</i>\n\n"
@@ -414,7 +365,7 @@ async def show_group_user_top(chat_id: Optional[int] = None) -> str:
             else:
                 message += f'{i}. <b>{display_name}</b> ➾ <b>{count}</b>\n'
 
-        await cache.set(cache_key, message)
+        cache[cache_key] = message
         LOGGER.info("User leaderboard generated and cached")
         
         return message

@@ -40,29 +40,12 @@ def to_small_caps(text: str) -> str:
         return ""
     return str(text).translate(_SMALL_CAPS_TRANS)
 
-class AsyncCache:
-    def __init__(self, ttl: int):
-        self.cache = TTLCache(maxsize=10000, ttl=ttl)
-        self.locks = {}
-    
-    async def get(self, key: str, fetch_func):
-        if key in self.cache:
-            return self.cache[key]
-        
-        if key not in self.locks:
-            self.locks[key] = asyncio.Lock()
-        
-        async with self.locks[key]:
-            if key in self.cache:
-                return self.cache[key]
-            
-            value = await fetch_func()
-            self.cache[key] = value
-            return value
+from cachetools import TTLCache
 
-char_cache = AsyncCache(CACHE_TTL_CHARS)
-user_cache = AsyncCache(CACHE_TTL_USER)
-count_cache = AsyncCache(CACHE_TTL_COUNT)
+char_cache = TTLCache(maxsize=10000, ttl=CACHE_TTL_CHARS)
+user_cache = TTLCache(maxsize=10000, ttl=CACHE_TTL_USER)
+char_locks = {}
+user_locks = {}
 
 async def setup_indexes():
     await db.characters.create_index([('id', ASCENDING)], unique=True)
@@ -147,13 +130,21 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
             is_collection_query = True
         
         if is_collection_query:
-            user = await user_cache.get(
-                f"user_{user_id}",
-                lambda: user_collection.find_one(
-                    {'id': user_id},
-                    {'characters': 1, 'first_name': 1, 'id': 1}
-                )
-            )
+            cache_key = f"user_{user_id}"
+            if cache_key in user_cache:
+                user = user_cache[cache_key]
+            else:
+                if cache_key not in user_locks:
+                    user_locks[cache_key] = asyncio.Lock()
+                async with user_locks[cache_key]:
+                    if cache_key in user_cache:
+                        user = user_cache[cache_key]
+                    else:
+                        user = await user_collection.find_one(
+                            {'id': user_id},
+                            {'characters': 1, 'first_name': 1, 'id': 1}
+                        )
+                        user_cache[cache_key] = user
             
             if not user or 'characters' not in user:
                 await update.inline_query.answer([], cache_time=0)
@@ -187,13 +178,21 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
                     {'id': 1, 'name': 1, 'anime': 1, 'img_url': 1, 'rarity': 1}
                 ).to_list(length=None)
             else:
-                async def fetch_all():
-                    return await collection.find(
-                        {},
-                        {'id': 1, 'name': 1, 'anime': 1, 'img_url': 1, 'rarity': 1}
-                    ).to_list(length=None)
-                
-                all_characters = await char_cache.get('all_chars', fetch_all)
+                cache_key = 'all_chars'
+                if cache_key in char_cache:
+                    all_characters = char_cache[cache_key]
+                else:
+                    if cache_key not in char_locks:
+                        char_locks[cache_key] = asyncio.Lock()
+                    async with char_locks[cache_key]:
+                        if cache_key in char_cache:
+                            all_characters = char_cache[cache_key]
+                        else:
+                            all_characters = await collection.find(
+                                {},
+                                {'id': 1, 'name': 1, 'anime': 1, 'img_url': 1, 'rarity': 1}
+                            ).to_list(length=None)
+                            char_cache[cache_key] = all_characters
         
         total_count = len(all_characters)
         characters = all_characters[offset:offset + MAX_RESULTS]

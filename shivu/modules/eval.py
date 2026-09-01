@@ -1,7 +1,6 @@
 #credit @ishikki_Akabane
 
 import io
-import os
 import textwrap
 import traceback
 from contextlib import redirect_stdout
@@ -9,9 +8,8 @@ from contextlib import redirect_stdout
 from shivu import application, LOGGER
 from shivu.security import can_use_eval
 from telegram import Update
-from telegram.constants import ChatID, ParseMode
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, CommandHandler
-from telegram.ext import CallbackContext 
 
 namespaces = {}
 

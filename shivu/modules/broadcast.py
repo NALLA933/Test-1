@@ -2,38 +2,17 @@ import asyncio
 import time
 import logging
 from datetime import timedelta
-from typing import Set, Tuple, Optional
 from telegram import Update
 from telegram.error import Forbidden, BadRequest, RetryAfter, TelegramError
 from telegram.ext import CallbackContext, CommandHandler
 from shivu import application, top_global_groups_collection, pm_users
 from shivu.security import is_owner
 
-# Setup logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
 # Broadcast control flag (for cancel feature)
 broadcast_running = {'status': False, 'cancel': False}
-
-
-def to_small_caps(text: str) -> str:
-    """Convert text to small caps."""
-    mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ',
-        'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ',
-        's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ',
-        'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ',
-        'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-    }
-    result = []
-    for char in text:
-        result.append(mapping.get(char, char))
-    return ''.join(result)
+from shivu.utils import to_small_caps
 
 
 def create_progress_bar(percentage: float, width: int = 10) -> str:
@@ -69,7 +48,7 @@ def format_time(seconds: float) -> str:
     return " ".join(parts)
 
 
-async def get_all_recipients() -> Tuple[Set[int], Set[int], Set[int], int]:
+async def get_all_recipients() -> tuple[set[int], set[int], set[int], int]:
     """Fetch all unique recipients from both collections and return groups/users separately."""
     all_chats = set()
     all_users = set()

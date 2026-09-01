@@ -1,7 +1,7 @@
 import secrets
 import string
 import time
-from typing import Optional, Dict, Any
+from typing import Any
 from html import escape
 
 from telegram import Update
@@ -18,49 +18,11 @@ from shivu.security import is_owner_or_sudo
 
 redeem_codes_collection = db.redeem_codes
 
-SMALL_CAPS_MAP = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-    'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-    'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ',
-    'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-    'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-    'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ',
-    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-    ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
-    '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '=': '=',
-    '+': '+', '*': '*', '/': '/', '\\': '\\', '|': '|', '_': '_',
-    '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5', 
-    '6': '6', '7': '7', '8': '8', '9': '9'
-}
-
-RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ",
-    2: "🔵 ʀᴀʀᴇ",
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ",
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
-    7: "🔮 ᴇᴘɪᴄ",
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ",
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
-    14: "🍭 ᴋᴀᴡᴀɪɪ",
-    15: "🧬 ʜʏʙʀɪᴅ"
-}
+from shivu.utils import to_small_caps, get_rarity_display
 
 _redeem_rate_limiter = {}
 _RATE_LIMIT_WINDOW = 2
 _RATE_LIMIT_MAX = 3
-
-def to_small_caps(text: str) -> str:
-    return ''.join(SMALL_CAPS_MAP.get(char, char) for char in str(text))
-
-def get_rarity_display(rarity: int) -> str:
-    return RARITY_MAP.get(rarity, f"⚪ ᴜɴᴋɴᴏᴡɴ ({rarity})")
 
 def generate_unique_code(length: int = 8) -> str:
     alphabet = string.ascii_lowercase + string.digits
@@ -87,7 +49,7 @@ async def _ensure_indexes():
     except Exception as e:
         LOGGER.error(f"Index creation failed: {e}")
 
-async def create_coin_code(amount: int, max_uses: int, created_by: int) -> Optional[str]:
+async def create_coin_code(amount: int, max_uses: int, created_by: int) -> str | None:
     if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
@@ -122,7 +84,7 @@ async def create_coin_code(amount: int, max_uses: int, created_by: int) -> Optio
         LOGGER.error(f"Failed to create coin code: {e}")
         return None
 
-async def create_character_code(character_id: int, max_uses: int, created_by: int) -> Optional[str]:
+async def create_character_code(character_id: int, max_uses: int, created_by: int) -> str | None:
     if redeem_codes_collection is None:
         LOGGER.error("Redeem codes collection not initialized")
         return None
@@ -163,7 +125,7 @@ async def create_character_code(character_id: int, max_uses: int, created_by: in
         LOGGER.error(f"Failed to create character code: {e}")
         return None
 
-async def redeem_code(code: str, user_id: int) -> Dict[str, Any]:
+async def redeem_code(code: str, user_id: int) -> dict[str, Any]:
     if redeem_codes_collection is None:
         return {"success": False, "message": "❌ System error: database not available"}
 

@@ -1,7 +1,7 @@
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Iterable
 
 
-def normalize_character_id(value: Any) -> Optional[int]:
+def normalize_character_id(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
 
@@ -28,20 +28,20 @@ def format_character_id(value: Any) -> str:
     return f"{normalized:0{width}d}"
 
 
-def character_id_variants(value: Any) -> List[Any]:
+def character_id_variants(value: Any) -> list[Any]:
     normalized = normalize_character_id(value)
     if normalized is None:
         return [value] if value not in (None, "") else []
 
-    variants: List[Any] = []
+    variants: list[Any] = []
     for candidate in (normalized, str(normalized), format_character_id(normalized)):
         if candidate not in variants:
             variants.append(candidate)
     return variants
 
 
-def expand_character_id_variants(values: Iterable[Any]) -> List[Any]:
-    expanded: List[Any] = []
+def expand_character_id_variants(values: Iterable[Any]) -> list[Any]:
+    expanded: list[Any] = []
     for value in values:
         for candidate in character_id_variants(value):
             if candidate not in expanded:
@@ -58,15 +58,15 @@ def character_id_filter(value: Any) -> Any:
     return {"$in": variants}
 
 
-def character_id_query(value: Any, field: str = "id") -> Dict[str, Any]:
+def character_id_query(value: Any, field: str = "id") -> dict[str, Any]:
     return {field: character_id_filter(value)}
 
 
-def character_matches_id(character: Dict[str, Any], value: Any) -> bool:
+def character_matches_id(character: dict[str, Any], value: Any) -> bool:
     return normalize_character_id(character.get("id")) == normalize_character_id(value)
 
 
-def normalize_character_document(character: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_character_document(character: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(character)
     character_id = normalize_character_id(character.get("id"))
     if character_id is not None:

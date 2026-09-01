@@ -4,11 +4,10 @@ import sys
 import importlib
 import time
 import random
-import re
 import asyncio
 import logging
 from html import escape
-from typing import Dict, Any, Optional, List, Set
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
@@ -38,68 +37,19 @@ for module_name in ALL_MODULES:
 
 import shivu.modules.setrarity as setrarity
 
-RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ",
-    2: "🔵 ʀᴀʀᴇ",
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ",
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
-    7: "🔮 ᴇᴘɪᴄ",
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ",
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
-    14: "🍭 ᴋᴀᴡᴀɪɪ",
-    15: "🧬 ʜʏʙʀɪᴅ",
-}
-
-RARITY_TEXT_TO_NUMBER = {
-    "⚪ ᴄᴏᴍᴍᴏɴ": 1,
-    "🔵 ʀᴀʀᴇ": 2,
-    "🟡 ʟᴇɢᴇɴᴅᴀʀʏ": 3,
-    "💮 ꜱᴘᴇᴄɪᴀʟ": 4,
-    "👹 ᴀɴᴄɪᴇɴᴛ": 5,
-    "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ": 6,
-    "🔮 ᴇᴘɪᴄ": 7,
-    "🪐 ᴄᴏꜱᴍɪᴄ": 8,
-    "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ": 9,
-    "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ": 10,
-    "💝 ᴠᴀʟᴇɴᴛɪɴᴇ": 11,
-    "🌸 ꜱᴘʀɪɴɢ": 12,
-    "🏖️ ᴛʀᴏᴘɪᴄᴀʟ": 13,
-    "🍭 ᴋᴀᴡᴀɪɪ": 14,
-    "🧬 ʜʏʙʀɪᴅ": 15,
-}
+from shivu.utils import RARITY_MAP, get_rarity_display
 
 SPAM_REPEAT_THRESHOLD = 10
 SPAM_IGNORE_SECONDS = 10 * 60
 DEFAULT_MESSAGE_FREQUENCY = 100
 MAX_SPAWN_ATTEMPTS = 10
-locks: Dict[str, asyncio.Lock] = {}
-message_counters: Dict[str, int] = {}
-sent_characters: Dict[int, Set[int]] = {}
-last_characters: Dict[int, Dict[str, Any]] = {}
-first_correct_guesses: Dict[int, int] = {}
-last_user: Dict[str, Dict[str, Any]] = {}
-warned_users: Dict[int, float] = {}
-
-_escape_markdown_re = re.compile(r'([\\*_`~>#+=\\-|{}.!])')
-def escape_markdown(text: str) -> str:
-    return _escape_markdown_re.sub(r'\\\1', text or '')
-
-def get_rarity_display(character: Dict[str, Any]) -> str:
-    rarity_raw = character.get('rarity', 'Unknown')
-    if isinstance(rarity_raw, int):
-        return RARITY_MAP.get(rarity_raw, str(rarity_raw))
-    elif isinstance(rarity_raw, str):
-        if rarity_raw.isdigit():
-            return RARITY_MAP.get(int(rarity_raw), rarity_raw)
-        else:
-            return rarity_raw
-    return str(rarity_raw)
+locks: dict[str, asyncio.Lock] = {}
+message_counters: dict[str, int] = {}
+sent_characters: dict[int, set[int]] = {}
+last_characters: dict[int, dict[str, Any]] = {}
+first_correct_guesses: dict[int, int] = {}
+last_user: dict[str, dict[str, Any]] = {}
+warned_users: dict[int, float] = {}
 
 async def _get_chat_lock(chat_id: str) -> asyncio.Lock:
     if chat_id not in locks:
@@ -158,7 +108,7 @@ async def _update_group_user_totals(user_id: int, chat_id: int, tg_user: Update.
     except Exception as e:
         LOGGER.exception("Failed to update group_user_totals: %s", e)
 
-async def _update_top_global_groups(chat_id: int, chat_title: Optional[str]) -> None:
+async def _update_top_global_groups(chat_id: int, chat_title: str | None) -> None:
     try:
         group_info = await top_global_groups_collection.find_one({'group_id': chat_id})
         if group_info:

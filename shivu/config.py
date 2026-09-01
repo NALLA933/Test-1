@@ -1,13 +1,12 @@
 import os
 import sys
-from typing import List, Optional
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-def _get_optional_int(name: str) -> Optional[int]:
+def _get_optional_int(name: str) -> int | None:
     value = os.getenv(name, "").strip()
     if not value:
         return None
@@ -17,9 +16,9 @@ def _get_optional_int(name: str) -> Optional[int]:
         raise ValueError(f"{name} must be an integer") from exc
 
 
-def _get_int_list(name: str, default: str = "") -> List[int]:
+def _get_int_list(name: str, default: str = "") -> list[int]:
     raw_value = os.getenv(name, default)
-    values: List[int] = []
+    values: list[int] = []
     for item in raw_value.split(","):
         cleaned = item.strip()
         if not cleaned:
@@ -45,23 +44,23 @@ class Config:
     TOKEN: str = os.getenv("BOT_TOKEN", "").strip()
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "Senpai_Waifu_Grabbing_Bot")
 
-    API_ID: Optional[int] = _get_optional_int("API_ID")
+    API_ID: int | None = _get_optional_int("API_ID")
     API_HASH: str = os.getenv("API_HASH", "").strip()
 
-    OWNER_ID: Optional[int] = _get_optional_int("OWNER_ID")
-    SUDO_USERS: List[int] = _get_int_list("SUDO_USERS")
-    EVAL_USERS: List[int] = _get_int_list("EVAL_USERS")
+    OWNER_ID: int | None = _get_optional_int("OWNER_ID")
+    SUDO_USERS: list[int] = _get_int_list("SUDO_USERS")
+    EVAL_USERS: list[int] = _get_int_list("EVAL_USERS")
 
-    GROUP_ID: Optional[int] = _get_optional_int("GROUP_ID")
-    CHARA_CHANNEL_ID: Optional[int] = _get_optional_int("CHARA_CHANNEL_ID")
+    GROUP_ID: int | None = _get_optional_int("GROUP_ID")
+    CHARA_CHANNEL_ID: int | None = _get_optional_int("CHARA_CHANNEL_ID")
 
     MONGO_URL: str = os.getenv("MONGO_URL", "").strip()
 
     IMGBB_API_KEY: str = os.getenv("IMGBB_API_KEY", "").strip()
-    BACKUP_CHAT_ID: Optional[int] = _get_optional_int("BACKUP_CHAT_ID")
+    BACKUP_CHAT_ID: int | None = _get_optional_int("BACKUP_CHAT_ID")
     ENABLE_AUTO_BACKUP: bool = _get_bool("ENABLE_AUTO_BACKUP", False)
 
-    VIDEO_URL: List[str] = [
+    VIDEO_URL: list[str] = [
         url.strip()
         for url in os.getenv(
             "VIDEO_URL",

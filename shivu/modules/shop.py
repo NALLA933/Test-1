@@ -2,7 +2,6 @@ import random
 import time
 from datetime import datetime, timezone, timedelta
 from html import escape
-from typing import List, Dict, Optional, Tuple
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import CommandHandler, CallbackContext, CallbackQueryHandler
@@ -16,32 +15,7 @@ from shivu.character_ids import (
 from shivu.security import is_owner_or_sudo
 
 # Small Caps Conversion Utility
-def to_small_caps(text: str) -> str:
-    """Convert standard text to Small Caps font."""
-    small_caps_mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
-        'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
-        'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ',
-        'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ',
-        'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ',
-        'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ',
-        'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ',
-        'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ',
-        'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ',
-        'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ',
-        'Z': 'ᴢ',
-        ' ': ' ', '-': '-', '/': '/', '(': '(', ')': ')',
-        '[': '[', ']': ']', '{': '{', '}': '}', ':': ':',
-        '.': '.', ',': ',', '!': '!', '?': '?', '\'': '\'',
-        '"': '"', '&': '&', '@': '@', '#': '#', '$': '$',
-        '%': '%', '^': '^', '*': '*', '+': '+', '=': '=',
-        '_': '_', '|': '|', '\\': '\\', '`': '`', '~': '~',
-        '<': '<', '>': '>', ';': ';', '\n': '\n',
-        '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
-        '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
-    }
-    return ''.join(small_caps_mapping.get(char, char) for char in str(text))
+from shivu.utils import to_small_caps
 
 
 # Rarity Emoji Mapping
@@ -146,7 +120,7 @@ async def change_balance(user_id: int, amount: int) -> int:
     return int(user.get('balance', 0)) if user else 0
 
 
-async def get_user_owned_characters(user_id: int) -> List[int]:
+async def get_user_owned_characters(user_id: int) -> list[int]:
     """Get list of character IDs owned by user."""
     user = await user_collection.find_one({'id': user_id})
     if not user:
@@ -192,7 +166,7 @@ async def add_character_to_user(user_id: int, character: dict) -> bool:
         return False
 
 
-async def fetch_shop_characters() -> List[dict]:
+async def fetch_shop_characters() -> list[dict]:
     """Fetch all eligible characters for shop (handles string/emoji rarities)."""
     all_chars = []
     async for char in collection.find({}):
@@ -282,7 +256,7 @@ async def initialize_shop_data(user_id: int) -> dict:
     return shop_data
 
 
-async def refresh_shop(user_id: int) -> Tuple[bool, str]:
+async def refresh_shop(user_id: int) -> tuple[bool, str]:
     """Refresh shop characters (once per day)."""
     user = await user_collection.find_one({'id': user_id})
 

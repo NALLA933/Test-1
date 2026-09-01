@@ -4,16 +4,6 @@ import time
 
 StartTime = time.time()
 
-# enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    handlers=[logging.FileHandler("log.txt"), logging.StreamHandler()],
-    level=logging.INFO,
-)
-
-logging.getLogger("apscheduler").setLevel(logging.ERROR)
-
-logging.getLogger("pyrate_limiter").setLevel(logging.ERROR)
 LOGGER = logging.getLogger(__name__)
 
 # if version < 3.6, stop bot.
@@ -55,7 +45,7 @@ def __list_all_modules():
             to_load = all_modules
 
         if NO_LOAD:
-            LOGGER.info("Not loading: {}".format(NO_LOAD))
+            LOGGER.info(f"Not loading: {NO_LOAD}")
             return [item for item in to_load if item not in NO_LOAD]
 
         return to_load

@@ -2,7 +2,6 @@ import random
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 from html import escape
 import asyncio
 
@@ -23,48 +22,16 @@ ENABLE_MEMBERSHIP_CHECK = True
 
 ALLOWED_RARITIES = [2, 3, 4]
 
-RARITY_MAP = {
-   1: "⚪ ᴄᴏᴍᴍᴏɴ",
-   2: "🔵 ʀᴀʀᴇ",
-   3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ",
-   4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-   5: "👹 ᴀɴᴄɪᴇɴᴛ",
-   6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ",
-   7: "🔮 ᴇᴘɪᴄ",
-   8: "🪐 ᴄᴏꜱᴍɪᴄ",
-   9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ",
-   10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ",
-   11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-   12: "🌸 ꜱᴘʀɪɴɢ",
-   13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ",
-   14: "🍭 ᴋᴀᴡᴀɪɪ",
-   15: "🧬 ʜʏʙʀɪᴅ"
-}
-
-SMALL_CAPS_MAP = {
-   'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-   'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-   'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ',
-   'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-   'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-   'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-   'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ',
-   'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-   ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
-   '0': '0', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5',
-   '6': '6', '7': '7', '8': '8', '9': '9'
-}
+from shivu.utils import to_small_caps, get_rarity_display
 
 _active_claims = {}
 _claim_locks = {}
-
 
 def _get_lock(user_id: int, command_type: str):
    key = f"{user_id}_{command_type}"
    if key not in _claim_locks:
        _claim_locks[key] = asyncio.Lock()
    return _claim_locks[key]
-
 
 def _normalize_datetime(dt):
    if dt is None:
@@ -78,17 +45,8 @@ def _normalize_datetime(dt):
        dt = dt.replace(tzinfo=timezone.utc)
    return dt
 
-
 def _utcnow():
    return datetime.now(timezone.utc)
-
-
-def to_small_caps(text: str) -> str:
-   return ''.join(SMALL_CAPS_MAP.get(char, char) for char in str(text))
-
-
-def get_rarity_display(rarity: int) -> str:
-   return RARITY_MAP.get(rarity, f"⚪ ᴜɴᴋɴᴏᴡɴ ({rarity})")
 
 
 def get_rarity_from_string(rarity_value) -> int:
@@ -196,7 +154,7 @@ async def check_cooldown(user_id: int, command_type: str) -> bool:
    return False
 
 
-async def get_cooldown_time(user_id: int, command_type: str) -> Optional[str]:
+async def get_cooldown_time(user_id: int, command_type: str) -> str | None:
    user = await user_collection.find_one(
        {"id": user_id},
        {f"last_{command_type}": 1}

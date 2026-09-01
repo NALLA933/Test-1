@@ -9,18 +9,7 @@ from shivu import pm_users as collection
 from shivu.modules.ref import ensure_referral_schema, process_referral_start, increment_message_count
 
 
-def small_caps(text: str) -> str:
-    mapping = {
-        'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-        'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-        'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ',
-        'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-        'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-        'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-        'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'S', 'T': 'ᴛ', 'U': 'ᴜ',
-        'V': 'ᴠ', 'W': 'ᴡ', 'X': 'X', 'Y': 'ʏ', 'Z': 'ᴢ'
-    }
-    return ''.join(mapping.get(ch, ch) for ch in text)
+from shivu.utils import to_small_caps
 
 
 def get_keyboard() -> InlineKeyboardMarkup:
@@ -164,7 +153,7 @@ async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 text=f"#ᴀᴅᴅɢʀᴏᴜᴘ\n\n"
                      f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
                      f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
-                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
+                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {to_small_caps(chat.type)}\n"
                      f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
                      f"ᴀᴅᴅᴇᴅ ʙʏ : {added_by_link}",
                 parse_mode='HTML',
@@ -192,7 +181,7 @@ async def track_group_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 text=f"#ʟᴇғᴛ\n\n"
                      f"ɢʀᴏᴜᴘ ɴᴀᴍᴇ : {escape(chat.title or 'Unknown')}\n"
                      f"ɢʀᴏᴜᴘ ɪᴅ : <code>{chat.id}</code>\n"
-                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {small_caps(chat.type)}\n"
+                     f"ɢʀᴏᴜᴘ ᴛʏᴘᴇ : {to_small_caps(chat.type)}\n"
                      f"ɢʀᴏᴜᴘ ʟɪɴᴋ : {group_link_text}\n"
                      f"ʀᴇᴍᴏᴠᴇᴅ ʙʏ : {removed_by_link}",
                 parse_mode='HTML',
@@ -207,7 +196,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
 
     if query.data == 'help':
-        help_text = f"""✦ {small_caps('guidance from senpai')} ✦
+        help_text = f"""✦ {to_small_caps('guidance from senpai')} ✦
 
 ✦ ── 『 ʜᴀʀᴇᴍ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 』 ── ✦
 

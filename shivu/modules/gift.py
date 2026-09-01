@@ -14,7 +14,6 @@ from shivu.character_ids import (
 )
 from shivu.security import is_owner_or_sudo
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 pending_trades = {}
@@ -31,38 +30,7 @@ PENDING_EXPIRY = 300
 GIFT_CONFIRM_TIMEOUT = 30
 MAX_INVENTORY_SIZE = 5000
 
-RARITY_MAP = {
-    1: "⚪ ᴄᴏᴍᴍᴏɴ", 
-    2: "🔵 ʀᴀʀᴇ", 
-    3: "🟡 ʟᴇɢᴇɴᴅᴀʀʏ", 
-    4: "💮 ꜱᴘᴇᴄɪᴀʟ",
-    5: "👹 ᴀɴᴄɪᴇɴᴛ", 
-    6: "🎐 ᴄᴇʟᴇꜱᴛɪᴀʟ", 
-    7: "🔮 ᴇᴘɪᴄ", 
-    8: "🪐 ᴄᴏꜱᴍɪᴄ",
-    9: "⚰️ ɴɪɢʜᴛᴍᴀʀᴇ", 
-    10: "🌬️ ꜰʀᴏꜱᴛʙᴏʀɴ", 
-    11: "💝 ᴠᴀʟᴇɴᴛɪɴᴇ",
-    12: "🌸 ꜱᴘʀɪɴɢ", 
-    13: "🏖️ ᴛʀᴏᴘɪᴄᴀʟ", 
-    14: "🍭 ᴋᴀᴡᴀɪɪ", 
-    15: "🧬 ʜʏʙʀɪᴅ"
-}
-
-SMALL_CAPS_MAP = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ',
-    'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ',
-    'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
-    'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ',
-    'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ',
-    'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x',
-    'Y': 'ʏ', 'Z': 'ᴢ'
-}
-
-def to_small_caps(text):
-    text = str(text) if text is not None else 'Unknown'
-    return ''.join(SMALL_CAPS_MAP.get(c, c) for c in text)
+from shivu.utils import RARITY_MAP, to_small_caps
 
 def get_user_lock(user_id):
     if user_id not in user_locks:
@@ -112,7 +80,7 @@ async def safe_store_recovery(character, context):
 
 async def atomic_transfer_character(sender_id, receiver_id, character_id):
     character_id = normalize_character_id(character_id)
-    if sender_char_id is None:
+    if character_id is None:
         return False, "Invalid character ID"
 
     sender = await user_collection.find_one({'id': sender_id})

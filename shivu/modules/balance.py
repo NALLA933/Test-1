@@ -2,7 +2,7 @@ import time
 import uuid
 import re
 from html import escape
-from typing import Optional, Dict, Any
+from typing import Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, User, Chat
 from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes
@@ -13,24 +13,7 @@ from shivu import application, user_collection, LOGGER, OWNER_ID, SUDO_USERS
 
 # ---------- Premium Styling Helpers ----------
 
-# Small Caps Unicode Mapping (preserving HTML tags)
-SMALL_CAPS_MAP = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
-    'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
-    'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ',
-    'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
-    'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
-    'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 'ꜱ', 'T': 'ᴛ', 'U': 'ᴜ',
-    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-    ' ': ' ', ':': ':', '!': '!', '?': '?', '.': '.', ',': ',', '-': '-',
-    '(': '(', ')': ')', '[': '[', ']': ']', '{': '{', '}': '}', '=': '=',
-    '+': '+', '*': '*', '/': '/', '\\': '\\', '|': '|', '_': '_', '"': '"',
-    "'": "'", '`': '`', '~': '~', '@': '@', '#': '#', '$': '$', '%': '%',
-    '^': '^', '&': '&', ';': ';', '<': '<', '>': '>', '0': '0', '1': '1',
-    '2': '2', '3': '3', '4': '4', '5': '5', '6': '6', '7': '7', '8': '8',
-    '9': '9'
-}
+from shivu.utils import SMALL_CAPS_MAP
 
 def safe_small_caps(text: str) -> str:
     """Convert text to small caps Unicode characters while preserving HTML tags."""
@@ -105,15 +88,15 @@ def premium_format(text: str) -> str:
     return '\n'.join(processed_lines)
 
 # In-memory pending payments and cooldowns
-pending_payments: Dict[str, Dict[str, Any]] = {}
-pay_cooldowns: Dict[int, float] = {}
+pending_payments: dict[str, dict[str, Any]] = {}
+pay_cooldowns: dict[int, float] = {}
 
 # Configuration
 PENDING_EXPIRY_SECONDS = 5 * 60
 PAY_COOLDOWN_SECONDS = 60
 
 # ---------- Enhanced Validation ----------
-async def validate_payment_target(target_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, Optional[str]]:
+async def validate_payment_target(target_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str | None]:
     """Validate if target is a regular user (not bot, channel, or group)."""
     try:
         target_chat = await context.bot.get_chat(target_id)
@@ -137,7 +120,7 @@ async def validate_payment_target(target_id: int, context: ContextTypes.DEFAULT_
         return False, "✘ ɪɴᴠᴀʟɪᴅ ᴛᴀʀɢᴇᴛ ᴜꜱᴇʀ."
 
 # ---------- Helpers - FIXED TO USE user_collection ----------
-async def _ensure_balance_doc(user_id: int) -> Dict[str, Any]:
+async def _ensure_balance_doc(user_id: int) -> dict[str, Any]:
     """
     Ensure a balance field exists in user_collection for the user and return it.
     FIXED: Now uses user_collection instead of separate user_balance_coll.
@@ -285,8 +268,8 @@ async def pay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     # Resolve target and amount
-    target_id: Optional[int] = None
-    amount_str: Optional[str] = None
+    target_id: int | None = None
+    amount_str: str | None = None
 
     if update.message.reply_to_message and len(context.args) == 1:
         target_id = update.message.reply_to_message.from_user.id
